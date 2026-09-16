@@ -66,6 +66,7 @@ export interface CommandContext {
   fetchFn?: typeof fetch | undefined;
   projectRoot?: string | undefined;
   configDir?: string | undefined;
+  once?: boolean | undefined;
 }
 
 export async function setupCommand(args: string[], context: CommandContext = {}): Promise<number> {
@@ -258,7 +259,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   const webUrl = webRes.pagesUrl ?? 'https://remote-hands-web.pages.dev';
   stdout(renderStepSuccess(`Web app live at ${webUrl}`));
 
-  const pairingUrl = generatePairingUrl(webUrl, activePairingCode, effectiveOwnerToken);
+  const pairingUrl = generatePairingUrl(webUrl, activePairingCode, effectiveOwnerToken, apiUrl);
   const summary = await formatPairingSummary({
     webUrl,
     pairingUrl,

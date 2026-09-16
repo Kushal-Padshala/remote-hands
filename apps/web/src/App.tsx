@@ -34,6 +34,10 @@ export function App() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
+      const api = params.get('api');
+      if (api) {
+        apiClient.setBaseUrl(api);
+      }
       const secret = params.get('secret') || params.get('token');
       if (secret) {
         apiClient.setToken(secret);

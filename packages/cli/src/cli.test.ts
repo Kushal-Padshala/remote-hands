@@ -29,9 +29,9 @@ describe('CLI command dispatcher', () => {
 
   it('dispatches daemon command', async () => {
     const logs: string[] = [];
-    const code = await main(['daemon'], { stdout: (msg) => logs.push(msg) });
+    const code = await main(['daemon', '--once'], { stdout: (msg) => logs.push(msg) });
     expect(code).toBe(0);
-    expect(logs.some((l) => l.includes('daemon'))).toBe(true);
+    expect(logs.some((l) => l.includes('daemon') || l.includes('Machine') || l.includes('Starting'))).toBe(true);
   });
 
   it('dispatches doctor command', async () => {

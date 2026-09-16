@@ -7,16 +7,47 @@ import {
   type TaskMode,
 } from '@remote-hands/shared';
 
+function resolveDefaultBaseUrl(providedUrl?: string): string {
+  if (providedUrl && providedUrl.trim().length > 0) {
+    return providedUrl.replace(/\/+$/, '');
+  }
+  if (typeof localStorage !== 'undefined') {
+    const stored = localStorage.getItem('rh_api_url');
+    if (stored && stored.trim().length > 0) {
+      return stored.replace(/\/+$/, '');
+    }
+  }
+  const envUrl = (import.meta as any).env?.VITE_REMOTE_HANDS_API_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim().length > 0) {
+    return envUrl.replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    const host = window.location.host;
+    if (host.includes('remote-hands-web.')) {
+      return window.location.origin.replace('remote-hands-web.', 'remote-hands-backend.');
+    }
+  }
+  return '';
+}
+
 export class WebApiClient {
   private baseUrl: string;
   private token: string | null;
 
   constructor(baseUrl?: string, token?: string | null) {
-    this.baseUrl = (baseUrl ?? (import.meta as any).env?.VITE_REMOTE_HANDS_API_URL ?? '').replace(
-      /\/+$/,
-      '',
-    );
+    this.baseUrl = resolveDefaultBaseUrl(baseUrl);
     this.token = token ?? (typeof localStorage !== 'undefined' ? localStorage.getItem('rh_token') : null);
+  }
+
+  setBaseUrl(url: string): void {
+    this.baseUrl = url.replace(/\/+$/, '');
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('rh_api_url', this.baseUrl);
+    }
+  }
+
+  getBaseUrl(): string {
+    return this.baseUrl;
   }
 
   setToken(token: string): void {
@@ -31,7 +62,8 @@ export class WebApiClient {
   }
 
   private async request<T>(path: string, method: string, body?: unknown): Promise<T> {
-    const url = `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
+    const effectiveBase = this.baseUrl || resolveDefaultBaseUrl();
+    const url = `${effectiveBase}${path.startsWith('/') ? path : `/${path}`}`;
     const headers: Record<string, string> = {};
     if (this.token) {
       headers['Authorization'] = `Bearer ${this.token}`;
@@ -46,23 +78,29 @@ export class WebApiClient {
     }
 
     const res = await fetch(url, init);
+    const contentType = res.headers.get('content-type') || '';
     let json: any = null;
-    try {
-      json = await res.json();
-    } catch {
-      json = null;
+    if (contentType.includes('application/json')) {
+      try {
+        json = await res.json();
+      } catch {
+        json = null;
+      }
     }
 
     if (!res.ok) {
       const msg = json?.error || res.statusText || `Request failed with ${res.status}`;
       throw new Error(msg);
     }
+    if (json === null) {
+      throw new Error(`Expected JSON response from ${url}, but received ${contentType || 'text'}`);
+    }
     return json as T;
   }
 
   async listMachines(): Promise<MachineRow[]> {
-    const res = await this.request<{ machines: MachineRow[] }>('/machines', 'GET');
-    return res.machines;
+    const res = await this.request<{ machines?: MachineRow[] }>('/machines', 'GET');
+    return res?.machines ?? [];
   }
 
   async createTask(params: {
@@ -98,8 +136,9 @@ export class WebApiClient {
   }
 
   createTaskWebSocket(taskId: string): WebSocket {
-    const protocol = this.baseUrl.startsWith('https:') ? 'wss:' : 'ws:';
-    const host = this.baseUrl ? new URL(this.baseUrl).host : window.location.host;
+    const effectiveBase = this.baseUrl || resolveDefaultBaseUrl();
+    const protocol = effectiveBase.startsWith('https:') ? 'wss:' : 'ws:';
+    const host = effectiveBase ? new URL(effectiveBase).host : window.location.host;
     const tokenQuery = this.token ? `?token=${encodeURIComponent(this.token)}` : '';
     const url = `${protocol}//${host}/ws/tasks/${taskId}${tokenQuery}`;
     return new WebSocket(url);

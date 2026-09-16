@@ -3,6 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { setupCommand, type CommandContext } from './setup.js';
+import { daemonCommand } from './daemon.js';
 import { c } from '../output/ui.js';
 
 export interface StartOptions {
@@ -152,11 +153,15 @@ export async function startCommand(args: string[], context: CommandContext = {})
       c.brightCyan(`╰${hr}`),
   );
 
-  if (once) {
+  try {
+    return await daemonCommand(args, {
+      ...context,
+      configDir,
+      stdout,
+      stderr,
+      once,
+    });
+  } finally {
     restoreSleep();
-    return 0;
   }
-
-  await new Promise<void>(() => {});
-  return 0;
 }

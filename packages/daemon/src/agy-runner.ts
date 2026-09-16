@@ -1,4 +1,5 @@
 import type { Task } from '@remote-hands/shared';
+import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import type { DaemonConfig } from './config.js';
 import type { EventInput } from './task-store.js';
@@ -132,6 +133,68 @@ export class StaticAgentRunner implements AgentRunner {
 
   async run(): Promise<AgentRunResult> {
     return this.#result;
+  }
+}
+
+export class ProcessAgentRunner implements AgentRunner {
+  private agyCommand: string;
+
+  constructor(agyCommand: string = 'agy') {
+    this.agyCommand = agyCommand;
+  }
+
+  async run(task: Task): Promise<AgentRunResult> {
+    const args = buildAgyArgs(task, { agyCommand: this.agyCommand });
+    const binary = args[0] || 'agy';
+    const cliArgs = args.slice(1);
+
+    return new Promise((resolve, reject) => {
+      const proc = spawn(binary, cliArgs, {
+        cwd: task.workspace_path || process.cwd(),
+        env: process.env,
+      });
+
+      const events: EventInput[] = [];
+      let summary = '';
+      let conversationId: string | null = null;
+      let buffer = '';
+
+      proc.stdout?.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const parsed = parseAgyStreamLine(line);
+          if (parsed) {
+            events.push(parsed);
+            if (parsed.kind === 'result') {
+              summary = (parsed.payload as any).summary || summary;
+              conversationId = (parsed.payload as any).conversation_id || conversationId;
+            }
+          }
+        }
+      });
+
+      proc.on('error', (err) => {
+        reject(err);
+      });
+
+      proc.on('close', (code) => {
+        if (buffer.trim()) {
+          const parsed = parseAgyStreamLine(buffer);
+          if (parsed) events.push(parsed);
+        }
+        if (code !== 0 && events.length === 0) {
+          reject(new Error(`Agent process exited with code ${code}`));
+          return;
+        }
+        resolve({
+          events,
+          summary: summary || `Task completed (exit code ${code})`,
+          conversationId,
+        });
+      });
+    });
   }
 }
 
