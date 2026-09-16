@@ -117,11 +117,11 @@ remote-hands/
 Set up your personal free backend in under 10 minutes (no Supabase project, Vercel deploy, or Docker required):
 
 ```bash
-# Run guided free setup wizard
-npx remote-hands setup --free
+# Run guided setup wizard
+rh setup
 
-# Start local daemon
-npx remote-hands daemon
+# Start daemon (with lid-closed clamshell sleep prevention)
+rh start
 ```
 
 For step-by-step instructions and troubleshooting:

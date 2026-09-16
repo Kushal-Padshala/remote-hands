@@ -48,7 +48,7 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
   if (hasConfig) {
     stdout(`[✓] Daemon configuration: ${daemonConfig} exists`);
   } else {
-    stdout('[!] Daemon configuration: not found (run: npx remote-hands setup --free)');
+    stdout('[!] Daemon configuration: not found (run: rh setup)');
   }
 
   stdout('');

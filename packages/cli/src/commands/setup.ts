@@ -71,7 +71,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     loggedIn = await ensureWranglerLogin(runner);
     if (!loggedIn) {
       stderr(renderStepError('Cloudflare authentication was not completed.'));
-      stderr('Please run "npx wrangler login" and then re-run "npx remote-hands setup --free".');
+      stderr('Please run "npx wrangler login" and then re-run "rh setup" (or "remote-hands setup").');
       return 1;
     }
     stdout(renderStepSuccess('Cloudflare authentication detected'));

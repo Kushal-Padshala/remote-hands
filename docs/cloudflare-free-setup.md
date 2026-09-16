@@ -29,7 +29,7 @@ npm install -g remote-hands
 Run the interactive setup wizard:
 
 ```bash
-remote-hands setup --free
+rh setup
 ```
 
 The wizard guides you through:

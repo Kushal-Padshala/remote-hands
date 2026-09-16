@@ -38,7 +38,7 @@ Open `http://localhost:5173` on your browser or phone on the same local network.
 In terminal 3, run the setup wizard or configure the daemon directly:
 
 ```bash
-npx remote-hands setup --free
+rh setup
 ```
 
 Provide `http://localhost:8787` when prompted for the control plane URL.

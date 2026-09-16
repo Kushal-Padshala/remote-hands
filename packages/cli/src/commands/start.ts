@@ -99,7 +99,7 @@ export async function startCommand(args: string[], context: CommandContext = {})
       `${c.brightCyan('│')}  ${
         hasConfig
           ? c.white('Listening for coding agent tasks from your phone...')
-          : c.yellow('Notice: Setup config not found yet. Run "rh setup --free" to pair.')
+          : c.yellow('Notice: Setup config not found yet. Run "rh setup" to pair.')
       }\n` +
       `${c.brightCyan('│')}  ${c.dim('Press Ctrl+C anytime to stop and restore normal sleep settings.')}\n` +
       c.brightCyan(`╰${hr}`),
