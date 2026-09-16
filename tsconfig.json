@@ -1,1 +1,1 @@
-{ "include": [], "references": [] }
+{ "include": [], "references": [{ "path": "./packages/shared" }] }
