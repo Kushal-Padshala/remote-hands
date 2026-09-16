@@ -1,1 +1,7 @@
-{ "include": [], "references": [{ "path": "./packages/shared" }] }
+{
+  "include": [],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/daemon" }
+  ]
+}
