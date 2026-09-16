@@ -1,4 +1,6 @@
-# The control plane schema
+# The control plane schema (Optional Supabase Backend)
+
+> **Note:** This Supabase control plane is retained as an optional adapter and as historical foundation work. The default free self-hosted path is the Cloudflare control plane described in `docs/architecture/free-cloudflare-control-plane.md`.
 
 This describes the Supabase schema in `supabase/migrations`: four tables,
 the row-level security policies that isolate one user's data from another's,

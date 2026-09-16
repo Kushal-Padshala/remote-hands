@@ -60,15 +60,15 @@ Read [SECURITY.md](SECURITY.md) and [docs/architecture/control-plane.md](docs/ar
 ```text
 ┌─────────────────────────────────────────┐
 │          Mobile Client (Phone)          │
-│       Realtime Stream & Approvals       │
+│       Phone PWA (Vite / React)          │
 └────────────────────┬────────────────────┘
-                     │  HTTPS / WSS (Supabase Realtime)
+                     │  HTTPS / WSS (/ws/tasks/:taskId)
                      ▼
 ┌─────────────────────────────────────────┐
-│         Supabase Control Plane          │
-│   RLS-Guarded Postgres & Event Log      │
+│       Cloudflare Worker & DOs           │
+│   Auth, D1 Database, TaskRoom DO Relay  │
 └────────────────────▲────────────────────┘
-                     │  Authenticated polling & event emission
+                     │  Outbound WSS (/ws/machines/:machineId)
                      ▼
 ┌─────────────────────────────────────────┐
 │          Local Machine Daemon           │
@@ -87,17 +87,20 @@ Read [SECURITY.md](SECURITY.md) and [docs/architecture/control-plane.md](docs/ar
 
 ```text
 remote-hands/
+├── apps/
+│   ├── cloudflare/           # Cloudflare Worker, D1 migrations & Durable Objects
+│   └── web/                  # Phone-first PWA (Vite + React)
 ├── packages/
-│   ├── shared/               # Shared domain contracts, Zod schemas, state machines
-│   └── daemon/               # Local machine task supervisor & agy runner
-├── supabase/
-│   ├── migrations/           # SQL migrations with row-level security
-│   └── tests/                # Multi-user RLS & database catalog invariant tests
+│   ├── shared/               # Shared domain contracts, Zod schemas, realtime envelope
+│   ├── control-plane/        # Provider-neutral business rules & validation
+│   ├── daemon/               # Local machine task supervisor & agy runner
+│   └── cli/                  # One-command setup, deploy, and pairing CLI
+├── supabase/                 # Optional self-hosted backend adapter
 ├── docs/
-│   ├── architecture/         # Control plane and system documentation
-│   └── development.md        # Local environment setup
+│   ├── architecture/         # System and control-plane architecture
+│   └── development.md        # Local development setup
 └── .github/
-    └── workflows/ci.yml      # CI workflow (typechecks, Supabase integration, secrets)
+    └── workflows/ci.yml      # CI workflow
 ```
 
 ---
@@ -107,7 +110,7 @@ remote-hands/
 ### Prerequisites
 
 - **Node.js**: `>=22.0.0`
-- **Docker**: For local Supabase development
+- **Cloudflare Account**: Free plan (optional Supabase adapter available for custom deployments)
 
 ```bash
 # Clone repository
@@ -117,10 +120,7 @@ cd remote-hands
 # Install dependencies
 npm install
 
-# Start local Supabase instance
-npm run db:start
-
-# Run full test suite (shared, daemon, database)
+# Run test suite
 npm test
 
 # Typecheck workspace
@@ -131,26 +131,15 @@ npm run typecheck
 
 ## Roadmap
 
-- [x] **Phase 1: Foundation & Control Plane**
-  - Monorepo workspace scaffolding with Node 22 & TypeScript 5.9
+- [x] **Phase 1: Foundation & Shared Contracts**
+  - Monorepo workspace scaffolding with Node 22 & TypeScript strict
   - `@remote-hands/shared` contracts with Zod validation
-  - Supabase schema migrations (`machines`, `tasks`, `events`, `approvals`) with RLS
-  - Database catalog invariant test suite (`schema-invariants.test.ts`)
-- [ ] **Phase 2: Local Daemon & Supervisor**
-  - [x] Daemon package foundation and runtime metadata
-  - [x] Task coordinator with event streaming
-  - [x] Safe `agy` command runner & NDJSON parser
-  - [ ] Real Supabase adapter for task claiming & machine heartbeats
-  - [ ] Machine pairing and secure credential storage
-  - [ ] Visual frame buffer capturing Chrome screenshots
-- [ ] **Phase 3: Approval Gate Hook**
-  - Hook integration intercepting critical actions
-  - Risk classification and payload capture
-  - Timeout enforcement and deny-on-timeout handler
-- [ ] **Phase 4: Mobile Web Application**
-  - Passkey-primary authentication with WebAuthn
-  - Live timeline rendering with Supabase Realtime
-  - Single-tap approval and rejection cards
+  - Local daemon foundation, runtime metadata, task coordinator & safe `agy` runner
+- [ ] **Phase 2: Free Cloudflare control plane**
+- [ ] **Phase 3: Outbound daemon transport and live task rooms**
+- [ ] **Phase 4: Phone PWA and approval workflow**
+- [ ] **Phase 5: One-command setup CLI**
+- [ ] **Phase 6: End-to-end browser task acceptance test**
 
 ---
 

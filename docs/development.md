@@ -1,16 +1,11 @@
 # Local development
 
-This is the setup a contributor needs before touching code. It gets you a
-running local Supabase instance, the test suite green, and the type checker
-clean. It does not run an agent — see the README's Status section for what
-exists today.
+This documents the setup for contributors. The default self-hosted control plane is Cloudflare (Workers, D1, Durable Objects); Supabase is retained as an optional backend adapter.
 
 ## Prerequisites
 
-- Node >= 22
-- Docker, running. Local Supabase is a set of Docker containers; the CLI
-  starts and stops them for you, but the Docker daemon itself has to already
-  be up.
+- **Node.js**: `>=22.0.0`
+- **Docker** *(Optional)*: Only required if you are actively working on or testing the optional `supabase/` backend adapter.
 - `gh`, the GitHub CLI, for opening pull requests.
 
 ## Install
