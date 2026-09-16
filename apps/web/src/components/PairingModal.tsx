@@ -15,7 +15,7 @@ export function PairingModal({ isOpen, onClose, pairingUrl, pairingCode }: Pairi
   const activeUrl =
     pairingUrl ||
     (typeof window !== 'undefined'
-      ? `${window.location.origin}/pair${pairingCode ? `?code=${pairingCode}` : ''}`
+      ? `${window.location.origin}/pair?code=${pairingCode || 'PAIR-123456'}`
       : '');
 
   useEffect(() => {
@@ -56,7 +56,7 @@ export function PairingModal({ isOpen, onClose, pairingUrl, pairingCode }: Pairi
         </div>
 
         <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: 16 }}>
-          Scan this QR code with your mobile camera to open and pair Remote Hands on your phone.
+          Scan this QR code with your mobile camera to open the direct pairing link on your phone.
         </p>
 
         <div
@@ -93,7 +93,7 @@ export function PairingModal({ isOpen, onClose, pairingUrl, pairingCode }: Pairi
 
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn" style={{ flex: 1 }} onClick={handleCopy}>
-            {copied ? '✓ Copied Link' : 'Copy Link'}
+            {copied ? '✓ Copied Direct Link' : 'Copy Direct Link'}
           </button>
           <button className="btn btn-primary" style={{ flex: 1 }} onClick={onClose}>
             Done

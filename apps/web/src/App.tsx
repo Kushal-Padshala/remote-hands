@@ -38,6 +38,16 @@ export function App() {
       const code = params.get('code');
       if (code) {
         setPairingCode(code);
+        try {
+          localStorage.setItem('rh_pairing_code', code);
+        } catch {}
+      } else {
+        try {
+          const cached = localStorage.getItem('rh_pairing_code');
+          if (cached) {
+            setPairingCode(cached);
+          }
+        } catch {}
       }
     }
   }, []);
@@ -83,6 +93,32 @@ export function App() {
       </header>
 
       <main>
+        {pairingCode && (
+          <div
+            className="card"
+            style={{
+              borderColor: 'var(--accent-teal)',
+              backgroundColor: 'rgba(20, 184, 166, 0.08)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 16,
+              padding: '10px 14px',
+            }}
+          >
+            <span style={{ fontSize: '0.8125rem', color: 'var(--accent-teal)', fontWeight: 600 }}>
+              📱 Direct Pairing Active: {pairingCode}
+            </span>
+            <button
+              className="btn"
+              style={{ width: 'auto', padding: '3px 10px', fontSize: '0.75rem' }}
+              onClick={() => setShowPairModal(true)}
+            >
+              QR Code
+            </button>
+          </div>
+        )}
+
         {error && (
           <div className="card" style={{ borderColor: 'var(--accent-rose)', color: 'var(--accent-rose)', marginBottom: 16 }}>
             {error}
