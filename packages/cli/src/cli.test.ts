@@ -20,6 +20,13 @@ describe('CLI command dispatcher', () => {
     expect(logs.some((l) => l.includes('Deploying'))).toBe(true);
   });
 
+  it('dispatches start command', async () => {
+    const logs: string[] = [];
+    const code = await main(['start', '--no-clamshell', '--once'], { stdout: (msg) => logs.push(msg) });
+    expect(code).toBe(0);
+    expect(logs.some((l) => l.includes('Daemon'))).toBe(true);
+  });
+
   it('dispatches daemon command', async () => {
     const logs: string[] = [];
     const code = await main(['daemon'], { stdout: (msg) => logs.push(msg) });

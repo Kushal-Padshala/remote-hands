@@ -165,7 +165,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     webUrl,
     pairingUrl,
     pairingCode,
-    daemonCommand: 'remote-hands daemon',
+    daemonCommand: 'rh start (or: remote-hands daemon)',
   });
 
   stdout(summary);

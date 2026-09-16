@@ -158,7 +158,7 @@ export async function renderPairingTui(info: PairingSummaryInfo, terminalCols?: 
     `${c.brightGreen('│')}  ${c.bold(c.white('4. Start Local Daemon:'))}`,
     `${c.brightGreen('│')}     ${c.green(info.daemonCommand)}`,
     c.brightGreen('│'),
-    `${c.brightGreen('│')}  ${c.dim('💡 Scan the QR above with your phone camera to pair immediately.')}`,
+    `${c.brightGreen('│')}  ${c.dim('💡 Run "rh start" to keep listening even with your laptop lid closed.')}`,
     c.brightGreen('│'),
     c.brightGreen(`╰${hr}`),
     '',

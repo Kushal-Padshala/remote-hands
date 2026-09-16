@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "description": "Phone-operated remote hands agentic coding control plane",
   "bin": {
-    "remote-hands": "./dist/index.js"
+    "remote-hands": "./dist/index.js",
+    "rh": "./dist/index.js"
   },
   "type": "module",
   "scripts": {
