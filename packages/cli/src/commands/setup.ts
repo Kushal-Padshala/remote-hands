@@ -92,20 +92,19 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   const ownerSecret = (crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '')).slice(0, 32);
 
   let setupRes: Response | undefined;
-  for (let attempt = 0; attempt < 15; attempt++) {
+  for (let attempt = 0; attempt < 30; attempt++) {
     try {
       setupRes = await fetchFn(`${apiUrl}/setup/owner`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ owner_secret: ownerSecret }),
       });
-      if (setupRes.ok || setupRes.status < 500) break;
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
+      if (setupRes.ok || setupRes.status === 409) break;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 
-  if (!setupRes || !setupRes.ok) {
+  if (!setupRes || (!setupRes.ok && setupRes.status !== 409)) {
     stderr(`Failed to initialize owner secret on Worker: ${setupRes ? await setupRes.text() : 'network failure'}`);
     return 1;
   }
