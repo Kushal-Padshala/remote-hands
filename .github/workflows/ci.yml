@@ -12,7 +12,22 @@ jobs:
         with: { node-version: '22', cache: 'npm' }
       - run: npm ci
       - run: npm run typecheck
-      - run: npm run test -- --passWithNoTests packages/shared
+      - run: npm test -- packages/shared
+      - run: npm test -- packages/control-plane
+      - run: npm test -- packages/daemon
+      - run: npm test -- packages/cli
+      - run: npm test -- apps/cloudflare
+      - run: npm test -- apps/web
+      - run: npm run build --workspace apps/web
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      - run: npm test -- tests/e2e
   db:
     runs-on: ubuntu-latest
     steps:
