@@ -59,6 +59,16 @@ single root `vitest.config.mts`. The `supabase` project's tests exercise
 row-level security against your local instance using the keys from `.env`,
 so `db:start` and `db:reset` need to have already succeeded.
 
+To run only the daemon foundation tests:
+
+```
+npm test -- packages/daemon
+```
+
+These tests do not launch `agy` or connect to Supabase. They exercise the
+config parser, runtime metadata helper, in-memory task store, `agy` argument
+builder, stream parser, and one-cycle daemon coordinator.
+
 ## Type-check
 
 ```
@@ -69,6 +79,26 @@ This builds every package's source with `tsc --build`, then runs each
 package's `typecheck:tests` script, so both source and test files are
 checked — including type-level assertions that fail if the hand-written
 types in `packages/shared` drift from the SQL schema.
+
+## Daemon development configuration
+
+The daemon package reads its startup configuration from environment variables.
+For local development, copy the daemon section from `.env.example` into your
+git-ignored `.env` and adjust the machine name and workspace allowlist:
+
+```
+REMOTE_HANDS_SUPABASE_URL=http://127.0.0.1:54321
+REMOTE_HANDS_SUPABASE_ANON_KEY=replace-me
+REMOTE_HANDS_MACHINE_NAME=office-mac
+REMOTE_HANDS_AGY_COMMAND=agy
+REMOTE_HANDS_WORKSPACE_ALLOWLIST=/Users/you/projects/site:/Users/you/projects/app
+REMOTE_HANDS_POLL_INTERVAL_MS=5000
+REMOTE_HANDS_HEARTBEAT_INTERVAL_MS=15000
+```
+
+The current daemon foundation is intentionally injectable and test-first. It
+does not yet start a long-running process, store credentials, subscribe to
+Supabase Realtime, capture Chrome frames, or install a launchd agent.
 
 ## Regenerating types from the schema
 

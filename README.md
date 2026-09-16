@@ -88,6 +88,12 @@ This repository is organized as a monorepo using npm workspaces:
 ```text
 remote-hands/
 ├── packages/
+│   ├── daemon/               # Local daemon foundation and agent runner boundary
+│   │   ├── src/
+│   │   │   ├── agy-runner.ts # Safe agy argument builder and stream parser
+│   │   │   ├── config.ts     # Environment parsing and startup validation
+│   │   │   ├── daemon.ts     # One-cycle task coordinator
+│   │   │   └── memory-task-store.ts # Deterministic store for tests/local dev
 │   └── shared/               # Shared domain contracts, Zod schemas, state machines
 │       ├── src/
 │       │   ├── approval.ts   # Approval schemas & expiry boundaries
@@ -161,10 +167,14 @@ remote-hands/
   - Full Row-Level Security isolation with `security invoker` functions
   - Automated catalog invariant test suite
 - [ ] **Phase 2: Local Daemon & Supervisor**
-  - Machine pairing and secure credential storage
-  - Daemon task-claiming loop and heartbeat reporter
-  - Agent process runner with streaming stdout/stderr parsing
-  - Visual frame buffer capturing browser screenshots
+  - [x] Daemon package foundation with strict TypeScript and Vitest coverage
+  - [x] Environment parsing, runtime metadata, heartbeat and task-store boundary
+  - [x] One-cycle task coordinator with ordered event writing and failure handling
+  - [x] Safe `agy` command builder and NDJSON stream parser boundary
+  - [ ] Supabase adapter for real machine registration, task claiming and events
+  - [ ] Machine pairing and secure credential storage
+  - [ ] Long-running supervisor loop and process runner
+  - [ ] Visual frame buffer capturing browser screenshots
 - [ ] **Phase 3: Approval Gate Hook**
   - Hook integration intercepting critical actions
   - Risk classification and payload capture
