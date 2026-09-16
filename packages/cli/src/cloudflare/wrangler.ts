@@ -1,7 +1,11 @@
 export type CommandRunner = (
   command: string,
   args: string[],
-  options?: { cwd?: string | undefined; env?: Record<string, string | undefined> | undefined },
+  options?: {
+    cwd?: string | undefined;
+    env?: Record<string, string | undefined> | undefined;
+    interactive?: boolean | undefined;
+  },
 ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
 export async function ensureWranglerLogin(runner: CommandRunner): Promise<boolean> {
@@ -11,6 +15,12 @@ export async function ensureWranglerLogin(runner: CommandRunner): Promise<boolea
     return false;
   }
   return res.stdout.includes('Logged in') || res.stdout.includes('Associated with');
+}
+
+export async function loginWrangler(runner: CommandRunner): Promise<boolean> {
+  const res = await runner('npx', ['wrangler', 'login'], { interactive: true });
+  if (res.exitCode !== 0) return false;
+  return await ensureWranglerLogin(runner);
 }
 
 export async function createD1Database(

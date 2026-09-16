@@ -100,4 +100,71 @@ describe('Setup Command Flow', () => {
     expect(fullOutput).not.toContain('super-secret');
     expect(fullOutput).not.toContain('OWNER_SECRET_HASH');
   });
+
+  it('automatically launches wrangler login when unauthenticated and continues setup', async () => {
+    const executedCommands: string[] = [];
+    let authenticated = false;
+
+    const mockRunner: CommandRunner = async (cmd, args) => {
+      const full = `${cmd} ${args.join(' ')}`;
+      executedCommands.push(full);
+
+      if (args.includes('whoami')) {
+        if (!authenticated) {
+          return { exitCode: 0, stdout: 'You are not authenticated.', stderr: '' };
+        }
+        return { exitCode: 0, stdout: 'Logged in as newuser@example.com', stderr: '' };
+      }
+      if (args.includes('login')) {
+        authenticated = true;
+        return { exitCode: 0, stdout: 'Success', stderr: '' };
+      }
+      if (args.includes('create') && args.includes('d1')) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ database_id: 'new-d1-uuid', database_name: 'remote-hands-db' }),
+          stderr: '',
+        };
+      }
+      if (args.includes('migrations')) {
+        return { exitCode: 0, stdout: 'Migrations applied successfully', stderr: '' };
+      }
+      if (args[0] === 'deploy') {
+        return {
+          exitCode: 0,
+          stdout: 'Deployed to https://remote-hands-api.workers.dev',
+          stderr: '',
+        };
+      }
+      if (args.includes('pages') && args.includes('deploy')) {
+        return {
+          exitCode: 0,
+          stdout: 'Deployed to https://remote-hands-web.pages.dev',
+          stderr: '',
+        };
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    };
+
+    const mockFs: FileSystemAdapter = {
+      readFile: async () => '{"d1_databases": [{"database_id": "placeholder"}]}',
+      writeFile: async () => {},
+      exists: async () => true,
+    };
+
+    const mockFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, owner_id: 'owner-1', pairing_code: 'PAIR-111111' }), { status: 200 }));
+
+    const exitCode = await setupCommand([], {
+      stdout: () => {},
+      stderr: () => {},
+      runner: mockRunner,
+      fs: mockFs,
+      fetchFn: mockFetch as unknown as typeof fetch,
+      projectRoot: '/project',
+    });
+
+    expect(exitCode).toBe(0);
+    expect(executedCommands.some((c) => c.includes('wrangler login'))).toBe(true);
+    expect(executedCommands.some((c) => c.includes('wrangler d1 create'))).toBe(true);
+  });
 });

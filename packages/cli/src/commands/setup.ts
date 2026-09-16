@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import { spawn } from 'node:child_process';
 import {
   ensureWranglerLogin,
+  loginWrangler,
   createD1Database,
   applyD1Migrations,
   deployWorker,
@@ -26,19 +27,23 @@ export interface CommandContext {
 
 const defaultRunner: CommandRunner = (command, args, options) => {
   return new Promise((resolve, reject) => {
+    const isInteractive = options?.interactive === true;
     const proc = spawn(command, args, {
       cwd: options?.cwd,
       env: { ...process.env, ...options?.env },
       shell: true,
+      stdio: isInteractive ? 'inherit' : undefined,
     });
     let stdout = '';
     let stderr = '';
-    proc.stdout?.on('data', (d) => {
-      stdout += d.toString();
-    });
-    proc.stderr?.on('data', (d) => {
-      stderr += d.toString();
-    });
+    if (!isInteractive) {
+      proc.stdout?.on('data', (d) => {
+        stdout += d.toString();
+      });
+      proc.stderr?.on('data', (d) => {
+        stderr += d.toString();
+      });
+    }
     proc.on('close', (code) => {
       resolve({ exitCode: code ?? 0, stdout, stderr });
     });
@@ -56,16 +61,22 @@ export async function setupCommand(args: string[], context: CommandContext = {})
 
   stdout('Setting up Remote Hands on Cloudflare free tier...');
 
-  const loggedIn = await ensureWranglerLogin(runner);
+  let loggedIn = await ensureWranglerLogin(runner);
   if (!loggedIn) {
-    stderr('');
-    stderr('Cloudflare authentication required.');
-    stderr('Please run the following command to log in to your Cloudflare account (free):');
-    stderr('  npx wrangler login');
-    stderr('Then re-run:');
-    stderr('  npx remote-hands setup --free');
-    stderr('');
-    return 1;
+    stdout('');
+    stdout('Cloudflare authentication required. Launching login in your browser...');
+    stdout('');
+    await loginWrangler(runner);
+    loggedIn = await ensureWranglerLogin(runner);
+    if (!loggedIn) {
+      stderr('');
+      stderr('Cloudflare authentication was not completed.');
+      stderr('Please run "npx wrangler login" and then re-run "npx remote-hands setup --free".');
+      stderr('');
+      return 1;
+    }
+    stdout('Cloudflare authentication successful!');
+    stdout('');
   }
 
   stdout('Creating D1 SQLite database...');
