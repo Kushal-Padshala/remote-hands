@@ -156,4 +156,29 @@ describe('Wrangler Automation', () => {
     expect(webRes.pagesUrl).toBe('https://remote-hands.example.workers.dev');
     expect(executed[1]?.args).toContain('pages');
   });
+
+  it('falls back to wrangler deploy when pages deploy fails', async () => {
+    const executed: Array<{ cmd: string; args: string[]; cwd?: string }> = [];
+
+    const fakeRunner: CommandRunner = async (cmd, args, opts) => {
+      executed.push({ cmd, args, cwd: opts?.cwd });
+      if (args.includes('pages')) {
+        return {
+          exitCode: 1,
+          stdout: '',
+          stderr: 'The Pages project remote-hands-web does not exist.',
+        };
+      }
+      return {
+        exitCode: 0,
+        stdout: 'Deployed to https://remote-hands-web.example.workers.dev',
+        stderr: '',
+      };
+    };
+
+    const webRes = await deployWebApp(fakeRunner, '/apps/web');
+    expect(webRes.pagesUrl).toBe('https://remote-hands-web.example.workers.dev');
+    expect(executed.some((e) => e.args.includes('pages'))).toBe(true);
+    expect(executed.some((e) => e.args[0] === 'wrangler' && e.args[1] === 'deploy')).toBe(true);
+  });
 });

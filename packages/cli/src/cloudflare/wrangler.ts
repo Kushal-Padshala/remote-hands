@@ -156,16 +156,20 @@ export async function deployWebApp(
   runner: CommandRunner,
   cwd: string,
 ): Promise<{ pagesUrl?: string | undefined }> {
-  const res = await runner(
+  let res = await runner(
     'npx',
     ['wrangler', 'pages', 'deploy', 'dist', '--project-name', 'remote-hands-web'],
     { cwd, env: { CI: 'true' } },
   );
   if (res.exitCode !== 0) {
+    res = await runner('npx', ['wrangler', 'deploy'], { cwd, env: { CI: 'true' } });
+  }
+  if (res.exitCode !== 0) {
     throw new Error(`Failed to deploy web app: ${res.stderr || res.stdout}`);
   }
 
-  const match = res.stdout.match(/https:\/\/[a-zA-Z0-9_.-]+\.(pages\.dev|workers\.dev)/);
+  const combined = res.stdout + '\n' + res.stderr;
+  const match = combined.match(/https:\/\/[a-zA-Z0-9_.-]+\.(pages\.dev|workers\.dev)/);
   return {
     pagesUrl: match ? match[0] : undefined,
   };
