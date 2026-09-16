@@ -129,17 +129,26 @@ npm run typecheck
 
 ---
 
+## Acceptance Testing & Verification
+
+Manual acceptance scripts and local verification playbooks:
+
+- [WordPress Privacy Policy Acceptance Test](scripts/acceptance/wordpress-privacy-policy.md)
+- [Running Local Free Stack Guide](scripts/acceptance/run-local-free-stack.md)
+
+---
+
 ## Roadmap
 
 - [x] **Phase 1: Foundation & Shared Contracts**
   - Monorepo workspace scaffolding with Node 22 & TypeScript strict
   - `@remote-hands/shared` contracts with Zod validation
   - Local daemon foundation, runtime metadata, task coordinator & safe `agy` runner
-- [ ] **Phase 2: Free Cloudflare control plane**
-- [ ] **Phase 3: Outbound daemon transport and live task rooms**
-- [ ] **Phase 4: Phone PWA and approval workflow**
-- [ ] **Phase 5: One-command setup CLI**
-- [ ] **Phase 6: End-to-end browser task acceptance test**
+- [x] **Phase 2: Free Cloudflare control plane**
+- [x] **Phase 3: Outbound daemon transport and live task rooms**
+- [x] **Phase 4: Phone PWA and approval workflow**
+- [x] **Phase 5: One-command setup CLI**
+- [x] **Phase 6: End-to-end browser task acceptance test**
 
 ---
 
