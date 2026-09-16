@@ -1,4 +1,5 @@
 import {
+  claimTaskRequestSchema,
   createTaskRequestSchema,
   completeTaskRequestSchema,
   failTaskRequestSchema,
@@ -50,6 +51,30 @@ export async function handleGetTask(taskId: string, request: Request, env: Env):
   }
 
   return jsonOk({ task });
+}
+
+export async function handleClaimNextTask(request: Request, env: Env): Promise<Response> {
+  const session = await requireSession(request, env.DB);
+  if (session.kind !== 'daemon' || !session.machine_id) {
+    throw new ForbiddenError('Only daemon sessions can claim tasks');
+  }
+
+  const body = claimTaskRequestSchema.parse(await request.json());
+  if (session.machine_id !== body.machine_id) {
+    throw new ForbiddenError('Machine ID mismatch');
+  }
+
+  const repo = new TasksRepository(env.DB);
+  const queued = await repo.listQueuedForMachine(body.machine_id);
+  if (queued.length === 0) {
+    return jsonOk({ task: null });
+  }
+
+  const oldest = queued[0]!;
+  const claimed = claimTask(oldest as any, session.machine_id);
+  await repo.updateStatus(oldest.id, 'claimed', { started_at: claimed.started_at });
+
+  return jsonOk({ task: claimed });
 }
 
 export async function handleClaimTask(taskId: string, request: Request, env: Env): Promise<Response> {

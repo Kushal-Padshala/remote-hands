@@ -1,4 +1,5 @@
 export * from './agy-runner.js';
+export * from './cloudflare-client.js';
 export * from './config.js';
 export * from './daemon.js';
 export * from './memory-task-store.js';

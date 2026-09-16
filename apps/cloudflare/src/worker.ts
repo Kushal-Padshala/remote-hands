@@ -6,9 +6,10 @@ import { HttpError } from './http/errors.js';
 import { jsonError, jsonOk } from './http/json.js';
 import { handleSetupOwner } from './routes/setup.js';
 import { handleStartPairing, handleClaimPairing } from './routes/pairing.js';
-import { handleListMachines } from './routes/machines.js';
+import { handleListMachines, handleGetMachine, handleMachineHeartbeat } from './routes/machines.js';
 import {
   handleCreateTask,
+  handleClaimNextTask,
   handleGetTask,
   handleClaimTask,
   handleMarkTaskRunning,
@@ -56,8 +57,24 @@ export default {
         return await handleListMachines(request, env);
       }
 
+      const machineSubrouteMatch = pathname.match(/^\/machines\/([a-zA-Z0-9_-]+)(?:\/(.*))?$/);
+      if (machineSubrouteMatch) {
+        const machineId = machineSubrouteMatch[1]!;
+        const subaction = machineSubrouteMatch[2];
+        if (!subaction && method === 'GET') {
+          return await handleGetMachine(machineId, request, env);
+        }
+        if (subaction === 'heartbeat' && method === 'POST') {
+          return await handleMachineHeartbeat(machineId, request, env);
+        }
+      }
+
       if (method === 'POST' && pathname === '/tasks') {
         return await handleCreateTask(request, env);
+      }
+
+      if (method === 'POST' && pathname === '/tasks/claim') {
+        return await handleClaimNextTask(request, env);
       }
 
       const taskSubrouteMatch = pathname.match(/^\/tasks\/([a-zA-Z0-9_-]+)(?:\/(.*))?$/);
