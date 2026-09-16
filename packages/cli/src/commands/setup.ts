@@ -58,7 +58,13 @@ export async function setupCommand(args: string[], context: CommandContext = {})
 
   const loggedIn = await ensureWranglerLogin(runner);
   if (!loggedIn) {
-    stderr('Cloudflare authentication required. Please run: npx wrangler login');
+    stderr('');
+    stderr('Cloudflare authentication required.');
+    stderr('Please run the following command to log in to your Cloudflare account (free):');
+    stderr('  npx wrangler login');
+    stderr('Then re-run:');
+    stderr('  npx remote-hands setup --free');
+    stderr('');
     return 1;
   }
 

@@ -6,7 +6,11 @@ export type CommandRunner = (
 
 export async function ensureWranglerLogin(runner: CommandRunner): Promise<boolean> {
   const res = await runner('npx', ['wrangler', 'whoami']);
-  return res.exitCode === 0;
+  if (res.exitCode !== 0) return false;
+  if (res.stdout.includes('You are not authenticated') || res.stderr.includes('You are not authenticated')) {
+    return false;
+  }
+  return res.stdout.includes('Logged in') || res.stdout.includes('Associated with');
 }
 
 export async function createD1Database(

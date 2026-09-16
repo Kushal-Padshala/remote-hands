@@ -23,6 +23,19 @@ describe('Wrangler Automation', () => {
     expect(executed[0]).toEqual({ cmd: 'npx', args: ['wrangler', 'whoami'] });
   });
 
+  it('detects unauthenticated wrangler status', async () => {
+    const fakeRunner: CommandRunner = async () => {
+      return {
+        exitCode: 0,
+        stdout: 'You are not authenticated. Please run `wrangler login`.',
+        stderr: '',
+      };
+    };
+
+    const loggedIn = await ensureWranglerLogin(fakeRunner);
+    expect(loggedIn).toBe(false);
+  });
+
   it('creates d1 database and extracts database_id', async () => {
     const executed: Array<{ cmd: string; args: string[] }> = [];
 
