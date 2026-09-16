@@ -1,13 +1,13 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { CommandContext } from './setup.js';
-import { ensureWranglerLogin } from '../cloudflare/wrangler.js';
+import { ensureWranglerLogin, defaultRunner } from '../cloudflare/wrangler.js';
 import { checkBrowserHarness } from '../system/browser-harness.js';
 import { defaultFileSystem } from '../cloudflare/project.js';
 
 export async function doctorCommand(args: string[], context: CommandContext = {}): Promise<number> {
   const stdout = context.stdout ?? console.log;
-  const runner = context.runner ?? (async (cmd, args) => ({ exitCode: 0, stdout: '', stderr: '' }));
+  const runner = context.runner ?? defaultRunner;
   const fs = context.fs ?? defaultFileSystem;
 
   stdout('Running remote-hands health checks...');

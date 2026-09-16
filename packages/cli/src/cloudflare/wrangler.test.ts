@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   ensureWranglerLogin,
+  waitForWranglerLogin,
   createD1Database,
   createR2Bucket,
   deployWorker,
@@ -21,6 +22,34 @@ describe('Wrangler Automation', () => {
     const loggedIn = await ensureWranglerLogin(fakeRunner);
     expect(loggedIn).toBe(true);
     expect(executed[0]).toEqual({ cmd: 'npx', args: ['wrangler', 'whoami'] });
+  });
+
+  it('checks wrangler login status case-insensitively with real oauth message', async () => {
+    const fakeRunner: CommandRunner = async () => {
+      return {
+        exitCode: 0,
+        stdout: '👋 You are logged in with an OAuth Token, associated with the email user@example.com.',
+        stderr: '',
+      };
+    };
+
+    const loggedIn = await ensureWranglerLogin(fakeRunner);
+    expect(loggedIn).toBe(true);
+  });
+
+  it('polls until login is detected in waitForWranglerLogin', async () => {
+    let attempts = 0;
+    const fakeRunner: CommandRunner = async () => {
+      attempts++;
+      if (attempts < 3) {
+        return { exitCode: 0, stdout: 'You are not authenticated.', stderr: '' };
+      }
+      return { exitCode: 0, stdout: 'You are logged in with an OAuth Token', stderr: '' };
+    };
+
+    const loggedIn = await waitForWranglerLogin(fakeRunner, 5000, 10);
+    expect(loggedIn).toBe(true);
+    expect(attempts).toBe(3);
   });
 
   it('detects unauthenticated wrangler status', async () => {

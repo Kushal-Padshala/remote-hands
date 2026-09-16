@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+
 export type CommandRunner = (
   command: string,
   args: string[],
@@ -8,19 +10,64 @@ export type CommandRunner = (
   },
 ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
+export const defaultRunner: CommandRunner = (command, args, options) => {
+  return new Promise((resolve, reject) => {
+    const isInteractive = options?.interactive === true;
+    const proc = spawn(command, args, {
+      cwd: options?.cwd,
+      env: { ...process.env, ...options?.env },
+      shell: true,
+      stdio: isInteractive ? 'inherit' : undefined,
+    });
+    let stdout = '';
+    let stderr = '';
+    if (!isInteractive) {
+      proc.stdout?.on('data', (d) => {
+        stdout += d.toString();
+      });
+      proc.stderr?.on('data', (d) => {
+        stderr += d.toString();
+      });
+    }
+    proc.on('close', (code) => {
+      resolve({ exitCode: code ?? 0, stdout, stderr });
+    });
+    proc.on('error', reject);
+  });
+};
+
 export async function ensureWranglerLogin(runner: CommandRunner): Promise<boolean> {
   const res = await runner('npx', ['wrangler', 'whoami']);
   if (res.exitCode !== 0) return false;
-  if (res.stdout.includes('You are not authenticated') || res.stderr.includes('You are not authenticated')) {
+  const combined = (res.stdout + '\n' + res.stderr).toLowerCase();
+  if (combined.includes('you are not authenticated')) {
     return false;
   }
-  return res.stdout.includes('Logged in') || res.stdout.includes('Associated with');
+  return (
+    combined.includes('logged in') ||
+    combined.includes('associated with') ||
+    combined.includes('oauth token') ||
+    combined.includes('account id')
+  );
 }
 
 export async function loginWrangler(runner: CommandRunner): Promise<boolean> {
   const res = await runner('npx', ['wrangler', 'login'], { interactive: true });
-  if (res.exitCode !== 0) return false;
-  return await ensureWranglerLogin(runner);
+  return res.exitCode === 0;
+}
+
+export async function waitForWranglerLogin(
+  runner: CommandRunner,
+  timeoutMs: number = 60_000,
+  intervalMs: number = 1_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const ok = await ensureWranglerLogin(runner);
+    if (ok) return true;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return false;
 }
 
 export async function createD1Database(

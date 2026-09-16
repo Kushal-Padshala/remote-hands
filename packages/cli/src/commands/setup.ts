@@ -1,13 +1,14 @@
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { spawn } from 'node:child_process';
 import {
   ensureWranglerLogin,
   loginWrangler,
+  waitForWranglerLogin,
   createD1Database,
   applyD1Migrations,
   deployWorker,
   deployWebApp,
+  defaultRunner,
   type CommandRunner,
 } from '../cloudflare/wrangler.js';
 import { writeWranglerConfig, defaultFileSystem, type FileSystemAdapter } from '../cloudflare/project.js';
@@ -26,32 +27,6 @@ export interface CommandContext {
   configDir?: string | undefined;
 }
 
-const defaultRunner: CommandRunner = (command, args, options) => {
-  return new Promise((resolve, reject) => {
-    const isInteractive = options?.interactive === true;
-    const proc = spawn(command, args, {
-      cwd: options?.cwd,
-      env: { ...process.env, ...options?.env },
-      shell: true,
-      stdio: isInteractive ? 'inherit' : undefined,
-    });
-    let stdout = '';
-    let stderr = '';
-    if (!isInteractive) {
-      proc.stdout?.on('data', (d) => {
-        stdout += d.toString();
-      });
-      proc.stderr?.on('data', (d) => {
-        stderr += d.toString();
-      });
-    }
-    proc.on('close', (code) => {
-      resolve({ exitCode: code ?? 0, stdout, stderr });
-    });
-    proc.on('error', reject);
-  });
-};
-
 export async function setupCommand(args: string[], context: CommandContext = {}): Promise<number> {
   const stdout = context.stdout ?? console.log;
   const stderr = context.stderr ?? console.error;
@@ -66,8 +41,26 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   if (!loggedIn) {
     stdout('');
     stdout('Cloudflare authentication required. Launching login in your browser...');
+    stdout('Listening silently in the background for authorization...');
     stdout('');
-    await loginWrangler(runner);
+
+    let loginExited = false;
+    const loginPromise = loginWrangler(runner).then((ok) => {
+      loginExited = true;
+      return ok;
+    });
+
+    const pollPromise = (async () => {
+      for (let i = 0; i < 120 && !loginExited; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const ok = await ensureWranglerLogin(runner);
+        if (ok) return true;
+      }
+      return false;
+    })();
+
+    await Promise.race([loginPromise, pollPromise]);
+
     loggedIn = await ensureWranglerLogin(runner);
     if (!loggedIn) {
       stderr('');
@@ -76,7 +69,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
       stderr('');
       return 1;
     }
-    stdout('Cloudflare authentication successful!');
+    stdout('Cloudflare authentication detected! Continuing setup...');
     stdout('');
   }
 
