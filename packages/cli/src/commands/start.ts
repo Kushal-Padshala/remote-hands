@@ -51,23 +51,49 @@ export async function startCommand(args: string[], context: CommandContext = {})
     } catch {}
   };
 
-  if (!noClamshell && process.platform === 'darwin' && !runner) {
-    try {
-      const res = spawnSync('sudo', ['pmset', '-a', 'disablesleep', '1'], {
-        stdio: ['inherit', 'pipe', 'pipe'],
-      });
-      if (res.status === 0) {
-        clamshellActive = true;
-      }
-    } catch {}
+  if (!noClamshell && !runner) {
+    if (process.platform === 'darwin') {
+      stdout(
+        '\n' +
+          c.yellow(`╭─ ${c.bold('🔒 Administrator Password Required (macOS)')} ${'─'.repeat(Math.max(2, termWidth - 46))}\n`) +
+          `${c.yellow('│')}  ${c.white('Please enter your Mac password to enable lid-closed sleep prevention.')}\n` +
+          `${c.yellow('│')}  ${c.dim('Allows your MacBook to run agent tasks with the lid closed (pmset disablesleep=1).')}\n` +
+          `${c.yellow('│')}  ${c.dim('Run "rh start --no-clamshell" or "rh daemon" to run without password.')}\n` +
+          c.yellow(`╰${hr}\n`),
+      );
+      try {
+        const res = spawnSync('sudo', ['pmset', '-a', 'disablesleep', '1'], {
+          stdio: ['inherit', 'pipe', 'pipe'],
+        });
+        if (res.status === 0) {
+          clamshellActive = true;
+        }
+      } catch {}
 
-    try {
-      caffeinateProc = spawn('caffeinate', ['-dims'], {
-        detached: true,
-        stdio: 'ignore',
-      });
-      caffeinateProc.unref();
-    } catch {}
+      try {
+        caffeinateProc = spawn('caffeinate', ['-dims'], {
+          detached: true,
+          stdio: 'ignore',
+        });
+        caffeinateProc.unref();
+      } catch {}
+    } else if (process.platform === 'win32') {
+      stdout(
+        '\n' +
+          c.yellow(`╭─ ${c.bold('⚡ Windows Power Management')} ${'─'.repeat(Math.max(2, termWidth - 30))}\n`) +
+          `${c.yellow('│')}  ${c.white('Configuring Windows power state to keep system awake during tasks.')}\n` +
+          `${c.yellow('│')}  ${c.dim('If prompted by Windows User Account Control (UAC), please approve.')}\n` +
+          c.yellow(`╰${hr}\n`),
+      );
+    } else if (process.platform === 'linux') {
+      stdout(
+        '\n' +
+          c.yellow(`╭─ ${c.bold('🔒 Administrator Password Required (Linux)')} ${'─'.repeat(Math.max(2, termWidth - 46))}\n`) +
+          `${c.yellow('│')}  ${c.white('Please enter your Linux password if prompted to inhibit system suspend.')}\n` +
+          `${c.yellow('│')}  ${c.dim('Run "rh start --no-clamshell" or "rh daemon" to run without password.')}\n` +
+          c.yellow(`╰${hr}\n`),
+      );
+    }
   }
 
   const onSignal = () => {
