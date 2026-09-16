@@ -5,6 +5,7 @@ let alice: TestUser;
 let mallory: TestUser;
 let aliceMachineId: string;
 let aliceTaskId: string;
+let aliceApprovalId: string;
 
 beforeAll(async () => {
   alice = await createUser();
@@ -34,6 +35,21 @@ beforeAll(async () => {
     payload: { text: 'starting' },
   });
   if (eErr) throw eErr;
+
+  const { data: approval, error: aErr } = await alice.client
+    .from('approvals')
+    .insert({
+      task_id: aliceTaskId,
+      user_id: alice.id,
+      action_kind: 'shell',
+      summary: 'run rm -rf build/',
+      risk: 'high',
+      expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    })
+    .select()
+    .single();
+  if (aErr) throw aErr;
+  aliceApprovalId = approval.id;
 }, 60_000);
 
 describe('the owner', () => {
@@ -93,6 +109,29 @@ describe('a second user', () => {
     const { data: still } = await alice.client.from('tasks').select().eq('id', aliceTaskId).single();
     expect(still.status).toBe('queued');
   });
+
+  it('cannot insert an event referencing someone else task', async () => {
+    const { error } = await mallory.client.from('events').insert({
+      task_id: aliceTaskId,
+      user_id: mallory.id,
+      seq: 1,
+      kind: 'agent_text',
+      payload: { text: 'forged' },
+    });
+    expect(error).not.toBeNull();
+  });
+
+  it('cannot insert an approval referencing someone else task', async () => {
+    const { error } = await mallory.client.from('approvals').insert({
+      task_id: aliceTaskId,
+      user_id: mallory.id,
+      action_kind: 'shell',
+      summary: 'forged approval',
+      risk: 'high',
+      expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+    expect(error).not.toBeNull();
+  });
 });
 
 describe('the append-only event log', () => {
@@ -103,5 +142,38 @@ describe('the append-only event log', () => {
       .eq('task_id', aliceTaskId)
       .select();
     expect(data).toEqual([]);
+  });
+});
+
+describe('approvals', () => {
+  it('the owner sees their own approval', async () => {
+    const { data } = await alice.client.from('approvals').select();
+    expect(data).toHaveLength(1);
+  });
+
+  it('a second user sees no approvals', async () => {
+    const { data } = await mallory.client.from('approvals').select();
+    expect(data).toEqual([]);
+  });
+
+  it('a second user cannot read one by id', async () => {
+    const { data } = await mallory.client.from('approvals').select().eq('id', aliceApprovalId);
+    expect(data).toEqual([]);
+  });
+
+  it('a second user cannot update someone else approval', async () => {
+    const { data } = await mallory.client
+      .from('approvals')
+      .update({ decision: 'approved', decided_at: new Date().toISOString() })
+      .eq('id', aliceApprovalId)
+      .select();
+    expect(data).toEqual([]);
+
+    const { data: still } = await alice.client
+      .from('approvals')
+      .select()
+      .eq('id', aliceApprovalId)
+      .single();
+    expect(still.decision).toBe('pending');
   });
 });
