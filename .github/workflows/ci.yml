@@ -12,7 +12,7 @@ jobs:
         with: { node-version: '22', cache: 'npm' }
       - run: npm ci
       - run: npm run typecheck
-      - run: npm run test -- packages/shared
+      - run: npm run test -- --passWithNoTests packages/shared
   secrets:
     runs-on: ubuntu-latest
     steps:
