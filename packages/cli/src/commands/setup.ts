@@ -1,5 +1,34 @@
 import * as path from 'node:path';
 import * as os from 'node:os';
+import * as fsSync from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+function resolveProjectRoot(customRoot?: string | undefined): string {
+  if (customRoot) {
+    return customRoot;
+  }
+  const cwd = process.cwd();
+  if (fsSync.existsSync(path.join(cwd, 'apps/cloudflare'))) {
+    return cwd;
+  }
+  try {
+    const thisFile = fileURLToPath(import.meta.url);
+    const cliDir = path.dirname(thisFile);
+    const monorepoCandidate = path.resolve(cliDir, '../../..');
+    if (fsSync.existsSync(path.join(monorepoCandidate, 'apps/cloudflare'))) {
+      return monorepoCandidate;
+    }
+    const distCandidate = path.resolve(cliDir, '../..');
+    if (fsSync.existsSync(path.join(distCandidate, 'apps/cloudflare'))) {
+      return distCandidate;
+    }
+    const pkgCandidate = path.resolve(cliDir, '..');
+    if (fsSync.existsSync(path.join(pkgCandidate, 'apps/cloudflare'))) {
+      return pkgCandidate;
+    }
+  } catch {}
+  return cwd;
+}
 import {
   ensureWranglerLogin,
   loginWrangler,
@@ -42,7 +71,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   const runner = context.runner ?? defaultRunner;
   const fs = context.fs ?? defaultFileSystem;
   const fetchFn = context.fetchFn ?? globalThis.fetch.bind(globalThis);
-  const projectRoot = context.projectRoot ?? process.cwd();
+  const projectRoot = resolveProjectRoot(context.projectRoot);
 
   stdout(renderBanner());
 

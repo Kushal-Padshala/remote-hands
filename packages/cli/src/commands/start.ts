@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import type { CommandContext } from './setup.js';
+import { setupCommand, type CommandContext } from './setup.js';
 import { c } from '../output/ui.js';
 
 export interface StartOptions {
@@ -17,6 +17,7 @@ export async function startCommand(args: string[], context: CommandContext = {})
 
   const noClamshell = args.includes('--no-clamshell') || args.includes('--no-sleep-prevent');
   const once = args.includes('--once');
+  const noAutoSetup = args.includes('--no-auto-setup') || once;
 
   let clamshellActive = false;
   let caffeinateProc: ChildProcess | null = null;
@@ -87,6 +88,26 @@ export async function startCommand(args: string[], context: CommandContext = {})
       hasConfig = true;
     }
   } catch {}
+
+  if (!hasConfig && !noAutoSetup) {
+    stdout(
+      '\n' +
+        c.yellow(`╭─ ${c.bold('⚡ Setup Required')} ${'─'.repeat(Math.max(2, termWidth - 20))}\n`) +
+        `${c.yellow('│')}  ${c.white('No paired backend configuration found on this machine.')}\n` +
+        `${c.yellow('│')}  ${c.cyan('Launching setup wizard now...')}\n` +
+        c.yellow(`╰${hr}\n`),
+    );
+    const setupExit = await setupCommand([], context);
+    if (setupExit !== 0) {
+      restoreSleep();
+      return setupExit;
+    }
+    try {
+      if (fs.existsSync(daemonConfigFile)) {
+        hasConfig = true;
+      }
+    } catch {}
+  }
 
   stdout(
     '\n' +
