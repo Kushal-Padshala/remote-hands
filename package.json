@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "db:start": "npx --yes supabase@latest start",
     "db:stop": "npx --yes supabase@latest stop",
-    "db:reset": "npx --yes supabase@latest db reset"
+    "db:reset": "npx --yes supabase@latest db reset",
+    "db:types": "npx --yes supabase@latest gen types typescript --local > packages/shared/src/database.generated.ts"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
