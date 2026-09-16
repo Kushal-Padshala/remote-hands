@@ -47,8 +47,8 @@ const result = z.object({
 });
 
 /**
- * Every schema is `.partial()`-tolerant only where a field is genuinely
- * optional. Defaults are applied here so consumers never branch on undefined.
+ * Fields are marked `.optional()` individually where genuinely optional, and
+ * defaults are applied at parse time so consumers never branch on undefined.
  */
 export const eventPayloadSchemas = {
   agent_text: agentText,
