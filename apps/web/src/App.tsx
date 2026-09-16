@@ -1,25 +1,60 @@
 import { useState, useEffect } from 'react';
-import type { MachineRow } from '@remote-hands/shared';
+import type { MachineRow, TaskRow, TaskKind, TaskMode } from '@remote-hands/shared';
 import { apiClient } from './api/client.js';
+import { MachinesScreen } from './screens/MachinesScreen.js';
+import { NewTaskScreen } from './screens/NewTaskScreen.js';
+import { LiveTaskScreen } from './screens/LiveTaskScreen.js';
 
 export function App() {
   const [machines, setMachines] = useState<MachineRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const list = await apiClient.listMachines();
-        setMachines(list);
-      } catch (err: any) {
-        setError(err?.message || 'Failed to load machines');
-      } finally {
-        setLoading(false);
-      }
+  const [currentScreen, setCurrentScreen] = useState<'machines' | 'new-task' | 'live-task'>('machines');
+  const [selectedMachine, setSelectedMachine] = useState<MachineRow | null>(null);
+  const [activeTask, setActiveTask] = useState<TaskRow | null>(null);
+  const [submittingTask, setSubmittingTask] = useState(false);
+
+  async function loadMachines() {
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await apiClient.listMachines();
+      setMachines(list);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load machines');
+    } finally {
+      setLoading(false);
     }
-    load();
+  }
+
+  useEffect(() => {
+    loadMachines();
   }, []);
+
+  const handleSelectMachine = (machine: MachineRow) => {
+    setSelectedMachine(machine);
+    setCurrentScreen('new-task');
+  };
+
+  const handleCreateTask = async (prompt: string, kind: TaskKind, mode: TaskMode) => {
+    if (!selectedMachine) return;
+    setSubmittingTask(true);
+    try {
+      const task = await apiClient.createTask({
+        machine_id: selectedMachine.id,
+        prompt,
+        kind,
+        mode,
+      });
+      setActiveTask(task);
+      setCurrentScreen('live-task');
+    } catch (err: any) {
+      alert(err?.message || 'Failed to create task');
+    } finally {
+      setSubmittingTask(false);
+    }
+  };
 
   return (
     <div className="app-container">
@@ -29,49 +64,38 @@ export function App() {
       </header>
 
       <main>
-        <div style={{ marginBottom: 16 }}>
-          <h2 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-            Available Machines
-          </h2>
-        </div>
-
-        {loading && (
-          <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-            Loading machines...
-          </div>
-        )}
-
         {error && (
-          <div className="card" style={{ borderColor: 'var(--accent-rose)', color: 'var(--accent-rose)' }}>
+          <div className="card" style={{ borderColor: 'var(--accent-rose)', color: 'var(--accent-rose)', marginBottom: 16 }}>
             {error}
           </div>
         )}
 
-        {!loading && !error && machines.length === 0 && (
-          <div className="card" data-testid="machines-placeholder" style={{ textAlign: 'center', padding: '32px 16px' }}>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 8 }}>No machines connected</p>
-            <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-              Run <code>remote-hands daemon</code> on your computer to pair.
-            </p>
-          </div>
+        {currentScreen === 'machines' && (
+          <MachinesScreen
+            machines={machines}
+            onSelectMachine={handleSelectMachine}
+            onRefresh={loadMachines}
+            loading={loading}
+          />
         )}
 
-        {!loading && !error && machines.length > 0 && (
-          <div>
-            {machines.map((machine) => (
-              <div key={machine.id} className="card" style={{ cursor: 'pointer' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <strong>{machine.name}</strong>
-                  <span className={`badge ${machine.status === 'online' ? 'badge-online' : 'badge-offline'}`}>
-                    {machine.status}
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  {machine.hostname}
-                </div>
-              </div>
-            ))}
-          </div>
+        {currentScreen === 'new-task' && selectedMachine && (
+          <NewTaskScreen
+            machine={selectedMachine}
+            onCreateTask={handleCreateTask}
+            onCancel={() => setCurrentScreen('machines')}
+            loading={submittingTask}
+          />
+        )}
+
+        {currentScreen === 'live-task' && activeTask && (
+          <LiveTaskScreen
+            task={activeTask}
+            onBack={() => {
+              setActiveTask(null);
+              setCurrentScreen('machines');
+            }}
+          />
         )}
       </main>
     </div>
