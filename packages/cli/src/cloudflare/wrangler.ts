@@ -13,8 +13,20 @@ export async function createD1Database(
   dbName: string,
   runner: CommandRunner,
 ): Promise<{ databaseId: string; databaseName: string }> {
-  const res = await runner('npx', ['wrangler', 'd1', 'create', dbName, '--json']);
+  const res = await runner('npx', ['wrangler', 'd1', 'create', dbName]);
   if (res.exitCode !== 0) {
+    if (res.stderr?.includes('already exists') || res.stdout?.includes('already exists')) {
+      const listRes = await runner('npx', ['wrangler', 'd1', 'list', '--json']);
+      if (listRes.exitCode === 0) {
+        try {
+          const list = JSON.parse(listRes.stdout);
+          const found = list.find((item: any) => item.name === dbName);
+          if (found?.uuid) {
+            return { databaseId: found.uuid, databaseName: dbName };
+          }
+        } catch {}
+      }
+    }
     throw new Error(`Failed to create D1 database: ${res.stderr || res.stdout}`);
   }
 

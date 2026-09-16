@@ -44,7 +44,19 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
   return 1;
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1])) {
+import { fileURLToPath } from 'node:url';
+import { realpathSync } from 'node:fs';
+
+function isEntrypoint(): boolean {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isEntrypoint()) {
   main(process.argv.slice(2)).then((code) => {
     if (code !== 0) process.exit(code);
   });

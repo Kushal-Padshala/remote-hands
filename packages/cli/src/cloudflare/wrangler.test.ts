@@ -43,7 +43,7 @@ describe('Wrangler Automation', () => {
     expect(result.databaseName).toBe('remote-hands-db');
     expect(executed[0]).toEqual({
       cmd: 'npx',
-      args: ['wrangler', 'd1', 'create', 'remote-hands-db', '--json'],
+      args: ['wrangler', 'd1', 'create', 'remote-hands-db'],
     });
   });
 
