@@ -15,7 +15,12 @@ describe('Setup Command Flow', () => {
     const mockRunner: CommandRunner = async (cmd, args) => {
       const full = `${cmd} ${args.join(' ')}`;
       executedCommands.push(full);
-
+      if (cmd === 'which' && args[0] === 'browser-harness') {
+        return { exitCode: 0, stdout: '/bin/browser-harness', stderr: '' };
+      }
+      if (cmd === 'browser-harness' && args[0] === 'skill') {
+        return { exitCode: 0, stdout: '---\nname: browser-harness\n---', stderr: '' };
+      }
       if (args.includes('whoami')) {
         return { exitCode: 0, stdout: 'Logged in as user@example.com', stderr: '' };
       }
@@ -108,7 +113,12 @@ describe('Setup Command Flow', () => {
     const mockRunner: CommandRunner = async (cmd, args) => {
       const full = `${cmd} ${args.join(' ')}`;
       executedCommands.push(full);
-
+      if (cmd === 'which' && args[0] === 'browser-harness') {
+        return { exitCode: 0, stdout: '/bin/browser-harness', stderr: '' };
+      }
+      if (cmd === 'browser-harness' && args[0] === 'skill') {
+        return { exitCode: 0, stdout: '---\nname: browser-harness\n---', stderr: '' };
+      }
       if (args.includes('whoami')) {
         if (!authenticated) {
           return { exitCode: 0, stdout: 'You are not authenticated.', stderr: '' };

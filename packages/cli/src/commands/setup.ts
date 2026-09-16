@@ -11,6 +11,7 @@ import {
   type CommandRunner,
 } from '../cloudflare/wrangler.js';
 import { writeWranglerConfig, defaultFileSystem, type FileSystemAdapter } from '../cloudflare/project.js';
+import { ensureBrowserHarness } from '../system/browser-harness.js';
 import { generatePairingUrl } from '../pairing/qr.js';
 import { formatPairingSummary } from '../output/messages.js';
 
@@ -78,6 +79,9 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     stdout('Cloudflare authentication successful!');
     stdout('');
   }
+
+  stdout('Verifying browser automation harness (browser-use)...');
+  await ensureBrowserHarness(runner, projectRoot, stdout, stderr, fs);
 
   stdout('Creating D1 SQLite database...');
   const d1 = await createD1Database('remote-hands-db', runner);
