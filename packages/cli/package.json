@@ -1,0 +1,21 @@
+{
+  "name": "remote-hands",
+  "version": "0.1.0",
+  "description": "Phone-operated remote hands agentic coding control plane",
+  "bin": {
+    "remote-hands": "./dist/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck:tests": "tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@remote-hands/daemon": "0.0.0",
+    "@remote-hands/shared": "0.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "vitest": "^5.0.1"
+  }
+}

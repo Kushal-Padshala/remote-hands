@@ -5,7 +5,8 @@
     { "path": "./packages/daemon" },
     { "path": "./packages/control-plane" },
     { "path": "./apps/cloudflare" },
-    { "path": "./apps/web" }
+    { "path": "./apps/web" },
+    { "path": "./packages/cli" }
   ]
 }
 
