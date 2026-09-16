@@ -14,5 +14,20 @@ radius before you run it.
 
 ## Status
 
-Under construction. See `docs/superpowers/specs/` for the design and
-`docs/superpowers/plans/` for the implementation plan.
+Foundation only. There is no daemon, no phone app, no browser integration,
+and no approval gate yet — none of it runs. What exists today:
+
+- A Supabase schema (`supabase/migrations`) for four tables — `machines`,
+  `tasks`, `events`, `approvals` — each with row-level security enabled in
+  the migration that creates it, isolating one user's data from another's.
+- Two invariants proved by a two-user test suite: the event log is
+  append-only, and a task can't be queued onto a machine the caller can't
+  see. See `docs/architecture/control-plane.md` for the schema and the
+  tests that prove it.
+- Shared TypeScript types and runtime (Zod) validation for these shapes in
+  `packages/shared`, type-checked against the generated database schema so
+  the two can't silently drift apart.
+
+See `docs/development.md` to set up and run the tests locally, and
+`docs/superpowers/specs/` and `docs/superpowers/plans/` for the design and
+the sequenced plan this came from.
