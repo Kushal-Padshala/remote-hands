@@ -1,0 +1,22 @@
+{
+  "name": "remote-hands",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "engines": { "node": ">=22.0.0" },
+  "workspaces": ["packages/*", "apps/*", "supabase"],
+  "scripts": {
+    "typecheck": "tsc --build --verbose && npm run --workspaces --if-present typecheck:tests",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:start": "npx --yes supabase@latest start",
+    "db:stop": "npx --yes supabase@latest stop",
+    "db:reset": "npx --yes supabase@latest db reset",
+    "db:types": "npx --yes supabase@latest gen types typescript --local > packages/shared/src/database.generated.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^5.0.1",
+    "@types/node": "^22.0.0"
+  }
+}

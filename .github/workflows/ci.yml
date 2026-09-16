@@ -1,0 +1,39 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test -- --passWithNoTests packages/shared
+  db:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - uses: supabase/setup-cli@v1
+        with: { version: latest }
+      - run: supabase start
+      - name: Export local keys
+        run: |
+          echo "SUPABASE_URL=$(supabase status -o json | jq -r .API_URL)" >> $GITHUB_ENV
+          echo "SUPABASE_ANON_KEY=$(supabase status -o json | jq -r .ANON_KEY)" >> $GITHUB_ENV
+          echo "SUPABASE_SERVICE_ROLE_KEY=$(supabase status -o json | jq -r .SERVICE_ROLE_KEY)" >> $GITHUB_ENV
+      - run: npm ci
+      - run: npm run test -- supabase
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

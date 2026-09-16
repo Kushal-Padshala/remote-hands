@@ -1,0 +1,17 @@
+{
+  "name": "@remote-hands/db-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "typecheck:tests": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.0"
+  }
+}

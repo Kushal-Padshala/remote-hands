@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest an idea or improvement for remote-hands.
+title: "[feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What problem are you trying to solve? What's missing or awkward today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would you like to see happen?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other approaches you thought about, and why you didn't prefer them.
+    validations:
+      required: false
+  - type: dropdown
+    id: implement
+    attributes:
+      label: Would you like to implement this yourself?
+      description: If yes, see CONTRIBUTING.md for how the project works (test-first, commit conventions, security rules).
+      options:
+        - "Yes, I'd like to work on this"
+        - "No, I'm just suggesting it"
+        - "Maybe, depends on guidance"
+    validations:
+      required: true
