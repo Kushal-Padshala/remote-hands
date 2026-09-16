@@ -2,7 +2,7 @@
 
 This describes the Supabase schema in `supabase/migrations`: four tables,
 the row-level security policies that isolate one user's data from another's,
-and the three invariants the test suite proves hold.
+and the four invariants the test suite proves hold.
 
 Nothing in this repository writes to these tables yet. There is no daemon
 and no phone app — see the README's Status section. The "writes" and "reads"
@@ -123,11 +123,12 @@ A request to pause an irreversible action until a human decides.
 changes instead of polling. `machines` is not published; heartbeat status is
 read on demand.
 
-## The three invariants
+## The four invariants
 
-These are the properties Plan 1 exists to guarantee. All three are proved by
-tests in `supabase/tests/rls.test.ts`, run against a real local Postgres
-instance with RLS enabled — not asserted against application code.
+These are the properties Plan 1 exists to guarantee. All four are proved by
+tests in `supabase/tests/rls.test.ts` and `supabase/tests/schema-invariants.test.ts`,
+run against a real local Postgres instance with RLS enabled — not asserted against
+application code.
 
 ### 1. Events are append-only
 
@@ -230,3 +231,29 @@ Proved by tests in `supabase/tests/rls.test.ts`:
   `a second user cannot update someone else approval`) proves the rest of
   `approvals`' isolation, mirroring the coverage `machines`, `tasks` and
   `events` already had.
+
+### 4. Every foreign key into a user-owned table is guarded by an ownership check
+
+A foreign key reference does not pass through row-level security. The same
+vulnerability class was found three times by hand in this schema:
+`tasks.machine_id`, `events.task_id`/`approvals.task_id`, and `tasks.parent_task_id`.
+
+Because `parent_task_id` is a nullable, self-referencing foreign key into `tasks`,
+`20260916135039_restrict_parent_task_ownership.sql` ensures both the INSERT and UPDATE
+policies on `tasks` check:
+
+```sql
+(parent_task_id is null or task_belongs_to_current_user(parent_task_id))
+```
+
+Proved by tests in `supabase/tests/rls.test.ts`:
+
+- **`a second user > cannot create a task referencing someone else task as parent`**
+- **`a second user > cannot update a task to reference someone else task as parent`**
+- **`a second user > can create a task referencing their own task as parent`**
+
+Mechanically enforced by **`supabase/tests/schema-invariants.test.ts`**:
+The test inspects Postgres's `pg_constraint` catalog for every foreign key in `public`
+referencing a table with a `user_id` column. It asserts that the referencing table's
+INSERT policy contains an ownership check (`auth.uid() = <col>` or `*_belongs_to_current_user(<col>)`).
+If a newly added table or foreign key lacks this check, the test fails automatically.
