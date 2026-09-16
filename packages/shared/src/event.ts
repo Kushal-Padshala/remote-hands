@@ -88,6 +88,27 @@ const envelope = z.object({
   payload: z.unknown(),
 });
 
+export const eventInputSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('agent_text'), payload: agentText }),
+  z.object({ kind: z.literal('thinking'), payload: thinking }),
+  z.object({ kind: z.literal('tool_call'), payload: toolCall }),
+  z.object({ kind: z.literal('tool_result'), payload: toolResult }),
+  z.object({ kind: z.literal('file_diff'), payload: fileDiff }),
+  z.object({ kind: z.literal('command_output'), payload: commandOutput }),
+  z.object({ kind: z.literal('browser_action'), payload: browserAction }),
+  z.object({ kind: z.literal('status'), payload: status }),
+  z.object({ kind: z.literal('approval_requested'), payload: approvalRequested }),
+  z.object({ kind: z.literal('error'), payload: errorPayload }),
+  z.object({ kind: z.literal('result'), payload: result }),
+]);
+
+export type EventInput<K extends EventKind = EventKind> = {
+  [Kind in K]: {
+    kind: Kind;
+    payload: EventPayload<Kind>;
+  };
+}[K];
+
 export function parseEvent(row: unknown): TaskEvent {
   const shell = envelope.parse(row);
   const payload = eventPayloadSchemas[shell.kind].parse(shell.payload);
@@ -107,3 +128,4 @@ export function safeParseEvent(
     return { ok: false, error: message };
   }
 }
+
