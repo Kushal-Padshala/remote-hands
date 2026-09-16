@@ -3,23 +3,34 @@
   "version": "0.1.0",
   "description": "Phone-operated remote hands agentic coding control plane",
   "bin": {
-    "remote-hands": "./dist/index.js",
-    "rh": "./dist/index.js"
+    "remote-hands": "dist/index.js",
+    "rh": "dist/index.js"
   },
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Kushal-Padshala/remote-hands.git"
+  },
+  "files": [
+    "dist",
+    "apps"
+  ],
   "scripts": {
-    "build": "tsc --build",
+    "build": "tsc --build && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --external:qrcode",
+    "prepack": "mkdir -p apps && cp -R ../../apps/cloudflare apps/ && cp -R ../../apps/web apps/",
     "typecheck:tests": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@remote-hands/control-plane": "0.0.0",
-    "@remote-hands/daemon": "0.0.0",
-    "@remote-hands/shared": "0.0.0",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
+    "@remote-hands/control-plane": "0.0.0",
+    "@remote-hands/daemon": "0.0.0",
+    "@remote-hands/shared": "0.0.0",
     "@types/node": "^22.0.0",
     "@types/qrcode": "^1.5.6",
+    "esbuild": "^0.25.12",
     "vitest": "^5.0.1"
   }
 }

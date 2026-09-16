@@ -11,3 +11,4 @@ coverage/
 .superpowers/
 .claude/
 .wrangler/
+packages/cli/apps/
