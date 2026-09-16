@@ -1,0 +1,84 @@
+name: Bug report
+description: Report something that isn't working as expected.
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please do not use this
+        form to report a security vulnerability — see SECURITY.md for how to
+        report those privately instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: A clear description of the bug you ran into.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: What you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact steps that trigger the bug, in order.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which component
+      description: Which part of remote-hands this affects.
+      options:
+        - daemon
+        - phone app
+        - browser layer
+        - approval gate
+        - database
+        - docs
+    validations:
+      required: true
+  - type: input
+    id: agy-version
+    attributes:
+      label: agy --version output
+      placeholder: e.g. 1.2.4
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS and Node version
+      placeholder: e.g. macOS 15.1, Node 22.22
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: >-
+        Paste any relevant logs or error output. This will be automatically
+        formatted as code, no need for backticks.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: no-secrets
+    attributes:
+      label: Confirmation
+      options:
+        - label: >-
+            I have checked the logs and screenshots I'm about to paste and
+            confirmed they do not contain secrets, API keys, tokens, or
+            session cookies.
+          required: true
