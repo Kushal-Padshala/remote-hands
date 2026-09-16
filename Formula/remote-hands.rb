@@ -1,7 +1,7 @@
 class RemoteHands < Formula
   desc "Autonomous phone-operated agentic coding control plane"
   homepage "https://github.com/Kushal-Padshala/remote-hands"
-  url "https://registry.npmjs.org/remote-hands-cli/-/remote-hands-cli-0.1.2.tgz"
+  url "https://registry.npmjs.org/remote-hands-cli/-/remote-hands-cli-0.1.3.tgz"
   license "MIT"
 
   depends_on "node"

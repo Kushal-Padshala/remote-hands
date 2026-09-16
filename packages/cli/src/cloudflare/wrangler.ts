@@ -165,6 +165,13 @@ export async function deployWebApp(
     res = await runner('npx', ['wrangler', 'deploy'], { cwd, env: { CI: 'true' } });
   }
   if (res.exitCode !== 0) {
+    res = await runner(
+      'npx',
+      ['wrangler', 'pages', 'deploy', 'dist', '--project-name', 'remote-hands-web', '--force'],
+      { cwd, env: { CI: 'true' } },
+    );
+  }
+  if (res.exitCode !== 0) {
     throw new Error(`Failed to deploy web app: ${res.stderr || res.stdout}`);
   }
 
