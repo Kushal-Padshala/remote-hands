@@ -110,7 +110,25 @@ remote-hands/
 ### Prerequisites
 
 - **Node.js**: `>=22.0.0`
-- **Cloudflare Account**: Free plan (optional Supabase adapter available for custom deployments)
+- **Cloudflare Account**: Free plan (no credit card required)
+
+### One-Command Setup
+
+Set up your personal free backend in under 10 minutes (no Supabase project, Vercel deploy, or Docker required):
+
+```bash
+# Run guided free setup wizard
+npx remote-hands setup --free
+
+# Start local daemon
+npx remote-hands daemon
+```
+
+For step-by-step instructions and troubleshooting:
+- [Cloudflare Free Setup Guide](docs/cloudflare-free-setup.md)
+- [Troubleshooting Guide](docs/troubleshooting.md)
+
+### Developer Installation
 
 ```bash
 # Clone repository
