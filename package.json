@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "license": "MIT",
   "engines": { "node": ">=22.0.0" },
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": ["packages/*", "apps/*", "supabase"],
   "scripts": {
     "typecheck": "tsc --build --verbose && npm run --workspaces --if-present typecheck:tests",
     "test": "vitest run",
