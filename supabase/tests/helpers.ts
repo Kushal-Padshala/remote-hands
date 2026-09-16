@@ -1,9 +1,11 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
+import { Client as PgClient } from 'pg';
 
 const url = process.env.SUPABASE_URL ?? 'http://127.0.0.1:54321';
 const anonKey = process.env.SUPABASE_ANON_KEY;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const dbUrl = process.env.SUPABASE_DB_URL ?? 'postgresql://postgres:postgres@127.0.0.1:54322/postgres';
 
 if (!anonKey || !serviceKey) {
   throw new Error(
@@ -14,6 +16,10 @@ if (!anonKey || !serviceKey) {
 /** Service role is permitted here and nowhere else in the repository. */
 export function createServiceClient(): SupabaseClient {
   return createClient(url, serviceKey!, { auth: { persistSession: false } });
+}
+
+export function createDbClient(): PgClient {
+  return new PgClient({ connectionString: dbUrl });
 }
 
 export interface TestUser {
