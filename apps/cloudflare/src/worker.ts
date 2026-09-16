@@ -3,7 +3,7 @@ import type { Env } from './env.js';
 import { TaskRoom } from './durable-objects/task-room.js';
 export { TaskRoom };
 import { HttpError } from './http/errors.js';
-import { jsonError, jsonOk } from './http/json.js';
+import { jsonError, jsonOk, corsHeaders } from './http/json.js';
 import { handleSetupOwner } from './routes/setup.js';
 import { handleStartPairing, handleClaimPairing, handleCreatePhoneSession } from './routes/pairing.js';
 import { handleListMachines, handleGetMachine, handleMachineHeartbeat } from './routes/machines.js';
@@ -26,6 +26,13 @@ export default {
       const url = new URL(request.url);
       const { pathname } = url;
       const method = request.method.toUpperCase();
+
+      if (method === 'OPTIONS') {
+        return new Response(null, {
+          status: 204,
+          headers: corsHeaders,
+        });
+      }
 
       if (method === 'GET' && pathname === '/health') {
         return jsonOk({ ok: true });

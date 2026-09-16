@@ -101,6 +101,22 @@ export function App() {
       }
     }
     loadMachines();
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadMachines();
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibilityChange);
+    }
+    const interval = setInterval(loadMachines, 10000);
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+      }
+      clearInterval(interval);
+    };
   }, []);
 
   const handleSelectMachine = (machine: MachineRow) => {
