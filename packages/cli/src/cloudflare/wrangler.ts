@@ -117,6 +117,7 @@ export async function applyD1Migrations(
 ): Promise<void> {
   const res = await runner('npx', ['wrangler', 'd1', 'migrations', 'apply', dbName, '--remote'], {
     cwd,
+    env: { CI: 'true' },
   });
   if (res.exitCode !== 0) {
     throw new Error(`Failed to apply D1 migrations: ${res.stderr || res.stdout}`);
@@ -158,7 +159,7 @@ export async function deployWebApp(
   const res = await runner(
     'npx',
     ['wrangler', 'pages', 'deploy', 'dist', '--project-name', 'remote-hands-web'],
-    { cwd },
+    { cwd, env: { CI: 'true' } },
   );
   if (res.exitCode !== 0) {
     throw new Error(`Failed to deploy web app: ${res.stderr || res.stdout}`);

@@ -10,3 +10,4 @@ supabase/.branches/
 coverage/
 .superpowers/
 .claude/
+.wrangler/

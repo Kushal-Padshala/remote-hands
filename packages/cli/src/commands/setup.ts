@@ -91,14 +91,22 @@ export async function setupCommand(args: string[], context: CommandContext = {})
 
   const ownerSecret = (crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '')).slice(0, 32);
 
-  const setupRes = await fetchFn(`${apiUrl}/setup/owner`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ owner_secret: ownerSecret }),
-  });
+  let setupRes: Response | undefined;
+  for (let attempt = 0; attempt < 15; attempt++) {
+    try {
+      setupRes = await fetchFn(`${apiUrl}/setup/owner`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner_secret: ownerSecret }),
+      });
+      if (setupRes.ok || setupRes.status < 500) break;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
 
-  if (!setupRes.ok) {
-    stderr(`Failed to initialize owner secret on Worker: ${await setupRes.text()}`);
+  if (!setupRes || !setupRes.ok) {
+    stderr(`Failed to initialize owner secret on Worker: ${setupRes ? await setupRes.text() : 'network failure'}`);
     return 1;
   }
 
@@ -116,6 +124,23 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     const pairingData: any = await pairingRes.json();
     pairingCode = pairingData.pairing_code ?? pairingCode;
   }
+
+  const configDir = context.configDir ?? path.join(os.homedir(), '.remote-hands');
+  const daemonConfigFile = path.join(configDir, 'daemon.json');
+  try {
+    await fs.writeFile(
+      daemonConfigFile,
+      JSON.stringify(
+        {
+          cloudflareApiUrl: apiUrl,
+          sessionToken: ownerSecret,
+          machineName: os.hostname() || 'primary-laptop',
+        },
+        null,
+        2,
+      ),
+    );
+  } catch {}
 
   stdout('Deploying phone web app...');
   const webRes = await deployWebApp(runner, path.join(projectRoot, 'apps/web'));

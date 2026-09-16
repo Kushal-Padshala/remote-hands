@@ -1,4 +1,5 @@
 import { promises as nodeFs } from 'node:fs';
+import * as path from 'node:path';
 
 export interface FileSystemAdapter {
   readFile: (path: string) => Promise<string>;
@@ -8,7 +9,10 @@ export interface FileSystemAdapter {
 
 export const defaultFileSystem: FileSystemAdapter = {
   readFile: (p) => nodeFs.readFile(p, 'utf-8'),
-  writeFile: (p, content) => nodeFs.writeFile(p, content, 'utf-8'),
+  writeFile: async (p, content) => {
+    await nodeFs.mkdir(path.dirname(p), { recursive: true });
+    await nodeFs.writeFile(p, content, 'utf-8');
+  },
   exists: async (p) => {
     try {
       await nodeFs.access(p);
@@ -26,9 +30,13 @@ export async function writeWranglerConfig(
 ): Promise<void> {
   const content = await fs.readFile(configPath);
 
-  const updated = content.replace(
+  let updated = content.replace(
     /"database_id":\s*"[^"]*"/,
     `"database_id": "${options.dbId}"`,
+  );
+  updated = updated.replace(
+    /"database_name":\s*"[^"]*"/,
+    `"database_name": "${options.dbName}"`,
   );
 
   await fs.writeFile(configPath, updated);
