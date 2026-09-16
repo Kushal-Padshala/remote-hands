@@ -1,0 +1,21 @@
+{
+  "name": "remote-hands",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "engines": { "node": ">=22.0.0" },
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "typecheck": "tsc --build --verbose",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:start": "npx --yes supabase@latest start",
+    "db:stop": "npx --yes supabase@latest stop",
+    "db:reset": "npx --yes supabase@latest db reset"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "@types/node": "^22.0.0"
+  }
+}
