@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import type { Env } from './env.js';
+import { TaskRoom } from './durable-objects/task-room.js';
+export { TaskRoom };
 import { HttpError } from './http/errors.js';
+
 import { jsonError, jsonOk } from './http/json.js';
 import { handleSetupOwner } from './routes/setup.js';
 import { handleStartPairing, handleClaimPairing } from './routes/pairing.js';
