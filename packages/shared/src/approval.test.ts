@@ -61,3 +61,46 @@ describe('resolveDecision', () => {
     expect(resolveDecision(approval(), at('2026-09-16T10:01:00.000Z'))).toBe('pending');
   });
 });
+
+describe('expiry boundary', () => {
+  // All three instants are derived from the same deadline so the
+  // millisecond offsets are unambiguous, rather than hand-written ISO
+  // strings whose one-millisecond difference would be easy to miss.
+  const deadline = approval().expires_at;
+  const deadlineMs = Date.parse(deadline);
+  const oneMsBefore = new Date(deadlineMs - 1);
+  const atDeadline = at(deadline);
+  const oneMsAfter = new Date(deadlineMs + 1);
+
+  it('is still pending exactly at expires_at: the deadline has not yet passed', () => {
+    const a = approval();
+    expect(isPending(a, atDeadline)).toBe(true);
+    expect(hasExpired(a, atDeadline)).toBe(false);
+    expect(resolveDecision(a, atDeadline)).toBe('pending');
+  });
+
+  it('has expired one millisecond after expires_at', () => {
+    const a = approval();
+    expect(isPending(a, oneMsAfter)).toBe(false);
+    expect(hasExpired(a, oneMsAfter)).toBe(true);
+    expect(resolveDecision(a, oneMsAfter)).toBe('expired');
+  });
+
+  it('is still pending one millisecond before expires_at', () => {
+    const a = approval();
+    expect(isPending(a, oneMsBefore)).toBe(true);
+    expect(hasExpired(a, oneMsBefore)).toBe(false);
+    expect(resolveDecision(a, oneMsBefore)).toBe('pending');
+  });
+
+  it('agrees across isPending, hasExpired and resolveDecision at every boundary instant', () => {
+    for (const now of [oneMsBefore, atDeadline, oneMsAfter]) {
+      const a = approval();
+      const pending = isPending(a, now);
+      const expired = hasExpired(a, now);
+      // Exact logical complements: never both true, never both false.
+      expect(pending).toBe(!expired);
+      expect(resolveDecision(a, now)).toBe(pending ? 'pending' : 'expired');
+    }
+  });
+});
