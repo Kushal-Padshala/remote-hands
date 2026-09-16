@@ -25,12 +25,12 @@ The name draws inspiration from data center operations: **remote hands** refers 
 Terminal-based remote agent controllers work for pure coding tasks, but fail for browser actions. A log line reading `click_at_xy(412, 380)` gives zero indication whether the agent is about to submit a form, publish a post, or charge a credit card.
 
 | Feature | `remote-hands` | Standard Terminal Bridges | Cloud Agent Browsers |
-|---|---|---|---|
-| **Controlled from Mobile** | Yes | Yes | Yes |
-| **Uses Your Real Signed-in Browser** | Yes (Local Chrome profile) | No | No (Ephemeral cloud browser) |
-| **Live Visual Stream** | Yes (Real screenshots) | No (Text terminal only) | Yes |
-| **Human-in-the-Loop Approval Gate** | Yes (Deny-on-timeout) | Partial | Rare |
-| **Self-Hostable Open Source** | Yes | Yes | No |
+|---|:---:|:---:|:---:|
+| 📱 **Controlled from Mobile** | ✅ Yes | ✅ Yes | ✅ Yes |
+| 🌐 **Uses Your Real Signed-in Browser** | ✅ Yes (Local Chrome) | ❌ No | ❌ No (Cloud sandbox) |
+| 📸 **Live Visual Stream** | ✅ Yes (Real screenshots) | ❌ No (Terminal text only) | ✅ Yes |
+| 🛡️ **Human-in-the-Loop Approval Gate** | ✅ Yes (Deny-on-timeout) | ⚠️ Partial | ⚠️ Rare |
+| 💻 **Self-Hostable Open Source** | ✅ Yes | ✅ Yes | ❌ No |
 
 ---
 
