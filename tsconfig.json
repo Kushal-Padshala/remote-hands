@@ -3,7 +3,9 @@
   "references": [
     { "path": "./packages/shared" },
     { "path": "./packages/daemon" },
-    { "path": "./packages/control-plane" }
+    { "path": "./packages/control-plane" },
+    { "path": "./apps/cloudflare" }
   ]
 }
+
 

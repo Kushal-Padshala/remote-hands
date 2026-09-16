@@ -10,7 +10,8 @@ try {
 
 export default defineConfig({
   test: {
-    projects: ['packages/*', 'supabase'],
+    projects: ['packages/*', 'apps/*', 'supabase'],
     exclude: ['**/node_modules/**', '**/.git/**', '**/.claude/**'],
   },
+
 });
