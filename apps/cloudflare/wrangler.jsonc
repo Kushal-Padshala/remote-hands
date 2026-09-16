@@ -8,7 +8,7 @@
     {
       "binding": "DB",
       "database_name": "remote-hands-db",
-      "database_id": "remote-hands-db-placeholder",
+      "database_id": "d989462c-6152-47c1-bd8e-cd50fe565037",
       "migrations_dir": "migrations"
     }
   ],

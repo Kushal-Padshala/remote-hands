@@ -5,7 +5,7 @@ export { TaskRoom };
 import { HttpError } from './http/errors.js';
 import { jsonError, jsonOk } from './http/json.js';
 import { handleSetupOwner } from './routes/setup.js';
-import { handleStartPairing, handleClaimPairing } from './routes/pairing.js';
+import { handleStartPairing, handleClaimPairing, handleCreatePhoneSession } from './routes/pairing.js';
 import { handleListMachines, handleGetMachine, handleMachineHeartbeat } from './routes/machines.js';
 import {
   handleCreateTask,
@@ -51,6 +51,10 @@ export default {
 
       if (method === 'POST' && pathname === '/pairing/claim') {
         return await handleClaimPairing(request, env);
+      }
+
+      if (method === 'POST' && pathname === '/pairing/phone-session') {
+        return await handleCreatePhoneSession(request, env);
       }
 
       if (method === 'GET' && pathname === '/machines') {

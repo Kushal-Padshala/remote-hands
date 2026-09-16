@@ -17,6 +17,42 @@ export function App() {
   const [submittingTask, setSubmittingTask] = useState(false);
   const [showPairModal, setShowPairModal] = useState(false);
   const [pairingCode, setPairingCode] = useState<string | undefined>(undefined);
+  const [pasteUrlInput, setPasteUrlInput] = useState('');
+
+  const handleClearCache = () => {
+    try {
+      localStorage.removeItem('rh_token');
+      localStorage.removeItem('rh_pairing_code');
+      localStorage.removeItem('rh_api_url');
+    } catch {}
+    setPairingCode(undefined);
+    setError(null);
+    setMachines([]);
+    if (typeof window !== 'undefined') {
+      window.location.href = window.location.origin;
+    }
+  };
+
+  const handleConnectUrl = (rawUrl: string) => {
+    try {
+      const parsed = new URL(rawUrl.trim());
+      const secret = parsed.searchParams.get('secret') || parsed.searchParams.get('token');
+      const api = parsed.searchParams.get('api');
+      const code = parsed.searchParams.get('code');
+      if (api) apiClient.setBaseUrl(api);
+      if (secret) apiClient.setToken(secret);
+      if (code) {
+        setPairingCode(code);
+        try {
+          localStorage.setItem('rh_pairing_code', code);
+        } catch {}
+      }
+      setPasteUrlInput('');
+      loadMachines();
+    } catch {
+      alert('Invalid pairing URL');
+    }
+  };
 
   async function loadMachines() {
     setLoading(true);
@@ -25,7 +61,14 @@ export function App() {
       const list = await apiClient.listMachines();
       setMachines(list);
     } catch (err: any) {
-      setError(err?.message || 'Failed to load machines');
+      const msg = err?.message || 'Failed to load machines';
+      setError(msg);
+      if (msg.includes('Valid session token required') || msg.includes('401') || msg.includes('Unauthorized')) {
+        setPairingCode(undefined);
+        try {
+          localStorage.removeItem('rh_pairing_code');
+        } catch {}
+      }
     } finally {
       setLoading(false);
     }
@@ -91,13 +134,22 @@ export function App() {
           <h1>Remote Hands</h1>
           <span className="badge badge-online">PWA</span>
         </div>
-        <button
-          className="btn"
-          style={{ width: 'auto', padding: '6px 12px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}
-          onClick={() => setShowPairModal(true)}
-        >
-          📱 QR Code
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            className="btn"
+            style={{ width: 'auto', padding: '6px 10px', fontSize: '0.75rem' }}
+            onClick={handleClearCache}
+          >
+            Reset
+          </button>
+          <button
+            className="btn"
+            style={{ width: 'auto', padding: '6px 12px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}
+            onClick={() => setShowPairModal(true)}
+          >
+            📱 QR Code
+          </button>
+        </div>
       </header>
 
       <main>
@@ -128,8 +180,44 @@ export function App() {
         )}
 
         {error && (
-          <div className="card" style={{ borderColor: 'var(--accent-rose)', color: 'var(--accent-rose)', marginBottom: 16 }}>
-            {error}
+          <div className="card" style={{ borderColor: 'var(--accent-rose)', marginBottom: 16 }}>
+            <div style={{ color: 'var(--accent-rose)', fontWeight: 600, marginBottom: 8 }}>
+              {error.includes('session token') ? 'Phone Not Paired' : error}
+            </div>
+            {error.includes('session token') && (
+              <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                <p style={{ marginBottom: 10 }}>
+                  This device does not have an active session with your computer.
+                </p>
+                <p style={{ marginBottom: 10 }}>
+                  Run <code>rh pair</code> on your computer to view your pairing QR code or direct link.
+                </p>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12, marginBottom: 12 }}>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Paste pairing URL or token..."
+                    value={pasteUrlInput}
+                    onChange={(e) => setPasteUrlInput(e.target.value)}
+                    style={{ flex: 1, padding: '8px 12px', fontSize: '0.75rem' }}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    style={{ width: 'auto', padding: '8px 14px', fontSize: '0.75rem' }}
+                    onClick={() => handleConnectUrl(pasteUrlInput)}
+                  >
+                    Connect
+                  </button>
+                </div>
+                <button
+                  className="btn"
+                  style={{ width: 'auto', padding: '6px 12px', fontSize: '0.75rem' }}
+                  onClick={handleClearCache}
+                >
+                  Clear Cache
+                </button>
+              </div>
+            )}
           </div>
         )}
 

@@ -4,8 +4,9 @@ import { deployCommand } from './commands/deploy.js';
 import { daemonCommand } from './commands/daemon.js';
 import { startCommand } from './commands/start.js';
 import { doctorCommand } from './commands/doctor.js';
+import { pairCommand } from './commands/pair.js';
 
-export { setupCommand, deployCommand, daemonCommand, startCommand, doctorCommand, type CommandContext };
+export { setupCommand, deployCommand, daemonCommand, startCommand, doctorCommand, pairCommand, type CommandContext };
 
 export async function main(argv: string[], context: CommandContext = {}): Promise<number> {
   const stdout = context.stdout ?? console.log;
@@ -18,6 +19,7 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
     stdout('');
     stdout('Commands:');
     stdout('  start    Start daemon with lid-closed clamshell sleep prevention');
+    stdout('  pair     Display phone pairing QR code and direct link');
     stdout('  daemon   Run the local execution daemon');
     stdout('  setup    Set up Cloudflare resources and pair this computer');
     stdout('  deploy   Deploy backend Worker and phone PWA to Cloudflare');
@@ -28,6 +30,10 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
 
   if (command === 'start') {
     return await startCommand(args, context);
+  }
+
+  if (command === 'pair') {
+    return await pairCommand(args, context);
   }
 
   if (command === 'setup') {

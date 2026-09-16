@@ -8,7 +8,7 @@ import {
   hashPairingCode,
   canClaimPairingToken,
 } from '@remote-hands/control-plane';
-import { requireOwnerSession, createSessionToken, hashSessionToken } from '../auth/session.js';
+import { requireOwnerSession, requireSession, createSessionToken, hashSessionToken } from '../auth/session.js';
 import { PairingRepository } from '../d1/pairing-repository.js';
 import { MachinesRepository } from '../d1/machines-repository.js';
 import { SessionsRepository } from '../d1/sessions-repository.js';
@@ -117,3 +117,33 @@ export async function handleClaimPairing(request: Request, env: Env): Promise<Re
     201,
   );
 }
+
+export async function handleCreatePhoneSession(request: Request, env: Env): Promise<Response> {
+  const session = await requireSession(request, env.DB);
+  const now = new Date();
+  const rawSessionToken = createSessionToken();
+  const tokenHash = await hashSessionToken(rawSessionToken);
+  const sessionExpiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  const sessionsRepo = new SessionsRepository(env.DB);
+  await sessionsRepo.create({
+    id: randomUUID(),
+    owner_id: session.owner_id,
+    machine_id: null,
+    kind: 'phone',
+    token_hash: tokenHash,
+    expires_at: sessionExpiresAt,
+    created_at: now.toISOString(),
+  });
+
+  return jsonOk(
+    {
+      ok: true,
+      owner_id: session.owner_id,
+      session_token: rawSessionToken,
+      expires_at: sessionExpiresAt,
+    },
+    201,
+  );
+}
+

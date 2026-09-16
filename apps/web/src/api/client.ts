@@ -89,6 +89,11 @@ export class WebApiClient {
     }
 
     if (!res.ok) {
+      if (res.status === 401 && typeof localStorage !== 'undefined') {
+        try {
+          localStorage.removeItem('rh_token');
+        } catch {}
+      }
       const msg = json?.error || res.statusText || `Request failed with ${res.status}`;
       throw new Error(msg);
     }
