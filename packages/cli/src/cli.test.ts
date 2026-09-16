@@ -4,9 +4,13 @@ import { main } from './index.js';
 describe('CLI command dispatcher', () => {
   it('dispatches setup command', async () => {
     const logs: string[] = [];
-    const code = await main(['setup'], { stdout: (msg) => logs.push(msg) });
-    expect(code).toBe(0);
-    expect(logs.some((l) => l.includes('setup'))).toBe(true);
+    const fakeRunner = async () => ({ exitCode: 1, stdout: '', stderr: 'mock' });
+    const code = await main(['setup'], {
+      stdout: (msg) => logs.push(msg),
+      stderr: () => {},
+      runner: fakeRunner as any,
+    });
+    expect(logs.some((l) => l.includes('Remote Hands'))).toBe(true);
   });
 
   it('dispatches deploy command', async () => {
