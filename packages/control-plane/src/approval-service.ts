@@ -8,16 +8,17 @@ import {
 } from '@remote-hands/shared';
 
 export interface CreateApprovalParams {
-  id?: string;
+  id?: string | undefined;
   ownerId: string;
   taskId: string;
   actionKind: ActionKind;
   summary: string;
   risk: RiskLevel;
   toolPayload: unknown;
-  framePath?: string | null;
-  timeoutMs?: number;
+  framePath?: string | null | undefined;
+  timeoutMs?: number | undefined;
 }
+
 
 export function createApproval(params: CreateApprovalParams, now: Date = new Date()): ApprovalRow {
   const timeoutMs = params.timeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;

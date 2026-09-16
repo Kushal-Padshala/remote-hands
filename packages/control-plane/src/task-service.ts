@@ -8,17 +8,18 @@ import {
 } from '@remote-hands/shared';
 
 export interface CreateTaskParams {
-  id?: string;
+  id?: string | undefined;
   ownerId: string;
   machineId: string;
   prompt: string;
-  kind?: TaskKind;
-  workspacePath?: string | null;
-  model?: string | null;
-  effort?: string | null;
-  mode?: TaskMode;
-  parentTaskId?: string | null;
+  kind?: TaskKind | undefined;
+  workspacePath?: string | null | undefined;
+  model?: string | null | undefined;
+  effort?: string | null | undefined;
+  mode?: TaskMode | undefined;
+  parentTaskId?: string | null | undefined;
 }
+
 
 export function createTask(params: CreateTaskParams, now: Date = new Date()): Task & { owner_id: string } {
   return {
@@ -67,9 +68,10 @@ export function claimTask(task: Task, machineId: string, now: Date = new Date())
 
 export function completeTask(
   task: Task,
-  input: { summary: string; conversationId?: string | null },
+  input: { summary: string; conversationId?: string | null | undefined },
   now: Date = new Date(),
 ): Task {
+
   const transitioned = transitionTask(task, 'done');
   return {
     ...transitioned,

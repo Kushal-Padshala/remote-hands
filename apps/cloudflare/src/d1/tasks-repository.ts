@@ -2,12 +2,13 @@ import type { TaskRow } from '@remote-hands/shared';
 import type { D1Database } from '../env.js';
 
 export interface UpdateTaskStatusOptions {
-  started_at?: string | null;
-  finished_at?: string | null;
-  result_summary?: string | null;
-  error?: string | null;
-  conversation_id?: string | null;
+  started_at?: string | null | undefined;
+  finished_at?: string | null | undefined;
+  result_summary?: string | null | undefined;
+  error?: string | null | undefined;
+  conversation_id?: string | null | undefined;
 }
+
 
 export class TasksRepository {
   constructor(private db: D1Database) {}
