@@ -6,6 +6,7 @@ let mallory: TestUser;
 let aliceMachineId: string;
 let aliceTaskId: string;
 let aliceApprovalId: string;
+let malloryMachineId: string;
 
 beforeAll(async () => {
   alice = await createUser();
@@ -96,6 +97,78 @@ describe('a second user', () => {
       .from('tasks')
       .insert({ user_id: mallory.id, machine_id: aliceMachineId, prompt: 'exfiltrate' });
     expect(error).not.toBeNull();
+  });
+
+  describe('parent_task_id', () => {
+    beforeAll(async () => {
+      const { data: malloryMachine, error: mmErr } = await mallory.client
+        .from('machines')
+        .insert({ user_id: mallory.id, name: 'mallory-air', hostname: 'mallory-air.local' })
+        .select()
+        .single();
+      if (mmErr) throw mmErr;
+      malloryMachineId = malloryMachine.id;
+    }, 60_000);
+
+    it('cannot create a task whose parent_task_id points at someone else task', async () => {
+      const { error } = await mallory.client.from('tasks').insert({
+        user_id: mallory.id,
+        machine_id: malloryMachineId,
+        parent_task_id: aliceTaskId,
+        prompt: 'forged parent',
+      });
+      expect(error).not.toBeNull();
+    });
+
+    it('cannot re-parent her own task onto someone else task', async () => {
+      const { data: own, error: ownErr } = await mallory.client
+        .from('tasks')
+        .insert({ user_id: mallory.id, machine_id: malloryMachineId, prompt: 'mallory own task' })
+        .select()
+        .single();
+      if (ownErr) throw ownErr;
+
+      // Unlike an update that targets someone else's row (rejected by `using`,
+      // which just filters it out of the update with no error), this row is
+      // mallory's own: `using` lets it through and `with check` rejects the
+      // resulting state outright, so PostgREST reports a permission error
+      // rather than silently affecting zero rows.
+      const { error } = await mallory.client
+        .from('tasks')
+        .update({ parent_task_id: aliceTaskId })
+        .eq('id', own.id)
+        .select();
+      expect(error).not.toBeNull();
+
+      const { data: still } = await mallory.client
+        .from('tasks')
+        .select()
+        .eq('id', own.id)
+        .single();
+      expect(still.parent_task_id).toBeNull();
+    });
+
+    it('can set parent_task_id to her own task', async () => {
+      const { data: parent, error: parentErr } = await mallory.client
+        .from('tasks')
+        .insert({ user_id: mallory.id, machine_id: malloryMachineId, prompt: 'mallory parent task' })
+        .select()
+        .single();
+      if (parentErr) throw parentErr;
+
+      const { data: child, error: childErr } = await mallory.client
+        .from('tasks')
+        .insert({
+          user_id: mallory.id,
+          machine_id: malloryMachineId,
+          parent_task_id: parent.id,
+          prompt: 'mallory child task',
+        })
+        .select()
+        .single();
+      expect(childErr).toBeNull();
+      expect(child?.parent_task_id).toBe(parent.id);
+    });
   });
 
   it('cannot cancel someone else task', async () => {
