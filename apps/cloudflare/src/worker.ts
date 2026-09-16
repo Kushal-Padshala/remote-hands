@@ -3,7 +3,6 @@ import type { Env } from './env.js';
 import { TaskRoom } from './durable-objects/task-room.js';
 export { TaskRoom };
 import { HttpError } from './http/errors.js';
-
 import { jsonError, jsonOk } from './http/json.js';
 import { handleSetupOwner } from './routes/setup.js';
 import { handleStartPairing, handleClaimPairing } from './routes/pairing.js';
@@ -16,9 +15,9 @@ import {
   handleCompleteTask,
   handleFailTask,
 } from './routes/tasks.js';
-
 import { handleListEvents, handleAppendEvent } from './routes/events.js';
 import { handleCreateApproval, handleDecideApproval } from './routes/approvals.js';
+import { handleTaskWebSocket, handleMachineWebSocket } from './routes/websocket.js';
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -29,6 +28,16 @@ export default {
 
       if (method === 'GET' && pathname === '/health') {
         return jsonOk({ ok: true });
+      }
+
+      if (pathname.startsWith('/ws/tasks/')) {
+        const taskId = pathname.slice('/ws/tasks/'.length);
+        return await handleTaskWebSocket(taskId, request, env);
+      }
+
+      if (pathname.startsWith('/ws/machines/')) {
+        const machineId = pathname.slice('/ws/machines/'.length);
+        return await handleMachineWebSocket(machineId, request, env);
       }
 
       if (method === 'POST' && pathname === '/setup/owner') {
@@ -66,7 +75,6 @@ export default {
           return await handleMarkTaskRunning(taskId, request, env);
         }
         if (subaction === 'complete' && method === 'POST') {
-
           return await handleCompleteTask(taskId, request, env);
         }
         if (subaction === 'fail' && method === 'POST') {

@@ -22,14 +22,21 @@ export async function authenticateRequest(
   request: Request,
   db: D1Database,
 ): Promise<SessionRow | null> {
+  let rawToken: string | null = null;
   const authHeader = request.headers.get('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    rawToken = authHeader.slice(7).trim();
+  } else {
+    try {
+      const url = new URL(request.url);
+      rawToken = url.searchParams.get('token');
+    } catch {}
   }
-  const rawToken = authHeader.slice(7).trim();
+
   if (!rawToken) {
     return null;
   }
+
   const tokenHash = await hashSessionToken(rawToken);
   const sessionsRepo = new SessionsRepository(db);
   const session = await sessionsRepo.getByTokenHash(tokenHash);
