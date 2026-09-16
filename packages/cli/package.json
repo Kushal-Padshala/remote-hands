@@ -1,20 +1,58 @@
 {
   "name": "remote-hands-cli",
-  "version": "0.1.0",
-  "description": "Phone-operated remote hands agentic coding control plane",
+  "version": "0.1.2",
+  "description": "Phone-operated remote control plane for autonomous coding agents and browsers. Run tasks on your Mac or PC from your mobile phone with live screen streaming, human-in-the-loop approval gates, clamshell sleep prevention, and a 100% free Cloudflare serverless backend.",
+  "keywords": [
+    "remote-hands",
+    "remote-hands-cli",
+    "rh",
+    "remote-terminal",
+    "remote-control",
+    "remote-access",
+    "agentic-coding",
+    "ai-agent",
+    "ai-agents",
+    "autonomous-agents",
+    "browser-automation",
+    "chrome-automation",
+    "human-in-the-loop",
+    "cloudflare",
+    "cloudflare-workers",
+    "cloudflare-d1",
+    "durable-objects",
+    "serverless",
+    "tunnel",
+    "ssh-alternative",
+    "ngrok-alternative",
+    "tailscale-alternative",
+    "clamshell-mode",
+    "mac-remote-access",
+    "mobile-terminal",
+    "zero-trust",
+    "end-to-end-encryption",
+    "cli",
+    "terminal",
+    "devtools"
+  ],
+  "homepage": "https://github.com/Kushal-Padshala/remote-hands#readme",
+  "bugs": {
+    "url": "https://github.com/Kushal-Padshala/remote-hands/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kushal-Padshala/remote-hands.git"
+  },
+  "author": "Kushal Padshala",
   "bin": {
     "remote-hands": "dist/index.js",
     "rh": "dist/index.js"
   },
   "type": "module",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Kushal-Padshala/remote-hands.git"
-  },
   "files": [
     "dist",
-    "templates"
+    "templates",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc --build && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --external:qrcode",

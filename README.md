@@ -2,6 +2,7 @@
 
 > Send a task to your computer from your phone. Watch the agent do it in your real, logged-in browser. Approve anything irreversible before it happens.
 
+[![npm version](https://img.shields.io/npm/v/remote-hands-cli.svg?style=flat-square&color=blue)](https://www.npmjs.com/package/remote-hands-cli)
 [![CI](https://github.com/Kushal-Padshala/remote-hands/actions/workflows/ci.yml/badge.svg)](https://github.com/Kushal-Padshala/remote-hands/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.0.0-black.svg)](https://nodejs.org)
