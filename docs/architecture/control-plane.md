@@ -2,7 +2,7 @@
 
 This describes the Supabase schema in `supabase/migrations`: four tables,
 the row-level security policies that isolate one user's data from another's,
-and the two invariants the test suite proves hold.
+and the three invariants the test suite proves hold.
 
 Nothing in this repository writes to these tables yet. There is no daemon
 and no phone app — see the README's Status section. The "writes" and "reads"
@@ -84,7 +84,8 @@ per agent step.
 - **Reads**: the phone app, as a live timeline (via `supabase_realtime`) and
   as history.
 - **Policies**: SELECT, INSERT, DELETE. **No UPDATE policy exists**, and
-  that is deliberate — see the append-only invariant below.
+  that is deliberate — see the append-only invariant below. INSERT carries
+  the extra task-ownership check described below.
 
 ## `approvals`
 
@@ -113,6 +114,7 @@ A request to pause an irreversible action until a human decides.
 - **Policies**: SELECT, INSERT, UPDATE. **No DELETE policy exists**, and
   that is deliberate — see the immutable-audit-trail invariant below. The
   table itself carries a `comment on table` recording this in the schema.
+  INSERT carries the extra task-ownership check described below.
 
 ## `supabase_realtime`
 
@@ -121,9 +123,9 @@ A request to pause an irreversible action until a human decides.
 changes instead of polling. `machines` is not published; heartbeat status is
 read on demand.
 
-## The two invariants
+## The three invariants
 
-These are the properties Plan 1 exists to guarantee. Both are proved by
+These are the properties Plan 1 exists to guarantee. All three are proved by
 tests in `supabase/tests/rls.test.ts`, run against a real local Postgres
 instance with RLS enabled — not asserted against application code.
 
@@ -177,3 +179,54 @@ Proved by two tests in `supabase/tests/rls.test.ts`, under `a second user`:
   the naive policy, and it's rejected because
   `machine_belongs_to_current_user` returns false for a machine she
   doesn't own.
+
+### 3. A row can only be attached to a parent the caller can see
+
+The same gap that let a task be queued onto someone else's machine also
+existed one level down: `events.task_id` and `approvals.task_id` are
+foreign keys into `tasks`, and a foreign key reference does not pass
+through row-level security either. A naive `auth.uid() = user_id` insert
+policy on `events` or `approvals` lets a second user insert a row with her
+**own** `user_id` but **someone else's** `task_id` — forging an event in
+another user's task timeline, or forging an approval request against
+another user's task. The INSERT policies on both tables close this the
+same way `tasks` does, with a `security invoker` function:
+
+```sql
+create policy "events are created by their owner"
+  on public.events for insert
+  with check (
+    auth.uid() = user_id
+    and public.task_belongs_to_current_user(task_id)
+  );
+
+create policy "approvals are created by their owner"
+  on public.approvals for insert
+  with check (
+    auth.uid() = user_id
+    and public.task_belongs_to_current_user(task_id)
+  );
+```
+
+`task_belongs_to_current_user` (added in
+`20260916134205_restrict_event_and_approval_task_ownership.sql`) runs as
+the calling user (`security invoker`), so it is itself subject to RLS on
+`tasks` — it can only see a task row if the caller owns it.
+
+This was proved live before it was fixed: a reviewer, signed in as a
+second user, inserted both an event and an approval referencing another
+user's `task_id` and got HTTP 201 for both, under the naive policy.
+
+Proved by tests in `supabase/tests/rls.test.ts`:
+
+- **`a second user > cannot insert an event referencing someone else task`**
+  — a second user (`mallory`) tries to insert an event with her **own**
+  `user_id` but `alice`'s `task_id`; rejected because
+  `task_belongs_to_current_user` returns false for a task she doesn't own.
+- **`a second user > cannot insert an approval referencing someone else
+  task`** — the same forgery against `approvals`, rejected the same way.
+- The `approvals` describe block (`the owner sees their own approval`, `a
+  second user sees no approvals`, `a second user cannot read one by id`,
+  `a second user cannot update someone else approval`) proves the rest of
+  `approvals`' isolation, mirroring the coverage `machines`, `tasks` and
+  `events` already had.
