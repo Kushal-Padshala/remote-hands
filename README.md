@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.svg" alt="remote-hands Interactive Simulation" width="100%" />
+</p>
+
 # remote-hands
 
 <p align="center">
@@ -26,11 +30,11 @@ Terminal-based remote agent controllers work for pure coding tasks, but fail for
 
 | Feature | `remote-hands` | Standard Terminal Bridges | Cloud Agent Browsers |
 |---|:---:|:---:|:---:|
-| 📱 **Controlled from Mobile** | ✅ Yes | ✅ Yes | ✅ Yes |
-| 🌐 **Uses Your Real Signed-in Browser** | ✅ Yes (Local Chrome) | ❌ No | ❌ No (Cloud sandbox) |
-| 📸 **Live Visual Stream** | ✅ Yes (Real screenshots) | ❌ No (Terminal text only) | ✅ Yes |
-| 🛡️ **Human-in-the-Loop Approval Gate** | ✅ Yes (Deny-on-timeout) | ⚠️ Partial | ⚠️ Rare |
-| 💻 **Self-Hostable Open Source** | ✅ Yes | ✅ Yes | ❌ No |
+| 📱 **Controlled from Mobile** | ✅ | ✅ | ✅ |
+| 🌐 **Uses Your Real Signed-in Browser** | ✅ (Local Chrome) | ❌ | ❌ (Cloud sandbox) |
+| 📸 **Live Visual Stream** | ✅ (Real screenshots) | ❌ (Terminal text only) | ✅ |
+| 🛡️ **Human-in-the-Loop Approval Gate** | ✅ (Deny-on-timeout) | ⚠️ (Partial) | ⚠️ (Rare) |
+| 💻 **Self-Hostable Open Source** | ✅ | ✅ | ❌ |
 
 ---
 
