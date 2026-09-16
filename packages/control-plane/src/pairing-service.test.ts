@@ -7,18 +7,20 @@ import {
 } from './pairing-service.js';
 
 describe('pairing service rules', () => {
-  it('generates a 6-digit numeric pairing code by default', () => {
+  it('generates a cryptographically strong pairing code by default', () => {
     const code = generatePairingCode();
-    expect(code).toMatch(/^\d{6}$/);
+    expect(code).toMatch(/^RH-[2-9A-Z]{4}-[2-9A-Z]{4}-[2-9A-Z]{4}$/);
   });
 
-  it('hashes pairing code with salt deterministically using sha256', async () => {
-    const hash1 = await hashPairingCode('123456', 'test-salt');
-    const hash2 = await hashPairingCode('123456', 'test-salt');
-    const hashDifferent = await hashPairingCode('654321', 'test-salt');
+  it('hashes pairing code with salt deterministically and normalizes formatting', async () => {
+    const hash1 = await hashPairingCode('RH-4K9M-2X7W-9P3V', 'test-salt');
+    const hash2 = await hashPairingCode('rh-4k9m-2x7w-9p3v', 'test-salt');
+    const hash3 = await hashPairingCode('4K9M2X7W9P3V', 'test-salt');
+    const hashDifferent = await hashPairingCode('RH-ZZZZ-YYYY-XXXX', 'test-salt');
 
     expect(hash1).toBe(hash2);
-    expect(hash1).not.toBe('123456');
+    expect(hash1).toBe(hash3);
+    expect(hash1).not.toBe('RH-4K9M-2X7W-9P3V');
     expect(hash1).not.toBe(hashDifferent);
     expect(hash1).toHaveLength(64);
   });

@@ -141,7 +141,7 @@ describe('setup and pairing route tests', () => {
 
     expect(startRes.status).toBe(201);
     const startData = (await startRes.json()) as any;
-    expect(startData.pairing_code).toMatch(/^\d{6}$/);
+    expect(startData.pairing_code).toMatch(/^RH-[2-9A-Z]{4}-[2-9A-Z]{4}-[2-9A-Z]{4}$/);
     const pairingCode = startData.pairing_code;
 
     const claimRes = await worker.fetch(

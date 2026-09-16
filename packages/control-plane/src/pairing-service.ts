@@ -4,16 +4,35 @@ export interface PairingTokenRecord {
   claimed_at: string | null;
 }
 
-export function generatePairingCode(length: number = 6): string {
+export function normalizePairingCode(code: string): string {
+  return code.trim().replace(/^RH-?/i, '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+}
+
+export function generatePairingCode(
+  optionsOrLength?: number | { length?: number; prefix?: string } | undefined,
+): string {
+  const isNum = typeof optionsOrLength === 'number';
+  const length = isNum ? optionsOrLength : (optionsOrLength?.length ?? 12);
+  const prefix = isNum ? '' : (optionsOrLength?.prefix !== undefined ? optionsOrLength.prefix : 'RH');
+  const charset = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
   const bytes = new Uint8Array(length);
   crypto.getRandomValues(bytes);
-  return Array.from(bytes)
-    .map((b) => (b % 10).toString())
-    .join('');
+  const chars = Array.from(bytes).map((b) => charset[b % charset.length]);
+
+  let formatted = '';
+  for (let i = 0; i < chars.length; i++) {
+    if (i > 0 && i % 4 === 0) {
+      formatted += '-';
+    }
+    formatted += chars[i];
+  }
+
+  return prefix ? `${prefix}-${formatted}` : formatted;
 }
 
 export async function hashPairingCode(code: string, salt: string): Promise<string> {
-  const data = `${salt}:${code}`;
+  const normalized = normalizePairingCode(code);
+  const data = `${salt}:${normalized}`;
   const encoded = new TextEncoder().encode(data);
   const digest = await crypto.subtle.digest('SHA-256', encoded);
   return Array.from(new Uint8Array(digest))
