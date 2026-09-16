@@ -26,18 +26,65 @@ export const c = {
   bgGreen: (s: string) => (isColorSupported ? `\x1b[42m\x1b[30m${s}\x1b[0m` : s),
 };
 
-export function renderBanner(): string {
-  const line1 = '╭─────────────────────────────────────────────────────────────────╮';
-  const line2 = `│  ${c.bold(c.brightCyan('⚡ Remote Hands'))}  ${c.dim('•')}  ${c.white('Autonomous Agentic Coding Control Plane')}   │`;
-  const line3 = `│  ${c.dim('Cloudflare Free Tier')}  ${c.dim('•')}  ${c.green('Zero Cloud Hosting Costs')}                 │`;
-  const line4 = '╰─────────────────────────────────────────────────────────────────╯';
+export function stripAnsi(str: string): string {
+  return str.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+export function visualWidth(str: string): number {
+  const clean = stripAnsi(str);
+  let width = 0;
+  for (const char of clean) {
+    const code = char.codePointAt(0);
+    if (!code) continue;
+    if (
+      (code >= 0x2600 && code <= 0x27bf) ||
+      (code >= 0x1f300 && code <= 0x1f9ff) ||
+      (code >= 0x2b50 && code <= 0x2b55)
+    ) {
+      width += 2;
+    } else {
+      width += 1;
+    }
+  }
+  return width;
+}
+
+export function renderBanner(terminalCols?: number): string {
+  const cols =
+    terminalCols ??
+    (typeof process !== 'undefined' && process.stdout && process.stdout.columns
+      ? process.stdout.columns
+      : 80);
+
+  if (cols < 68) {
+    const termWidth = Math.max(36, Math.min(cols, 80));
+    const hr = '─'.repeat(termWidth - 2);
+    return [
+      '',
+      c.cyan(`╭─ ${c.bold(c.brightCyan('⚡ Remote Hands'))} ${'─'.repeat(Math.max(2, termWidth - 20))}`),
+      `${c.cyan('│')}  ${c.white('Autonomous Agentic Coding Control Plane')}`,
+      `${c.cyan('│')}  ${c.dim('Cloudflare Free Tier')} ${c.dim('•')} ${c.green('Zero Cloud Hosting Costs')}`,
+      c.cyan(`╰${hr}`),
+      '',
+    ].join('\n');
+  }
+
+  const innerWidth = 63;
+  const line1Text = `  ${c.bold(c.brightCyan('⚡ Remote Hands'))}  ${c.dim('•')}  ${c.white('Autonomous Agentic Coding Control Plane')}`;
+  const line2Text = `  ${c.dim('Cloudflare Free Tier')}  ${c.dim('•')}  ${c.green('Zero Cloud Hosting Costs')}`;
+
+  const pad1 = Math.max(0, innerWidth - visualWidth(line1Text));
+  const pad2 = Math.max(0, innerWidth - visualWidth(line2Text));
+
+  const borderTop = `╭${'─'.repeat(innerWidth)}╮`;
+  const borderBot = `╰${'─'.repeat(innerWidth)}╯`;
 
   return [
     '',
-    c.cyan(line1),
-    line2,
-    line3,
-    c.cyan(line4),
+    c.cyan(borderTop),
+    `${c.cyan('│')}${line1Text}${' '.repeat(pad1)}${c.cyan('│')}`,
+    `${c.cyan('│')}${line2Text}${' '.repeat(pad2)}${c.cyan('│')}`,
+    c.cyan(borderBot),
     '',
   ].join('\n');
 }
@@ -62,53 +109,57 @@ export function renderStepError(msg: string): string {
   return `${c.cyan('╰─')} ${c.yellow('✖')} ${msg}\n`;
 }
 
-export async function renderPairingTui(info: PairingSummaryInfo): Promise<string> {
-  let qrBlock = '';
+export async function renderPairingTui(info: PairingSummaryInfo, terminalCols?: number): Promise<string> {
+  const cols =
+    terminalCols ??
+    (typeof process !== 'undefined' && process.stdout && process.stdout.columns
+      ? process.stdout.columns
+      : 80);
+  const termWidth = Math.max(48, Math.min(cols, 74));
+  const hr = '─'.repeat(termWidth - 2);
+
+  let qrLines: string[] = [];
   try {
     const rawQr = await QRCode.toString(info.pairingUrl, {
       type: 'terminal',
       small: true,
       margin: 1,
     });
-    qrBlock = rawQr
+    qrLines = rawQr
       .split('\n')
-      .map((line) => `     ${line}`)
-      .join('\n');
+      .filter((line) => line.trim().length > 0)
+      .map((line) => `${c.brightGreen('│')}     ${line}`);
   } catch {
-    qrBlock = `     ${c.yellow('(QR code generation failed, use link below)')}`;
+    qrLines = [`${c.brightGreen('│')}     ${c.yellow('(QR code generation failed, use link below)')}`];
   }
-
-  const borderTop = '╭─────────────────────────────────────────────────────────────────╮';
-  const borderMid = '├─────────────────────────────────────────────────────────────────┤';
-  const borderBot = '╰─────────────────────────────────────────────────────────────────╯';
 
   const lines = [
     '',
-    c.brightGreen(borderTop),
-    `│  ${c.bold(c.brightGreen('✨ REMOTE HANDS STACK READY'))}  ${c.dim('•')}  ${c.white('Pair Your Phone')}                  │`,
-    c.brightGreen(borderMid),
-    '│                                                                 │',
-    `│  ${c.bold(c.brightCyan('📱 SCAN QR CODE WITH YOUR PHONE CAMERA:'))}                          │`,
-    '│                                                                 │',
-    qrBlock,
-    '│                                                                 │',
-    c.brightGreen(borderMid),
-    '│                                                                 │',
-    `│  ${c.bold(c.white('1. Open Phone Web App:'))}                                            │`,
-    `│     ${c.cyan(info.webUrl)}`,
-    '│                                                                 │',
-    `│  ${c.bold(c.white('2. Direct Pairing Link:'))}                                           │`,
-    `│     ${c.brightCyan(info.pairingUrl)}`,
-    '│                                                                 │',
-    `│  ${c.bold(c.white('3. Pairing Code:'))}                                                  │`,
-    `│     ${c.bold(c.yellow(info.pairingCode))}`,
-    '│                                                                 │',
-    `│  ${c.bold(c.white('4. Start Local Daemon:'))}                                            │`,
-    `│     ${c.green(info.daemonCommand)}`,
-    '│                                                                 │',
-    `│  ${c.dim('💡 Run the daemon command above to begin processing tasks.')}        │`,
-    '│                                                                 │',
-    c.brightGreen(borderBot),
+    c.brightGreen(`╭─ ${c.bold('✨ Remote Hands Stack Ready')} ${'─'.repeat(Math.max(2, termWidth - 32))}`),
+    `${c.brightGreen('│')}  ${c.dim('Cloudflare Free Tier • Pair your phone to begin')}`,
+    c.brightGreen(`├${hr}`),
+    c.brightGreen('│'),
+    `${c.brightGreen('│')}  ${c.bold(c.brightCyan('📱 SCAN QR CODE WITH YOUR PHONE CAMERA:'))}`,
+    c.brightGreen('│'),
+    ...qrLines,
+    c.brightGreen('│'),
+    c.brightGreen(`├${hr}`),
+    c.brightGreen('│'),
+    `${c.brightGreen('│')}  ${c.bold(c.white('1. Open Phone Web App:'))}`,
+    `${c.brightGreen('│')}     ${c.cyan(info.webUrl)}`,
+    c.brightGreen('│'),
+    `${c.brightGreen('│')}  ${c.bold(c.white('2. Direct Pairing Link:'))}`,
+    `${c.brightGreen('│')}     ${c.brightCyan(info.pairingUrl)}`,
+    c.brightGreen('│'),
+    `${c.brightGreen('│')}  ${c.bold(c.white('3. Pairing Code:'))}`,
+    `${c.brightGreen('│')}     ${c.bold(c.yellow(info.pairingCode))}`,
+    c.brightGreen('│'),
+    `${c.brightGreen('│')}  ${c.bold(c.white('4. Start Local Daemon:'))}`,
+    `${c.brightGreen('│')}     ${c.green(info.daemonCommand)}`,
+    c.brightGreen('│'),
+    `${c.brightGreen('│')}  ${c.dim('💡 Run the daemon command above to begin processing tasks.')}`,
+    c.brightGreen('│'),
+    c.brightGreen(`╰${hr}`),
     '',
   ];
 
