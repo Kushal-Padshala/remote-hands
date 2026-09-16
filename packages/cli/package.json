@@ -1,5 +1,5 @@
 {
-  "name": "remote-hands",
+  "name": "remote-hands-cli",
   "version": "0.1.0",
   "description": "Phone-operated remote hands agentic coding control plane",
   "bin": {
@@ -14,11 +14,12 @@
   },
   "files": [
     "dist",
-    "apps"
+    "templates"
   ],
   "scripts": {
     "build": "tsc --build && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --external:qrcode",
-    "prepack": "mkdir -p apps && cp -R ../../apps/cloudflare apps/ && cp -R ../../apps/web apps/",
+    "prepack": "rm -rf templates && mkdir -p templates/apps/cloudflare templates/apps/web && cp -R ../../apps/cloudflare/src ../../apps/cloudflare/migrations ../../apps/cloudflare/wrangler.jsonc templates/apps/cloudflare/ && cp -R ../../apps/web/dist ../../apps/web/wrangler.jsonc templates/apps/web/",
+    "postpack": "rm -rf templates",
     "typecheck:tests": "tsc -p tsconfig.test.json"
   },
   "dependencies": {

@@ -23,6 +23,9 @@ function resolveProjectRoot(customRoot?: string | undefined): string {
       return distCandidate;
     }
     const pkgCandidate = path.resolve(cliDir, '..');
+    if (fsSync.existsSync(path.join(pkgCandidate, 'templates/apps/cloudflare'))) {
+      return path.join(pkgCandidate, 'templates');
+    }
     if (fsSync.existsSync(path.join(pkgCandidate, 'apps/cloudflare'))) {
       return pkgCandidate;
     }

@@ -112,13 +112,19 @@ remote-hands/
 - **Node.js**: `>=22.0.0`
 - **Cloudflare Account**: Free plan (no credit card required)
 
-### One-Command Setup
+### Quick Start
 
-Set up your personal free backend in under 10 minutes (no Supabase project, Vercel deploy, or Docker required):
+Install globally or run directly via npm:
 
 ```bash
+# Global install (gives you "rh" and "remote-hands" commands)
+npm install -g remote-hands-cli
+
 # Run guided setup wizard
 rh setup
+
+# Or run one-shot wizard directly without installing
+npx remote-hands-cli setup
 
 # Start daemon (with lid-closed clamshell sleep prevention)
 rh start
