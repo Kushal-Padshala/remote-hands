@@ -9,3 +9,4 @@ supabase/.temp/
 supabase/.branches/
 coverage/
 .superpowers/
+.claude/
