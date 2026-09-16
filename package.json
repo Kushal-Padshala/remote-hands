@@ -6,7 +6,7 @@
   "engines": { "node": ">=22.0.0" },
   "workspaces": ["packages/*", "apps/*"],
   "scripts": {
-    "typecheck": "tsc --build --verbose",
+    "typecheck": "tsc --build --verbose && npm run --workspaces --if-present typecheck:tests",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:start": "npx --yes supabase@latest start",

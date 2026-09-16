@@ -15,7 +15,8 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "build": "tsc --build"
+    "build": "tsc --build",
+    "typecheck:tests": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
     "zod": "^4.6.5"
