@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDbClient } from './helpers.js';
+import { createDbClient, isSupabaseReachable } from './helpers.js';
 import type { Client as PgClient } from 'pg';
 
 interface OwnedForeignKey {
@@ -8,54 +8,57 @@ interface OwnedForeignKey {
   referencedTable: string;
 }
 
-let db: PgClient;
-let foreignKeys: OwnedForeignKey[];
+const isAvailable = await isSupabaseReachable();
 
-beforeAll(async () => {
-  db = createDbClient();
-  await db.connect();
+describe.skipIf(!isAvailable)('every foreign key into a user-owned table', () => {
+  let db: PgClient;
+  let foreignKeys: OwnedForeignKey[];
 
-  const { rows } = await db.query<{
-    referencing_table: string;
-    referencing_column: string;
-    referenced_table: string;
-  }>(`
-    select
-      rt.relname as referencing_table,
-      att.attname as referencing_column,
-      ref.relname as referenced_table
-    from pg_constraint con
-    join pg_class rt on rt.oid = con.conrelid
-    join pg_namespace rn on rn.oid = rt.relnamespace
-    join pg_class ref on ref.oid = con.confrelid
-    join pg_attribute att
-      on att.attrelid = con.conrelid
-     and att.attnum = con.conkey[1]
-    where con.contype = 'f'
-      and rn.nspname = 'public'
-      and exists (
-        select 1
-        from pg_attribute ref_col
-        where ref_col.attrelid = con.confrelid
-          and ref_col.attname = 'user_id'
-          and ref_col.attnum > 0
-          and not ref_col.attisdropped
-      )
-    order by rt.relname, att.attname;
-  `);
+  beforeAll(async () => {
+    db = createDbClient();
+    await db.connect();
 
-  foreignKeys = rows.map((row) => ({
-    referencingTable: row.referencing_table,
-    referencingColumn: row.referencing_column,
-    referencedTable: row.referenced_table,
-  }));
-}, 60_000);
+    const { rows } = await db.query<{
+      referencing_table: string;
+      referencing_column: string;
+      referenced_table: string;
+    }>(`
+      select
+        rt.relname as referencing_table,
+        att.attname as referencing_column,
+        ref.relname as referenced_table
+      from pg_constraint con
+      join pg_class rt on rt.oid = con.conrelid
+      join pg_namespace rn on rn.oid = rt.relnamespace
+      join pg_class ref on ref.oid = con.confrelid
+      join pg_attribute att
+        on att.attrelid = con.conrelid
+       and att.attnum = con.conkey[1]
+      where con.contype = 'f'
+        and rn.nspname = 'public'
+        and exists (
+          select 1
+          from pg_attribute ref_col
+          where ref_col.attrelid = con.confrelid
+            and ref_col.attname = 'user_id'
+            and ref_col.attnum > 0
+            and not ref_col.attisdropped
+        )
+      order by rt.relname, att.attname;
+    `);
 
-afterAll(async () => {
-  await db.end();
-});
+    foreignKeys = rows.map((row) => ({
+      referencingTable: row.referencing_table,
+      referencingColumn: row.referencing_column,
+      referencedTable: row.referenced_table,
+    }));
+  }, 60_000);
 
-describe('every foreign key into a user-owned table', () => {
+  afterAll(async () => {
+    if (db) {
+      await db.end();
+    }
+  });
   it('found at least the foreign keys this schema is known to have', () => {
     expect(foreignKeys.length).toBeGreaterThan(0);
   });

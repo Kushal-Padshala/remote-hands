@@ -71,7 +71,7 @@ describe('Setup Command Flow', () => {
         return new Response(
           JSON.stringify({
             token_id: '22222222-2222-4222-8222-222222222222',
-            pairing_code: 'PAIR-123456',
+            pairing_code: 'RH-87KZ-M2WP-46NT',
             expires_at: new Date(Date.now() + 600000).toISOString(),
           }),
           { status: 200 },
@@ -98,7 +98,7 @@ describe('Setup Command Flow', () => {
     expect(executedCommands.some((c) => c.includes('wrangler pages deploy'))).toBe(true);
 
     const fullOutput = outputLines.join('\n');
-    expect(fullOutput).toContain('PAIR-123456');
+    expect(fullOutput).toContain('RH-87KZ-M2WP-46NT');
     expect(fullOutput).toContain('https://remote-hands-web.pages.dev');
     expect(fullOutput).toContain('remote-hands daemon');
 
@@ -162,7 +162,7 @@ describe('Setup Command Flow', () => {
       exists: async () => true,
     };
 
-    const mockFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, owner_id: 'owner-1', pairing_code: 'PAIR-111111' }), { status: 200 }));
+    const mockFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, owner_id: 'owner-1', pairing_code: 'RH-9999-AAAA-BBBB' }), { status: 200 }));
 
     const exitCode = await setupCommand([], {
       stdout: () => {},

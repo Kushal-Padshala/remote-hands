@@ -15,7 +15,7 @@ export function PairingModal({ isOpen, onClose, pairingUrl, pairingCode }: Pairi
   const activeUrl =
     pairingUrl ||
     (typeof window !== 'undefined'
-      ? `${window.location.origin}/pair?code=${pairingCode || 'PAIR-123456'}`
+      ? `${window.location.origin}/pair${pairingCode ? `?code=${encodeURIComponent(pairingCode)}` : ''}`
       : '');
 
   useEffect(() => {

@@ -1,16 +1,19 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { createUser, type TestUser } from './helpers.js';
+import { createUser, isSupabaseReachable, type TestUser } from './helpers.js';
 
-let alice: TestUser;
-let mallory: TestUser;
-let aliceMachineId: string;
-let aliceTaskId: string;
-let aliceApprovalId: string;
-let malloryMachineId: string;
+const isAvailable = await isSupabaseReachable();
 
-beforeAll(async () => {
-  alice = await createUser();
-  mallory = await createUser();
+describe.skipIf(!isAvailable)('RLS policies', () => {
+  let alice: TestUser;
+  let mallory: TestUser;
+  let aliceMachineId: string;
+  let aliceTaskId: string;
+  let aliceApprovalId: string;
+  let malloryMachineId: string;
+
+  beforeAll(async () => {
+    alice = await createUser();
+    mallory = await createUser();
 
   const { data: machine, error: mErr } = await alice.client
     .from('machines')
@@ -249,4 +252,5 @@ describe('approvals', () => {
       .single();
     expect(still.decision).toBe('pending');
   });
+});
 });

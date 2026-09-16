@@ -13,6 +13,7 @@ import {
 } from '../cloudflare/wrangler.js';
 import { writeWranglerConfig, defaultFileSystem, type FileSystemAdapter } from '../cloudflare/project.js';
 import { ensureBrowserHarness } from '../system/browser-harness.js';
+import { generatePairingCode } from '@remote-hands/control-plane';
 import { generatePairingUrl } from '../pairing/qr.js';
 import { formatPairingSummary } from '../output/messages.js';
 import {
@@ -104,6 +105,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   const ownerSecret = (crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '')).slice(0, 32);
 
   let setupRes: Response | undefined;
+  let ownerSessionToken = '';
   for (let attempt = 0; attempt < 30; attempt++) {
     try {
       setupRes = await fetchFn(`${apiUrl}/setup/owner`, {
@@ -111,7 +113,16 @@ export async function setupCommand(args: string[], context: CommandContext = {})
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ owner_secret: ownerSecret }),
       });
-      if (setupRes.ok || setupRes.status === 409) break;
+      if (setupRes.ok) {
+        try {
+          const setupData = (await setupRes.json()) as { session_token?: string };
+          if (setupData?.session_token) {
+            ownerSessionToken = setupData.session_token;
+          }
+        } catch {}
+        break;
+      }
+      if (setupRes.status === 409) break;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }
@@ -121,19 +132,73 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     return 1;
   }
 
-  const pairingRes = await fetchFn(`${apiUrl}/pairing/start`, {
+  const effectiveOwnerToken = ownerSessionToken || ownerSecret;
+
+  const machinePairingRes = await fetchFn(`${apiUrl}/pairing/start`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${ownerSecret}`,
+      Authorization: `Bearer ${effectiveOwnerToken}`,
     },
     body: JSON.stringify({ machine_name: os.hostname() || 'primary-laptop' }),
   });
 
-  let pairingCode = 'PAIR-123456';
-  if (pairingRes.ok) {
-    const pairingData: any = await pairingRes.json();
-    pairingCode = pairingData.pairing_code ?? pairingCode;
+  let machinePairingCode = '';
+  if (machinePairingRes.ok) {
+    try {
+      const pairingData = (await machinePairingRes.json()) as { pairing_code?: string };
+      if (pairingData?.pairing_code) {
+        machinePairingCode = pairingData.pairing_code;
+      }
+    } catch {}
+  }
+  if (!machinePairingCode) {
+    machinePairingCode = generatePairingCode();
+  }
+
+  let daemonSessionToken = effectiveOwnerToken;
+  let machineId: string | undefined;
+
+  try {
+    const claimRes = await fetchFn(`${apiUrl}/pairing/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pairing_code: machinePairingCode,
+        hostname: os.hostname() || 'primary-laptop',
+        daemon_version: '0.1.0',
+        agy_version: '0.2.0',
+      }),
+    });
+    if (claimRes.ok) {
+      const claimData = (await claimRes.json()) as { session_token?: string; machine_id?: string };
+      if (claimData?.session_token) {
+        daemonSessionToken = claimData.session_token;
+      }
+      machineId = claimData?.machine_id;
+    }
+  } catch {}
+
+  const activePairingRes = await fetchFn(`${apiUrl}/pairing/start`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${effectiveOwnerToken}`,
+    },
+    body: JSON.stringify({ machine_name: os.hostname() || 'primary-laptop' }),
+  });
+
+  let activePairingCode = '';
+  if (activePairingRes.ok) {
+    try {
+      const activeData = (await activePairingRes.json()) as { pairing_code?: string };
+      if (activeData?.pairing_code) {
+        activePairingCode = activeData.pairing_code;
+      }
+    } catch {}
+  }
+  if (!activePairingCode) {
+    activePairingCode = generatePairingCode();
   }
 
   const configDir = context.configDir ?? path.join(os.homedir(), '.remote-hands');
@@ -144,7 +209,8 @@ export async function setupCommand(args: string[], context: CommandContext = {})
       JSON.stringify(
         {
           cloudflareApiUrl: apiUrl,
-          sessionToken: ownerSecret,
+          sessionToken: daemonSessionToken,
+          machineId: machineId,
           machineName: os.hostname() || 'primary-laptop',
         },
         null,
@@ -160,11 +226,11 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   const webUrl = webRes.pagesUrl ?? 'https://remote-hands-web.pages.dev';
   stdout(renderStepSuccess(`Web app live at ${webUrl}`));
 
-  const pairingUrl = generatePairingUrl(webUrl, pairingCode);
+  const pairingUrl = generatePairingUrl(webUrl, activePairingCode, effectiveOwnerToken);
   const summary = await formatPairingSummary({
     webUrl,
     pairingUrl,
-    pairingCode,
+    pairingCode: activePairingCode,
     daemonCommand: 'rh start (or: remote-hands daemon)',
   });
 

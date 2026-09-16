@@ -32,9 +32,12 @@ export function App() {
   }
 
   useEffect(() => {
-    loadMachines();
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
+      const secret = params.get('secret') || params.get('token');
+      if (secret) {
+        apiClient.setToken(secret);
+      }
       const code = params.get('code');
       if (code) {
         setPairingCode(code);
@@ -50,6 +53,7 @@ export function App() {
         } catch {}
       }
     }
+    loadMachines();
   }, []);
 
   const handleSelectMachine = (machine: MachineRow) => {

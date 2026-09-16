@@ -13,7 +13,25 @@ if (!anonKey || !serviceKey) {
   );
 }
 
-/** Service role is permitted here and nowhere else in the repository. */
+export async function isSupabaseReachable(): Promise<boolean> {
+  const socket = new (await import('node:net')).Socket();
+  return new Promise<boolean>((resolve) => {
+    socket.setTimeout(400);
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once('error', () => {
+      resolve(false);
+    });
+    socket.connect(54322, '127.0.0.1');
+  });
+}
+
 export function createServiceClient(): SupabaseClient {
   return createClient(url, serviceKey!, { auth: { persistSession: false } });
 }

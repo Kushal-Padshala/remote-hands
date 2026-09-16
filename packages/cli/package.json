@@ -12,6 +12,7 @@
     "typecheck:tests": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
+    "@remote-hands/control-plane": "0.0.0",
     "@remote-hands/daemon": "0.0.0",
     "@remote-hands/shared": "0.0.0",
     "qrcode": "^1.5.4"
