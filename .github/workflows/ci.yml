@@ -27,6 +27,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22', cache: 'npm' }
       - run: npm ci
+      - run: npm run build
       - run: npm test -- tests/e2e
   db:
     runs-on: ubuntu-latest
@@ -43,6 +44,7 @@ jobs:
           echo "SUPABASE_ANON_KEY=$(supabase status -o json | jq -r .ANON_KEY)" >> $GITHUB_ENV
           echo "SUPABASE_SERVICE_ROLE_KEY=$(supabase status -o json | jq -r .SERVICE_ROLE_KEY)" >> $GITHUB_ENV
       - run: npm ci
+      - run: npm run build
       - run: npm run test -- supabase
   secrets:
     runs-on: ubuntu-latest
