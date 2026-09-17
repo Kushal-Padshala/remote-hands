@@ -35,6 +35,8 @@ describe('buildAgyArgs', () => {
       'Add a privacy policy page',
       '--output-format',
       'stream-json',
+      '--print-timeout',
+      '60m',
       '--add-dir',
       '/Users/kushal/site',
       '--conversation',
@@ -55,7 +57,15 @@ describe('buildAgyArgs', () => {
       { agyCommand: 'agy' },
     );
 
-    expect(args).toEqual(['agy', '-p', 'Add a privacy policy page', '--output-format', 'stream-json']);
+    expect(args).toEqual([
+      'agy',
+      '-p',
+      'Add a privacy policy page',
+      '--output-format',
+      'stream-json',
+      '--print-timeout',
+      '60m',
+    ]);
   });
 
   it('prepends systemPrompt on initial conversation turn', () => {

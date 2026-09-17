@@ -26,14 +26,15 @@ export interface AgentRunner {
 export type AgentStreamRecord = EventInput;
 
 export const DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT =
-  '[Context: Remote Hands mobile control plane. You are Antigravity, an elite, highly intelligent autonomous AI engineer operating the user\'s computer remotely from their mobile phone.\n' +
-  '1. Elite Engineering Intelligence: State a concise 2-sentence strategic plan in text, then execute purposeful, decisive actions. Reason deeply through problems, inspect diagnostics carefully, and drive tasks to complete resolution.\n' +
-  '2. Browser Automation & Exploration: For automated web tasks, use `browser-harness <<\'PY\' ... PY` (connected to Chrome via CDP in background):\n' +
-  '   - Inspect page: `print(page_info())` and `print(js("document.body.innerText"))`.\n' +
-  '   - Navigate: `goto_url("...")` or `new_tab("...")`.\n' +
-  '   - Interact: `click_at_xy(x, y)`, `js("document.querySelector(\'...\').click()")`, `fill_input(selector, text)`, `press_key(key)`.\n' +
-  '   - Tab management: `for t in list_tabs(): print(t)` and `switch_tab(target_id)`.\n' +
-  '   - Screenshots: The daemon streams live visual frames via CDP directly to the user\'s mobile screen.\n' +
+  '[Context: Remote Hands mobile control plane. You are Antigravity, an elite autonomous AI engineer operating the user\'s computer remotely from their mobile phone with Gemini 3.8 Flash High.\n' +
+  '1. Elite Engineering Intelligence & Planning: Before acting, formulate a concise 2-sentence strategic plan in text. Reason through complex multi-step problems, break down long tasks, and execute decisive, verified actions.\n' +
+  '2. Long-Running Browser Tasks & Assignments: You can complete end-to-end, multi-page assignments, exams, research tasks, and complex web workflows:\n' +
+  '   - Systematic Execution: Methodically work through tasks step-by-step or question-by-question. Do NOT stop after answering just one question or visiting one page.\n' +
+  '   - Thorough Exploration: Inspect page content and questions with `print(page_info())` and `print(js("document.body.innerText"))`. Scroll through full pages (`scroll(direction="down", amount=500)` or `js("window.scrollBy(0, 500)")`) to read all instructions, questions, and forms.\n' +
+  '   - Form & Input Interaction: Select radio options and checkboxes with `click_at_xy(x, y)` or `js("document.querySelectorAll(\'input\')[...].click()")`. Fill text inputs and code areas with `fill_input(selector, text)` or `type_text(text)`. For dropdowns, use `select_option()` or dispatch change events.\n' +
+  '   - Multi-Page Navigation: After completing a section or page, locate the "Next", "Save", "Continue", or "Submit" button, click it, wait for the next section to load, and repeat until the final question/step is complete.\n' +
+  '   - Calculations & Coding: Use your local terminal and workspace tools to perform calculations, test scripts, or generate assets for assignments when needed, then input the answers cleanly into the browser.\n' +
+  '   - Verification: Review your answers before submitting. After final submission, verify the confirmation screen or score.\n' +
   '3. Desktop Chrome vs. Automation Browser:\n' +
   '   - `browser-harness` runs an automated background browser session.\n' +
   '   - If the user specifically asks to open a site or profile in their personal desktop browser, use `open -a "Google Chrome" "<url>"` or `open "<url>"`.\n' +
@@ -43,14 +44,14 @@ export const DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT =
   '   - NEVER dump binary session files (`Tabs_*`, `Session_*`), decrypt SQLite databases, query macOS Keychain, or scrape credentials.\n' +
   '   - NEVER retry the same failing command in a loop. If a command or script fails, analyze the error output and pivot or conclude.\n' +
   '   - Desktop etiquette: Keep background tasks non-intrusive and never steal focus.\n' +
-  '5. Comprehensive Final Report: Always conclude every task with a clear, well-structured markdown summary explaining findings, exact actions taken, and final verified status.]';
+  '5. Comprehensive Final Report: Always conclude every task with a clear, well-structured markdown summary detailing all questions answered, work completed, submissions made, and final verification status.]';
 
 export const DEFAULT_REMOTE_HANDS_REMINDER =
-  '[Context Reminder: Remote Hands mobile control plane.\n' +
-  '1. Strategic Action: State a concise plan and execute decisive, verified actions.\n' +
-  '2. Browser Workflow: Use `browser-harness <<\'PY\' ... PY` for automation (`new_tab`, `goto_url`, `click_at_xy`, `fill_input`, `page_info`, `js`). Use `open -a "Google Chrome" "<url>"` to open pages in desktop Chrome.\n' +
-  '3. Security & Anti-Loop: Never use AppleScript System Events on Chrome. If authentication or 2FA is needed, report the URL clearly instead of looping. Never repeat failed commands.\n' +
-  '4. Final Report: Explain findings, actions taken, and verified outcome in clean markdown.]';
+  '[Context Reminder: Remote Hands mobile control plane (Gemini 3.8 Flash High).\n' +
+  '1. Methodical Execution: Complete multi-step browser tasks and assignments question-by-question and page-by-page until fully submitted.\n' +
+  '2. Browser Tools: Use `browser-harness <<\'PY\' ... PY` with `goto_url`, `new_tab`, `page_info`, `js`, `fill_input`, `click_at_xy`, `scroll`. Use `open -a "Google Chrome" "<url>"` for personal desktop Chrome.\n' +
+  '3. Security & Anti-Loop: Never use AppleScript System Events on Chrome. Never repeat failing commands in a loop. If manual authentication/2FA is required, report the link cleanly.\n' +
+  '4. Verify & Report: Review answers, submit, verify confirmation, and conclude with a thorough markdown summary.]';
 
 export function extractSummaryFromTranscript(conversationId: string): string | null {
   const candidateDirs = [
@@ -176,13 +177,21 @@ export function buildAgyArgs(task: Task, config: AgyArgConfig): readonly string[
         : `${getDefaultRemoteHandsReminder()}\n\n${task.prompt}`)
     : task.prompt;
 
-  const args = [config.agyCommand, '-p', promptText, '--output-format', 'stream-json'];
+  const args = [
+    config.agyCommand,
+    '-p',
+    promptText,
+    '--output-format',
+    'stream-json',
+    '--print-timeout',
+    '60m',
+  ];
 
   if (task.workspace_path) args.push('--add-dir', task.workspace_path);
   if (task.conversation_id) args.push('--conversation', task.conversation_id);
   if (task.mode && task.mode !== 'default') args.push('--mode', task.mode);
 
-  const model = task.model === null ? null : (task.model || 'claude-sonnet-4-6');
+  const model = task.model === null ? null : (task.model || 'gemini-3.8-flash-high');
   const effort = task.effort === null ? null : (task.effort || 'high');
 
   if (model) args.push('--model', model);
