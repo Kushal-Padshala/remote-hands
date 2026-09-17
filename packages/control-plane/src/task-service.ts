@@ -31,7 +31,7 @@ export function createTask(params: CreateTaskParams, now: Date = new Date()): Ta
 
     kind: params.kind ?? 'browser',
     workspace_path: params.workspacePath ?? null,
-    model: params.model ?? 'gemini-3.8-flash-high',
+    model: params.model ?? 'claude-sonnet-4-6',
     effort: params.effort ?? 'high',
     mode: params.mode ?? 'default',
     status: 'queued',

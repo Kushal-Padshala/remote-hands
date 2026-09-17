@@ -33,7 +33,7 @@ export async function handleCreateTask(request: Request, env: Env): Promise<Resp
     kind: body.kind,
     mode: body.mode,
     workspacePath: body.workspace_path,
-    model: body.model || 'gemini-3.8-flash-high',
+    model: body.model || 'claude-sonnet-4-6',
     effort: body.effort || 'high',
     conversationId: body.conversation_id,
     parentTaskId: body.parent_task_id,
