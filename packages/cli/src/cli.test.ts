@@ -53,6 +53,13 @@ describe('CLI command dispatcher', () => {
     expect(emptyLogs.some((l) => l.includes('Usage: remote-hands'))).toBe(true);
   });
 
+  it('lists browser command in help output', async () => {
+    const logs: string[] = [];
+    const code = await main(['--help'], { stdout: (msg) => logs.push(msg) });
+    expect(code).toBe(0);
+    expect(logs.some((l) => l.includes('browser'))).toBe(true);
+  });
+
   it('returns error code 1 on unknown command', async () => {
     const errors: string[] = [];
     const code = await main(['foobar'], { stderr: (msg) => errors.push(msg) });

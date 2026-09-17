@@ -45,7 +45,8 @@
   "author": "Kushal Padshala",
   "bin": {
     "remote-hands": "dist/index.js",
-    "rh": "dist/index.js"
+    "rh": "dist/index.js",
+    "rh-browser": "dist/index.js"
   },
   "type": "module",
   "license": "MIT",
