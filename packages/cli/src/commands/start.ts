@@ -5,7 +5,7 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { setupCommand, type CommandContext } from './setup.js';
 import { daemonCommand } from './daemon.js';
 import { c } from '../output/ui.js';
-import { ensureMacPermissions } from '../system/mac-permissions.js';
+import { ensureMacPermissions, checkMacFullDiskAccess, detectHostAppName } from '../system/mac-permissions.js';
 
 export interface StartOptions {
   clamshell?: boolean | undefined;
@@ -55,11 +55,8 @@ export async function startCommand(args: string[], context: CommandContext = {})
 
   if (!noClamshell && !runner) {
     if (process.platform === 'darwin') {
-      let fdaGranted = false;
-      try {
-        fs.readdirSync(path.join(os.homedir(), 'Library', 'Safari'));
-        fdaGranted = true;
-      } catch {}
+      const fdaGranted = checkMacFullDiskAccess();
+      const hostApp = detectHostAppName();
 
       stdout(
         '\n' +
@@ -68,7 +65,7 @@ export async function startCommand(args: string[], context: CommandContext = {})
           `${c.yellow('│')}  ${c.dim('Allows your MacBook to run agent tasks with the lid closed (pmset disablesleep=1).')}\n` +
           `${c.yellow('│')}  ${c.dim('Run "rh start --no-clamshell" or "rh daemon" to run without password.')}\n` +
           (!fdaGranted
-            ? `${c.yellow('│')}  ${c.dim('Tip: Grant Full Disk Access to Antigravity IDE/Terminal to skip permission dialogs.')}\n`
+            ? `${c.yellow('│')}  ${c.dim(`Tip: Grant Full Disk Access to ${hostApp} to skip permission dialogs.`)}\n`
             : '') +
           c.yellow(`╰${hr}\n`),
       );
