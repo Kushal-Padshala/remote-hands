@@ -12,7 +12,7 @@ export interface AgentRunResult {
 }
 
 export interface AgentRunner {
-  run(task: Task): Promise<AgentRunResult>;
+  run(task: Task, onEvent?: (event: EventInput) => Promise<void> | void): Promise<AgentRunResult>;
 }
 
 export type AgentStreamRecord = EventInput;
@@ -52,23 +52,100 @@ const resultRecord = z.object({
 export function buildAgyArgs(task: Task, config: AgyArgConfig): readonly string[] {
   const args = [config.agyCommand, '-p', task.prompt, '--output-format', 'stream-json'];
 
-  if (task.workspace_path !== null) args.push('--add-dir', task.workspace_path);
-  if (task.conversation_id !== null) args.push('--conversation', task.conversation_id);
-  if (task.mode !== 'default') args.push('--mode', task.mode);
-  if (task.model !== null) args.push('--model', task.model);
-  if (task.effort !== null) args.push('--effort', task.effort);
+  if (task.workspace_path) args.push('--add-dir', task.workspace_path);
+  if (task.conversation_id) args.push('--conversation', task.conversation_id);
+  if (task.mode && task.mode !== 'default') args.push('--mode', task.mode);
+  if (task.model) args.push('--model', task.model);
+  if (task.effort) args.push('--effort', task.effort);
 
   return args;
 }
 
 export function parseAgyStreamLine(line: string): AgentStreamRecord | null {
-  if (line.trim().length === 0) return null;
+  const trimmed = line.trim();
+  if (trimmed.length === 0) return null;
 
-  let record: unknown;
+  let record: any;
   try {
-    record = JSON.parse(line);
+    record = JSON.parse(trimmed);
   } catch {
-    return null;
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      return null;
+    }
+    return { kind: 'agent_text', payload: { text: line + '\n' } };
+  }
+
+  if (!record || typeof record !== 'object') return null;
+
+  if (record.event === 'init') {
+    return {
+      kind: 'status',
+      payload: { status: 'running' },
+    };
+  }
+
+  if (record.event === 'step_update' && record.step_update) {
+    const step = record.step_update;
+
+    if (step.step_type === 'tool') {
+      if (step.state === 'ACTIVE') {
+        return {
+          kind: 'tool_call',
+          payload: {
+            tool: step.tool_name || step.tool_info?.name || 'tool',
+            input: step.tool_info?.parameters,
+            call_id: String(step.step_index ?? ''),
+          },
+        };
+      }
+      if (step.state === 'DONE') {
+        const out = typeof step.tool_info?.output === 'string'
+          ? step.tool_info.output
+          : JSON.stringify(step.tool_info?.output ?? '');
+        return {
+          kind: 'tool_result',
+          payload: {
+            call_id: String(step.step_index ?? ''),
+            ok: true,
+            output: out,
+          },
+        };
+      }
+    }
+
+    if (step.step_type === 'agent_response') {
+      if (step.text_delta) {
+        return {
+          kind: 'agent_text',
+          payload: { text: step.text_delta },
+        };
+      }
+      if (step.usage?.thinking_tokens && step.state === 'DONE') {
+        const secs = step.duration_seconds ? `${step.duration_seconds.toFixed(1)}s` : '';
+        return {
+          kind: 'thinking',
+          payload: { text: `Reasoned for ${secs || 'a few seconds'}` },
+        };
+      }
+    }
+
+    if (step.thinking) {
+      return {
+        kind: 'thinking',
+        payload: { text: String(step.thinking) },
+      };
+    }
+  }
+
+  if (record.event === 'result' && record.result) {
+    return {
+      kind: 'result',
+      payload: {
+        summary: record.result.response || 'Task completed successfully',
+        conversation_id: record.result.conversation_id,
+        duration_seconds: record.result.duration_seconds,
+      },
+    };
   }
 
   const text = textRecord.safeParse(record);
@@ -131,7 +208,14 @@ export class StaticAgentRunner implements AgentRunner {
     this.#result = result;
   }
 
-  async run(): Promise<AgentRunResult> {
+  async run(_task: Task, onEvent?: (event: EventInput) => Promise<void> | void): Promise<AgentRunResult> {
+    if (onEvent) {
+      for (const event of this.#result.events) {
+        try {
+          await onEvent(event);
+        } catch {}
+      }
+    }
     return this.#result;
   }
 }
@@ -143,7 +227,7 @@ export class ProcessAgentRunner implements AgentRunner {
     this.agyCommand = agyCommand;
   }
 
-  async run(task: Task): Promise<AgentRunResult> {
+  async run(task: Task, onEvent?: (event: EventInput) => Promise<void> | void): Promise<AgentRunResult> {
     const args = buildAgyArgs(task, { agyCommand: this.agyCommand });
     const binary = args[0] || 'agy';
     const cliArgs = args.slice(1);
@@ -159,6 +243,22 @@ export class ProcessAgentRunner implements AgentRunner {
       let conversationId: string | null = null;
       let buffer = '';
 
+      let eventQueue: Promise<void> = Promise.resolve();
+      const handleEvent = (parsed: EventInput) => {
+        events.push(parsed);
+        if (parsed.kind === 'result') {
+          summary = (parsed.payload as any).summary || summary;
+          conversationId = (parsed.payload as any).conversation_id || conversationId;
+        }
+        if (onEvent) {
+          eventQueue = eventQueue.then(async () => {
+            try {
+              await onEvent(parsed);
+            } catch {}
+          });
+        }
+      };
+
       proc.stdout?.on('data', (chunk: Buffer) => {
         buffer += chunk.toString();
         const lines = buffer.split('\n');
@@ -166,12 +266,15 @@ export class ProcessAgentRunner implements AgentRunner {
         for (const line of lines) {
           const parsed = parseAgyStreamLine(line);
           if (parsed) {
-            events.push(parsed);
-            if (parsed.kind === 'result') {
-              summary = (parsed.payload as any).summary || summary;
-              conversationId = (parsed.payload as any).conversation_id || conversationId;
-            }
+            handleEvent(parsed);
           }
+        }
+      });
+
+      proc.stderr?.on('data', (chunk: Buffer) => {
+        const text = chunk.toString();
+        if (text.trim().length > 0) {
+          handleEvent({ kind: 'command_output', payload: { command: 'agy', stderr: text } });
         }
       });
 
@@ -182,16 +285,24 @@ export class ProcessAgentRunner implements AgentRunner {
       proc.on('close', (code) => {
         if (buffer.trim()) {
           const parsed = parseAgyStreamLine(buffer);
-          if (parsed) events.push(parsed);
+          if (parsed) handleEvent(parsed);
         }
-        if (code !== 0 && events.length === 0) {
-          reject(new Error(`Agent process exited with code ${code}`));
-          return;
-        }
-        resolve({
-          events,
-          summary: summary || `Task completed (exit code ${code})`,
-          conversationId,
+        eventQueue.then(() => {
+          if (code !== 0 && events.length === 0) {
+            reject(new Error(`Agent process exited with code ${code}`));
+            return;
+          }
+          resolve({
+            events,
+            summary: summary || `Task completed (exit code ${code})`,
+            conversationId,
+          });
+        }).catch(() => {
+          resolve({
+            events,
+            summary: summary || `Task completed (exit code ${code})`,
+            conversationId,
+          });
         });
       });
     });

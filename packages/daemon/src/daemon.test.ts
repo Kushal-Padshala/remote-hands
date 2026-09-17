@@ -101,7 +101,7 @@ describe('runDaemonOnce', () => {
     expect(store.taskById(taskId)?.status).toBe('done');
     expect(store.taskById(taskId)?.result_summary).toBe('Published page');
     expect(store.taskById(taskId)?.conversation_id).toBe('conversation-1');
-    expect(store.eventsForTask(taskId).map((event) => event.kind)).toEqual(['status', 'agent_text']);
+    expect(store.eventsForTask(taskId).map((event) => event.kind)).toEqual(['status', 'agent_text', 'result', 'status']);
   });
 
   it('writes an error event and marks the task failed when the runner throws', async () => {

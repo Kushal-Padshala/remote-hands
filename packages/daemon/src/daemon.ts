@@ -34,10 +34,30 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
   await input.store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
 
   try {
-    const result = await input.runner.run(running);
-    for (const event of result.events) {
-      await input.store.appendEvent(running.id, event);
+    let streamedCount = 0;
+    const result = await input.runner.run(running, async (event) => {
+      try {
+        streamedCount++;
+        await input.store.appendEvent(running.id, event);
+      } catch {}
+    });
+    if (streamedCount === 0 && result.events) {
+      for (const event of result.events) {
+        await input.store.appendEvent(running.id, event);
+      }
     }
+    const hasResultEvent = result.events.some((e) => e.kind === 'result');
+    if (!hasResultEvent) {
+      await input.store.appendEvent(running.id, {
+        kind: 'result',
+        payload: {
+          summary: result.summary,
+          conversation_id: result.conversationId ?? undefined,
+          duration_seconds: result.durationSeconds,
+        },
+      });
+    }
+    await input.store.appendEvent(running.id, { kind: 'status', payload: { status: 'done' } });
     await input.store.completeTask(running.id, {
       summary: result.summary,
       conversationId: result.conversationId,

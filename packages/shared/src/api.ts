@@ -68,6 +68,7 @@ export const createTaskRequestSchema = z.object({
   workspace_path: z.string().optional(),
   model: z.string().optional(),
   effort: z.string().optional(),
+  conversation_id: z.string().optional(),
   parent_task_id: z.string().uuid().optional(),
 });
 

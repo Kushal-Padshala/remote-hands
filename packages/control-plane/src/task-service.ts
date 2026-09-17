@@ -17,9 +17,9 @@ export interface CreateTaskParams {
   model?: string | null | undefined;
   effort?: string | null | undefined;
   mode?: TaskMode | undefined;
+  conversationId?: string | null | undefined;
   parentTaskId?: string | null | undefined;
 }
-
 
 export function createTask(params: CreateTaskParams, now: Date = new Date()): Task & { owner_id: string } {
   return {
@@ -35,7 +35,7 @@ export function createTask(params: CreateTaskParams, now: Date = new Date()): Ta
     effort: params.effort ?? null,
     mode: params.mode ?? 'default',
     status: 'queued',
-    conversation_id: null,
+    conversation_id: params.conversationId ?? null,
     parent_task_id: params.parentTaskId ?? null,
     result_summary: null,
     error: null,
