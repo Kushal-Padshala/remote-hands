@@ -8,6 +8,7 @@ import { apiClient } from '../api/client.js';
 import { FrameViewer } from '../components/FrameViewer.js';
 import { ApprovalSheet } from '../components/ApprovalSheet.js';
 import { StepsDropdown, type ChatStep } from '../components/StepsDropdown.js';
+import { MarkdownView } from '../components/MarkdownView.js';
 
 export interface LiveTaskScreenProps {
   task: TaskRow;
@@ -387,37 +388,32 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
 
   return (
     <div className="chat-screen">
-      <div className="chat-nav-header">
-        <button
-          className="btn"
-          style={{ width: 'auto', padding: '6px 10px', fontSize: '0.8125rem', background: 'transparent', color: 'var(--text-secondary)' }}
-          onClick={onBack}
-        >
-          ← Machines
+      <header className="chat-nav-header">
+        <button className="chat-nav-back" onClick={onBack}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          <span>Machines</span>
         </button>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-            {machineName || 'My Computer'}
-          </div>
-          <div style={{ fontSize: '0.6875rem', color: isWorking ? 'var(--accent-amber)' : 'var(--accent-green)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-            <span>●</span> {isWorking ? 'agy working...' : 'Ready'}
+        <div className="chat-nav-center">
+          <div className="chat-nav-title">{machineName || 'Remote Mac'}</div>
+          <div className={`chat-nav-status ${isWorking ? 'working' : 'ready'}`}>
+            <span className={`status-dot ${isWorking ? 'pulse' : ''}`} />
+            <span>{isWorking ? 'agy working...' : 'Ready'}</span>
           </div>
         </div>
         {frameBase64 ? (
-          <button
-            className="btn"
-            style={{ width: 'auto', padding: '4px 8px', fontSize: '0.6875rem', background: 'var(--bg-surface)' }}
-            onClick={() => setShowFrame(!showFrame)}
-          >
-            📺 Screen
+          <button className="chat-nav-btn" onClick={() => setShowFrame(!showFrame)}>
+            <span>📺</span>
+            <span>{showFrame ? 'Hide' : 'Screen'}</span>
           </button>
         ) : (
-          <div style={{ width: 48 }} />
+          <div style={{ width: 60 }} />
         )}
-      </div>
+      </header>
 
       {showFrame && frameBase64 && (
-        <div style={{ marginBottom: 12 }}>
+        <div style={{ padding: '8px 16px 0 16px' }}>
           <FrameViewer frameBase64={frameBase64} />
         </div>
       )}
@@ -445,21 +441,23 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
           if (item.kind === 'agent') {
             return (
               <div key={item.message.id} className="chat-bubble-agent">
-                <div style={{ fontSize: '0.6875rem', color: 'var(--accent-cyan)', fontWeight: 600, marginBottom: 4 }}>
-                  ⚡ agy
+                <div className="chat-agent-header">
+                  <span>⚡</span>
+                  <span>agy</span>
                 </div>
-                <div style={{ whiteSpace: 'pre-wrap' }}>
-                  {item.message.text}
-                  {isWorking && item.isLatest && <span className="cursor-blink" />}
-                </div>
+                <MarkdownView
+                  content={item.message.text || ''}
+                  isLatest={isWorking && item.isLatest}
+                />
               </div>
             );
           }
 
           if (item.kind === 'error') {
             return (
-              <div key={item.message.id} className="card" style={{ borderColor: 'var(--accent-rose)', color: 'var(--accent-rose)', fontSize: '0.8125rem' }}>
-                ✖ {item.message.text}
+              <div key={item.message.id} className="error-banner" style={{ margin: '4px 0' }}>
+                <div className="error-banner-title">Error</div>
+                <div style={{ fontSize: '0.8125rem' }}>{item.message.text}</div>
               </div>
             );
           }
@@ -476,7 +474,7 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
           if (!hasThinking && !hasAgent && !hasTools) {
             return (
               <div className="chat-thinking-indicator">
-                <span>⚡</span>
+                <span className="spinner" />
                 <span>agy is starting up...</span>
               </div>
             );
@@ -503,7 +501,10 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
           disabled={!chatInput.trim() || sendingMessage}
           aria-label="Send message"
         >
-          ↑
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="19" x2="12" y2="5" />
+            <polyline points="5 12 12 5 19 12" />
+          </svg>
         </button>
       </div>
 

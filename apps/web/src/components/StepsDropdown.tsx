@@ -39,17 +39,20 @@ function formatStepDetails(step: ChatStep): {
   if (name === 'run_command') {
     const cmd = input?.CommandLine || input?.command || '';
     return {
-      icon: '$',
-      title: cmd ? `Ran ${cmd}` : 'Ran terminal command',
+      icon: '⚡',
+      title: cmd ? `$ ${cmd}` : 'Ran terminal command',
+      tag: 'CMD',
     };
   }
 
   if (name === 'view_file') {
     const p = input?.AbsolutePath || input?.path || '';
     const base = p.split('/').filter(Boolean).pop() || 'file';
+    const ext = base.includes('.') ? base.split('.').pop()?.toUpperCase() : undefined;
     return {
       icon: '📄',
-      title: `Explored ${base}`,
+      title: base,
+      tag: ext && ext.length <= 4 ? ext : 'READ',
     };
   }
 
@@ -59,8 +62,8 @@ function formatStepDetails(step: ChatStep): {
     const ext = base.includes('.') ? base.split('.').pop()?.toUpperCase() : undefined;
     return {
       icon: '✏️',
-      title: `Edited ${base}`,
-      tag: ext && ext.length <= 4 ? ext : undefined,
+      title: base,
+      tag: ext && ext.length <= 4 ? ext : 'EDIT',
     };
   }
 
@@ -69,7 +72,8 @@ function formatStepDetails(step: ChatStep): {
     const base = dir.split('/').filter(Boolean).pop() || 'directory';
     return {
       icon: '📁',
-      title: `Explored /${base}`,
+      title: `/${base}`,
+      tag: 'DIR',
     };
   }
 
@@ -77,7 +81,8 @@ function formatStepDetails(step: ChatStep): {
     const q = input?.Query || '';
     return {
       icon: '🔍',
-      title: q ? `Explored search "${q.slice(0, 30)}"` : 'Explored search',
+      title: q ? `"${q.slice(0, 32)}"` : 'Search',
+      tag: 'GREP',
     };
   }
 
@@ -85,7 +90,8 @@ function formatStepDetails(step: ChatStep): {
     const q = input?.query || '';
     return {
       icon: '🌐',
-      title: q ? `Searched web for "${q.slice(0, 30)}"` : 'Searched web',
+      title: q ? `"${q.slice(0, 32)}"` : 'Web',
+      tag: 'WEB',
     };
   }
 
@@ -93,13 +99,14 @@ function formatStepDetails(step: ChatStep): {
     const tool = input?.ToolName || 'tool';
     return {
       icon: '🔌',
-      title: `Ran ${tool}`,
+      title: tool,
+      tag: 'MCP',
     };
   }
 
   return {
     icon: '⚙️',
-    title: `Ran ${name}`,
+    title: name,
   };
 }
 
@@ -133,10 +140,10 @@ export function StepsDropdown({ steps, isWorking }: StepsDropdownProps) {
 
   const duration = calculateDuration(steps);
   const headerText = isWorking
-    ? `Working on task (${steps.length} ${steps.length === 1 ? 'step' : 'steps'})`
+    ? `Running actions (${steps.length})`
     : duration
-      ? `Worked for ${duration}`
-      : `Completed ${steps.length} ${steps.length === 1 ? 'action' : 'actions'}`;
+      ? `Completed ${steps.length} actions in ${duration}`
+      : `Completed ${steps.length} actions`;
 
   return (
     <div className="steps-dropdown">
@@ -151,7 +158,9 @@ export function StepsDropdown({ steps, isWorking }: StepsDropdownProps) {
           {isWorking ? (
             <span className="steps-pulse-dot" />
           ) : (
-            <span style={{ fontSize: '0.8125rem' }}>⚙️</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--accent-emerald)' }}>
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
           )}
           <span>{headerText}</span>
         </div>
@@ -197,8 +206,8 @@ export function StepsDropdown({ steps, isWorking }: StepsDropdownProps) {
                 {isStepExpanded && (
                   <div className="step-details">
                     {step.toolInput && (
-                      <div style={{ marginBottom: 6 }}>
-                        <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 2 }}>
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 3, fontWeight: 600 }}>
                           Input
                         </div>
                         <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>
@@ -210,12 +219,12 @@ export function StepsDropdown({ steps, isWorking }: StepsDropdownProps) {
                     )}
                     {step.toolOutput && (
                       <div>
-                        <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 2 }}>
+                        <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 3, fontWeight: 600 }}>
                           Output
                         </div>
                         <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>
-                          {step.toolOutput.slice(0, 1000)}
-                          {step.toolOutput.length > 1000 ? '\n... (truncated)' : ''}
+                          {step.toolOutput.slice(0, 1500)}
+                          {step.toolOutput.length > 1500 ? '\n... (truncated)' : ''}
                         </pre>
                       </div>
                     )}

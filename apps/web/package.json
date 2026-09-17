@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@remote-hands/shared": "0.0.0",
+    "marked": "^18.0.13",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
