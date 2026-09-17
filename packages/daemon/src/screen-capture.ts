@@ -43,7 +43,10 @@ export class DefaultFrameSource implements FrameSource {
       try {
         if (!fs.existsSync(candidate)) continue;
         const stat = await fs.promises.stat(candidate);
-        if (now - stat.mtimeMs > 8000) continue;
+        if (now - stat.mtimeMs > 5000) {
+          await fs.promises.unlink(candidate).catch(() => {});
+          continue;
+        }
 
         const buf = await fs.promises.readFile(candidate);
         if (buf.length === 0) continue;
@@ -118,7 +121,7 @@ export class DefaultFrameSource implements FrameSource {
 
   private async captureFromChromeTab(): Promise<BrowserFrame | null | undefined> {
     const now = Date.now();
-    if (now - this.lastCapturedTime < 2500) {
+    if (now - this.lastCapturedTime < 2000) {
       return null;
     }
 

@@ -925,37 +925,29 @@ main {
   line-height: 1.5;
 }
 
-.chat-working-orb-card {
-  display: flex;
-  flex-direction: column;
+.chat-inline-status {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border-subtle);
-  border-radius: 16px;
-  padding: 24px 16px;
-  margin: 12px 0;
-  text-align: center;
+  gap: 8px;
+  padding: 5px 12px;
+  margin: 6px 0;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  width: fit-content;
+  max-width: 90%;
+  animation: fadeIn 0.15s ease-out;
 }
 
-.chat-working-orb-details {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  align-items: center;
-}
-
-.chat-working-orb-title {
+.chat-inline-status-text {
   font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--text-primary);
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   letter-spacing: 0.01em;
-}
-
-.chat-working-orb-desc {
-  font-size: 0.6875rem;
-  color: var(--text-muted);
 }
 
 .chat-nav-btn {
@@ -1167,6 +1159,18 @@ main {
   flex-shrink: 0;
 }
 
+.step-tag.step-tag-loading {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.4);
+  animation: pulse 1.6s infinite ease-in-out;
+}
+
+.step-row.is-active-loading {
+  background: rgba(56, 189, 248, 0.04);
+  border-radius: 8px;
+}
+
 .step-title {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1283,21 +1287,72 @@ main {
 }
 
 .frame-viewer {
+  position: relative;
   width: 100%;
   border-radius: 12px;
   overflow: hidden;
-  background: #000000;
+  background: #09090b;
   border: 1px solid var(--border-subtle);
   aspect-ratio: 16 / 9;
   display: flex;
   align-items: center;
   justify-content: center;
+  animation: fadeIn 0.2s ease-out;
 }
 
-.frame-viewer img {
+.frame-viewer-header {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 2;
+  pointer-events: auto;
+}
+
+.frame-viewer-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: #ffffff;
+  letter-spacing: 0.02em;
+}
+
+.frame-viewer-close {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.75);
+  border: none;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.frame-viewer-close:active {
+  transform: scale(0.9);
+  color: #ffffff;
+}
+
+.frame-viewer img,
+.frame-viewer-img {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  transition: opacity 0.15s ease-in-out;
 }
 
 .sheet-overlay {

@@ -139,9 +139,16 @@ export function StepsDropdown({ steps, isWorking }: StepsDropdownProps) {
 
   if (steps.length === 0) return null;
 
+  const activeStep = isWorking ? steps.find((s) => s.toolStatus === 'active') : null;
+  const activeHeaderSubtitle = activeStep?.toolName === 'view_file'
+    ? 'Reading files...'
+    : activeStep?.toolName === 'replace_file_content' || activeStep?.toolName === 'write_to_file'
+      ? 'Updating files...'
+      : `Running actions (${steps.length})`;
+
   const duration = calculateDuration(steps);
   const headerText = isWorking
-    ? `Running actions (${steps.length})`
+    ? activeHeaderSubtitle
     : duration
       ? `Completed ${steps.length} actions in ${duration}`
       : `Completed ${steps.length} actions`;
@@ -174,11 +181,18 @@ export function StepsDropdown({ steps, isWorking }: StepsDropdownProps) {
             const formatted = formatStepDetails(step);
             const isStepExpanded = expandedStepId === step.id;
             const hasExtra = Boolean(step.toolInput || step.toolOutput);
+            const isToolActive = step.toolStatus === 'active' && isWorking;
+            const isFileRead = step.toolName === 'view_file' && isToolActive;
+            const isFileEdit = (step.toolName === 'replace_file_content' || step.toolName === 'write_to_file') && isToolActive;
+
+            const tagLabel = isFileRead ? 'READING' : isFileEdit ? 'EDITING' : formatted.tag;
+            const statusLabel = isFileRead ? 'reading' : isFileEdit ? 'updating' : 'running';
+            const orbState = isFileRead ? 'searching' : isFileEdit ? 'shaping' : 'solving';
 
             return (
               <div key={step.id} className="step-item-wrapper">
                 <div
-                  className="step-row"
+                  className={`step-row ${isFileRead || isFileEdit ? 'is-active-loading' : ''}`}
                   onClick={() => {
                     if (hasExtra) {
                       setExpandedStepId(isStepExpanded ? null : step.id);
@@ -188,15 +202,19 @@ export function StepsDropdown({ steps, isWorking }: StepsDropdownProps) {
                 >
                   <div className="step-row-left">
                     <span className="step-icon">{formatted.icon}</span>
-                    {formatted.tag && <span className="step-tag">{formatted.tag}</span>}
+                    {tagLabel && (
+                      <span className={`step-tag ${isFileRead || isFileEdit ? 'step-tag-loading' : ''}`}>
+                        {tagLabel}
+                      </span>
+                    )}
                     <span className="step-title">{formatted.title}</span>
                   </div>
 
                   <div className="step-row-right">
-                    {step.toolStatus === 'active' && isWorking ? (
+                    {isToolActive ? (
                       <span className="step-status running" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <ThinkingOrb state="solving" size={20} theme="dark" role="presentation" />
-                        <span>running</span>
+                        <ThinkingOrb state={orbState} size={20} theme="dark" role="presentation" />
+                        <span>{statusLabel}</span>
                       </span>
                     ) : (
                       <span className="step-status done">✓</span>

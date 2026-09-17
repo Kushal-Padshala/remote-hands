@@ -40,7 +40,7 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
 
   const frameStream = new ThrottledFrameStream({
     source: input.frameSource ?? new DefaultFrameSource(),
-    minIntervalMs: 800,
+    minIntervalMs: 2000,
     onFrame: (frame) => {
       try {
         if (input.onFrame) {
@@ -53,7 +53,7 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
     },
   });
 
-  frameStream.start(800);
+  frameStream.start(2000);
 
   try {
     let streamedCount = 0;

@@ -1,20 +1,38 @@
 export interface FrameViewerProps {
   frameBase64: string | null;
+  onClose?: (() => void) | undefined;
 }
 
-export function FrameViewer({ frameBase64 }: FrameViewerProps) {
+export function FrameViewer({ frameBase64, onClose }: FrameViewerProps) {
+  if (!frameBase64) return null;
+
+  const imgSrc = frameBase64.startsWith('data:')
+    ? frameBase64
+    : `data:image/jpeg;base64,${frameBase64}`;
+
   return (
     <div className="frame-viewer" data-testid="frame-viewer">
-      {frameBase64 ? (
-        <img
-          src={frameBase64.startsWith('data:') ? frameBase64 : `data:image/jpeg;base64,${frameBase64}`}
-          alt="Live browser screen"
-        />
-      ) : (
-        <div style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
-          No browser frame available
+      <div className="frame-viewer-header">
+        <div className="frame-viewer-live-badge">
+          <span className="live-dot pulse" />
+          <span>LIVE • Chrome</span>
         </div>
-      )}
+        {onClose && (
+          <button
+            type="button"
+            className="frame-viewer-close"
+            onClick={onClose}
+            aria-label="Hide screen"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      <img
+        src={imgSrc}
+        alt="Live browser screen"
+        className="frame-viewer-img"
+      />
     </div>
   );
 }

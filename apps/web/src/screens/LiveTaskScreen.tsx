@@ -73,6 +73,51 @@ function groupMessages(messages: ChatMessage[], isWorking: boolean): GroupedRend
   return items;
 }
 
+function getActiveWorkingInfo(messages: ChatMessage[]): {
+  text: string;
+  state: 'working' | 'searching' | 'solving' | 'listening' | 'connecting' | 'weaving' | 'composing' | 'breathing' | 'shaping';
+} {
+  const activeTool = [...messages].reverse().find((m) => m.type === 'tool' && m.toolStatus === 'active');
+  if (activeTool) {
+    const name = activeTool.toolName || '';
+    const input = activeTool.toolInput;
+
+    if (name === 'view_file') {
+      const p = input?.AbsolutePath || input?.path || '';
+      const base = p.split('/').filter(Boolean).pop() || 'file';
+      return { text: `Reading ${base}...`, state: 'searching' };
+    }
+    if (name === 'replace_file_content' || name === 'multi_replace_file_content' || name === 'write_to_file') {
+      const p = input?.TargetFile || input?.path || '';
+      const base = p.split('/').filter(Boolean).pop() || 'file';
+      return { text: `Updating ${base}...`, state: 'shaping' };
+    }
+    if (name === 'run_command') {
+      const cmd = input?.CommandLine || input?.command || '';
+      const displayCmd = cmd.length > 28 ? cmd.slice(0, 28) + '...' : cmd;
+      return { text: displayCmd ? `Running ${displayCmd}` : 'Running terminal command...', state: 'solving' };
+    }
+    if (name === 'grep_search') {
+      const q = input?.Query || '';
+      return { text: q ? `Searching for "${q.slice(0, 18)}"...` : 'Searching codebase...', state: 'searching' };
+    }
+    if (name === 'search_web') {
+      return { text: 'Searching web...', state: 'connecting' };
+    }
+    if (name === 'list_dir') {
+      return { text: 'Listing files...', state: 'searching' };
+    }
+    return { text: `Executing ${name}...`, state: 'working' };
+  }
+
+  const lastMsg = messages[messages.length - 1];
+  if (lastMsg?.type === 'thinking') {
+    return { text: 'Thinking...', state: 'weaving' };
+  }
+
+  return { text: 'Thinking...', state: 'working' };
+}
+
 export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFactory }: LiveTaskScreenProps) {
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(task?.id ?? null);
   const [conversationId, setConversationId] = useState<string | undefined>(task?.conversation_id ?? undefined);
@@ -83,6 +128,20 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
   const [isWorking, setIsWorking] = useState<boolean>(Boolean(task));
   const [chatInput, setChatInput] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
+  const frameExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const updateFrame = (nextBase64: string | null) => {
+    if (frameExpiryTimerRef.current) {
+      clearTimeout(frameExpiryTimerRef.current);
+      frameExpiryTimerRef.current = null;
+    }
+    setFrameBase64(nextBase64);
+    if (nextBase64) {
+      frameExpiryTimerRef.current = setTimeout(() => {
+        setFrameBase64(null);
+      }, 5000);
+    }
+  };
 
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     if (task?.prompt) {
@@ -285,7 +344,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         const msg = parseResult.message;
 
         if (msg.type === 'task.frame') {
-          setFrameBase64(msg.jpeg_base64);
+          updateFrame(msg.jpeg_base64);
         } else if (msg.type === 'task.event') {
           if ((msg.event as any)?.id) {
             seenEventIds.add(String((msg.event as any).id));
@@ -313,6 +372,10 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
     return () => {
       closed = true;
       if (pollTimer) clearInterval(pollTimer);
+      if (frameExpiryTimerRef.current) {
+        clearTimeout(frameExpiryTimerRef.current);
+        frameExpiryTimerRef.current = null;
+      }
       if (ws) {
         try {
           ws.close();
@@ -403,6 +466,8 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
     }
   };
 
+  const activeInfo = getActiveWorkingInfo(messages);
+
   return (
     <div className="chat-screen">
       <header className="chat-nav-header">
@@ -453,7 +518,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
 
       {showFrame && frameBase64 && (
         <div style={{ padding: '8px 16px 0 16px' }}>
-          <FrameViewer frameBase64={frameBase64} />
+          <FrameViewer frameBase64={frameBase64} onClose={() => setShowFrame(false)} />
         </div>
       )}
 
@@ -523,12 +588,9 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         })}
 
         {isWorking && (
-          <div className="chat-working-orb-card" data-testid="thinking-orb-indicator">
-            <ThinkingOrb state="searching" size={64} theme="dark" role="presentation" />
-            <div className="chat-working-orb-details">
-              <span className="chat-working-orb-title">Thinking & Executing</span>
-              <span className="chat-working-orb-desc">agy is taking actions on your Mac...</span>
-            </div>
+          <div className="chat-inline-status" data-testid="thinking-orb-indicator">
+            <ThinkingOrb state={activeInfo.state} size={20} theme="dark" role="presentation" />
+            <span className="chat-inline-status-text">{activeInfo.text}</span>
           </div>
         )}
 

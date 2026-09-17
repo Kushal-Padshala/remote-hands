@@ -176,4 +176,39 @@ describe('Web App Workflow', () => {
       expect(screen.queryByTestId('approval-sheet')).toBeNull();
     });
   });
+
+  it('renders inline thinking status and expires old frame in 5s', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+    const socket = new MockSocket();
+
+    render(
+      <LiveTaskScreen
+        task={fakeTask}
+        onBack={() => {}}
+        webSocketFactory={() => socket as any}
+      />,
+    );
+
+    expect(screen.getByTestId('thinking-orb-indicator')).toBeDefined();
+
+    socket.triggerMessage({
+      type: 'task.frame',
+      task_id: fakeTask.id,
+      jpeg_base64: 'live-screenshot-data',
+      captured_at: new Date().toISOString(),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('frame-viewer')).toBeDefined();
+    });
+
+    vi.advanceTimersByTime(5100);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('frame-viewer')).toBeNull();
+    });
+
+    vi.useRealTimers();
+  });
 });
