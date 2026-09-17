@@ -18,7 +18,12 @@ export interface AgentRunner {
 
 export type AgentStreamRecord = EventInput;
 
-type AgyArgConfig = Pick<DaemonConfig, 'agyCommand'>;
+export const DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT =
+  '[Context: Remote Hands mobile web interface. Format all output using clean, readable GitHub-flavored Markdown. Use markdown tables for multi-row or multi-column data, bold labels, and syntax-highlighted code blocks. Keep answers direct, concise, and structured for phone screens.]';
+
+type AgyArgConfig = Pick<DaemonConfig, 'agyCommand'> & {
+  systemPrompt?: string | undefined;
+};
 
 const textRecord = z.object({ type: z.literal('text'), text: z.string() });
 const thinkingRecord = z.object({ type: z.literal('thinking'), text: z.string() });
@@ -51,7 +56,11 @@ const resultRecord = z.object({
 });
 
 export function buildAgyArgs(task: Task, config: AgyArgConfig): readonly string[] {
-  const args = [config.agyCommand, '-p', task.prompt, '--output-format', 'stream-json'];
+  const promptText = config.systemPrompt && !task.conversation_id
+    ? `${config.systemPrompt}\n\n${task.prompt}`
+    : task.prompt;
+
+  const args = [config.agyCommand, '-p', promptText, '--output-format', 'stream-json'];
 
   if (task.workspace_path) args.push('--add-dir', task.workspace_path);
   if (task.conversation_id) args.push('--conversation', task.conversation_id);
@@ -243,13 +252,18 @@ export class StaticAgentRunner implements AgentRunner {
 
 export class ProcessAgentRunner implements AgentRunner {
   private agyCommand: string;
+  private systemPrompt?: string;
 
-  constructor(agyCommand: string = 'agy') {
+  constructor(agyCommand: string = 'agy', systemPrompt?: string) {
     this.agyCommand = agyCommand;
+    this.systemPrompt = systemPrompt ?? DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT;
   }
 
   async run(task: Task, onEvent?: (event: EventInput) => Promise<void> | void): Promise<AgentRunResult> {
-    const args = buildAgyArgs(task, { agyCommand: this.agyCommand });
+    const args = buildAgyArgs(task, {
+      agyCommand: this.agyCommand,
+      systemPrompt: this.systemPrompt,
+    });
     const binary = args[0] || 'agy';
     const cliArgs = args.slice(1);
 

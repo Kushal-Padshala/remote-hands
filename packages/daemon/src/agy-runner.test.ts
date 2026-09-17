@@ -57,6 +57,15 @@ describe('buildAgyArgs', () => {
 
     expect(args).toEqual(['agy', '-p', 'Add a privacy policy page', '--output-format', 'stream-json']);
   });
+
+  it('prepends systemPrompt on initial conversation turn', () => {
+    const args = buildAgyArgs(
+      task({ conversation_id: null }),
+      { agyCommand: 'agy', systemPrompt: '[System Context]' },
+    );
+
+    expect(args).toContain('[System Context]\n\nAdd a privacy policy page');
+  });
 });
 
 describe('parseAgyStreamLine', () => {

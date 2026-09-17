@@ -144,88 +144,79 @@ export function App() {
   };
 
   return (
-    <div className="app-container">
+    <div className="app-shell">
       {currentScreen !== 'live-task' && (
-        <header className="header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <h1>Remote Hands</h1>
-            <span className="badge badge-online">PWA</span>
+        <header className="app-header">
+          <div className="brand-group">
+            <div className="brand-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+            </div>
+            <span className="brand-title">Remote Hands</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="header-actions">
             <button
-              className="btn"
-              style={{ width: 'auto', padding: '6px 10px', fontSize: '0.75rem' }}
+              className="btn-header-ghost"
               onClick={handleClearCache}
+              title="Reset paired session"
             >
               Reset
             </button>
             <button
-              className="btn qr-button"
-              style={{ width: 'auto', padding: '6px 12px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}
+              className="btn-header-pill qr-button"
               onClick={() => setShowPairModal(true)}
             >
-              📱 QR Code
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+              </svg>
+              <span>Pair QR</span>
             </button>
           </div>
         </header>
       )}
 
-      <main>
+      <main className="app-main">
         {currentScreen !== 'live-task' && pairingCode && (
-          <div
-            className="card"
-            style={{
-              borderColor: 'var(--accent-teal)',
-              backgroundColor: 'rgba(20, 184, 166, 0.08)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: 16,
-              padding: '10px 14px',
-            }}
-          >
-            <span style={{ fontSize: '0.8125rem', color: 'var(--accent-teal)', fontWeight: 600 }}>
-              Direct Pairing Active: {pairingCode}
-            </span>
+          <div className="info-banner">
+            <div className="info-banner-content">
+              <span className="info-banner-dot" />
+              <span className="info-banner-text">Paired to <strong>{pairingCode}</strong></span>
+            </div>
           </div>
         )}
 
         {currentScreen !== 'live-task' && error && (
-          <div className="card" style={{ borderColor: 'var(--accent-rose)', marginBottom: 16 }}>
-            <div style={{ color: 'var(--accent-rose)', fontWeight: 600, marginBottom: 8 }}>
+          <div className="error-banner">
+            <div className="error-banner-title">
               {error.includes('session token') ? 'Phone Not Paired' : error}
             </div>
             {error.includes('session token') && (
-              <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-                <p style={{ marginBottom: 10 }}>
-                  This device does not have an active session with your computer.
-                </p>
-                <p style={{ marginBottom: 10 }}>
-                  Run <code>rh pair</code> on your computer to view your pairing QR code or direct link.
-                </p>
-                <div style={{ display: 'flex', gap: 8, marginTop: 12, marginBottom: 12 }}>
+              <div className="error-banner-body">
+                <p>This phone does not have an active session with your Mac.</p>
+                <p>Run <code className="inline-code">rh pair</code> on your computer to view QR code or direct link.</p>
+                <div className="connect-input-group">
                   <input
                     type="text"
-                    className="input"
+                    className="app-input"
                     placeholder="Paste pairing URL or token..."
                     value={pasteUrlInput}
                     onChange={(e) => setPasteUrlInput(e.target.value)}
-                    style={{ flex: 1, padding: '8px 12px', fontSize: '0.75rem' }}
                   />
                   <button
-                    className="btn btn-primary"
-                    style={{ width: 'auto', padding: '8px 14px', fontSize: '0.75rem' }}
+                    className="btn-primary-compact"
                     onClick={() => handleConnectUrl(pasteUrlInput)}
                   >
                     Connect
                   </button>
                 </div>
-                <button
-                  className="btn"
-                  style={{ width: 'auto', padding: '6px 12px', fontSize: '0.75rem' }}
-                  onClick={handleClearCache}
-                >
-                  Clear Cache
+                <button className="btn-text" onClick={handleClearCache}>
+                  Clear cached credentials
                 </button>
               </div>
             )}

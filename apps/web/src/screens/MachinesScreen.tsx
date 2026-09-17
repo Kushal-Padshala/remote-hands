@@ -8,64 +8,100 @@ export interface MachinesScreenProps {
   onShowPairQr?: (() => void) | undefined;
 }
 
-export function MachinesScreen({ machines, onSelectMachine, onRefresh, loading, onShowPairQr }: MachinesScreenProps) {
+export function MachinesScreen({ machines, onSelectMachine, onRefresh, loading }: MachinesScreenProps) {
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-          Available Machines
-        </h2>
+    <div className="screen-content">
+      <div className="section-header">
+        <div>
+          <h2 className="section-title">Devices</h2>
+          <p className="section-subtitle">Select a machine to start or continue tasks</p>
+        </div>
         <button
-          className="btn"
-          style={{ width: 'auto', padding: '6px 12px', fontSize: '0.75rem', background: 'var(--bg-surface)' }}
+          className="btn-ghost"
           onClick={onRefresh}
           disabled={loading}
+          aria-label="Refresh machines list"
         >
-          {loading ? 'Refreshing...' : 'Refresh'}
+          {loading ? (
+            <span className="spinner" />
+          ) : (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+            </svg>
+          )}
+          <span>{loading ? 'Refreshing' : 'Refresh'}</span>
         </button>
       </div>
 
       {machines.length === 0 && !loading && (
-        <div className="card" data-testid="machines-placeholder" style={{ textAlign: 'center', padding: '32px 16px' }}>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 500 }}>No machines connected</p>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-            Run <code>rh start</code> on your computer to begin.
+        <div className="empty-state-card" data-testid="machines-placeholder">
+          <div className="empty-state-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+              <line x1="8" y1="21" x2="16" y2="21" />
+              <line x1="12" y1="17" x2="12" y2="21" />
+            </svg>
+          </div>
+          <h3 className="empty-state-title">No machines connected</h3>
+          <p className="empty-state-desc">
+            Run <code className="inline-code">rh start</code> on your Mac or terminal to connect this device.
           </p>
         </div>
       )}
 
-      {machines.map((machine) => (
-        <div
-          key={machine.id}
-          className="card"
-          data-testid={`machine-card-${machine.id}`}
-          style={{ cursor: 'pointer' }}
-          onClick={() => onSelectMachine(machine)}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <strong style={{ fontSize: '0.9375rem' }}>{machine.name}</strong>
-            <span className={`badge ${machine.status === 'online' ? 'badge-online' : 'badge-offline'}`}>
-              {machine.status}
-            </span>
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-            {machine.hostname}
-          </div>
-          <div style={{ marginTop: 12 }}>
-            <button
-              className="btn btn-primary"
-              data-testid={`create-task-btn-${machine.id}`}
-              style={{ padding: '8px 12px', fontSize: '0.8125rem' }}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelectMachine(machine);
-              }}
+      <div className="machines-list">
+        {machines.map((machine) => {
+          const isOnline = machine.status === 'online';
+          return (
+            <div
+              key={machine.id}
+              className="machine-card"
+              data-testid={`machine-card-${machine.id}`}
+              onClick={() => onSelectMachine(machine)}
             >
-              + New Task
-            </button>
-          </div>
-        </div>
-      ))}
+              <div className="machine-card-header">
+                <div className="machine-info-group">
+                  <div className="device-avatar">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                      <line x1="8" y1="21" x2="16" y2="21" />
+                      <line x1="12" y1="17" x2="12" y2="21" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="machine-title-row">
+                      <span className="machine-name">{machine.name}</span>
+                    </div>
+                    <div className="machine-hostname">{machine.hostname}</div>
+                  </div>
+                </div>
+                <div className={`status-pill ${isOnline ? 'status-pill-online' : 'status-pill-offline'}`}>
+                  <span className={`status-dot ${isOnline ? 'pulse' : ''}`} />
+                  <span className="status-label">{isOnline ? 'Online' : 'Offline'}</span>
+                </div>
+              </div>
+
+              <div className="machine-card-footer">
+                <span className="badge-badge">agy {machine.agy_version || 'ready'}</span>
+                <button
+                  className="btn-create-task"
+                  data-testid={`create-task-btn-${machine.id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectMachine(machine);
+                  }}
+                >
+                  <span>New Task</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                    <polyline points="12 5 19 12 12 19" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
