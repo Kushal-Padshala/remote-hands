@@ -59,6 +59,15 @@ function createMockD1Database(): D1Database {
           const list = tables.get('machines')!.filter((m) => m.id === bound[0]);
           return { success: true, results: list as T[] };
         }
+        if (q.startsWith('UPDATE machines SET last_seen_at')) {
+          const list = tables.get('machines')!;
+          const match = list.find((m) => m.id === bound[1]);
+          if (match) {
+            match.last_seen_at = bound[0];
+            match.status = 'online';
+          }
+          return { success: true, results: [] as T[] };
+        }
         if (q.startsWith('INSERT INTO tasks')) {
           const list = tables.get('tasks')!;
           list.push({
@@ -189,6 +198,7 @@ describe('D1 repositories', () => {
 
   it('manages machines repository operations', async () => {
     const machines = new MachinesRepository(db);
+    const nowIso = new Date().toISOString();
     await machines.upsert({
       id: '11111111-1111-4111-8111-111111111111',
       owner_id: 'owner-1',
@@ -197,13 +207,19 @@ describe('D1 repositories', () => {
       daemon_version: '0.1.0',
       agy_version: '0.2.0',
       status: 'online',
-      last_seen_at: '2026-09-16T12:00:00.000Z',
-      created_at: '2026-09-16T12:00:00.000Z',
+      last_seen_at: nowIso,
+      created_at: nowIso,
     });
 
     const list = await machines.listByOwner('owner-1');
     expect(list).toHaveLength(1);
     expect(list[0]?.name).toBe('MacBook');
+    expect(list[0]?.status).toBe('online');
+
+    const staleIso = new Date(Date.now() - 60_000).toISOString();
+    await machines.updateHeartbeat('11111111-1111-4111-8111-111111111111', staleIso);
+    const staleGet = await machines.getById('11111111-1111-4111-8111-111111111111');
+    expect(staleGet?.status).toBe('offline');
   });
 
   it('manages tasks and events repository operations', async () => {

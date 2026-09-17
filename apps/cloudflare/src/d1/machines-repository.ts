@@ -36,14 +36,31 @@ export class MachinesRepository {
       .prepare(`SELECT * FROM machines WHERE owner_id = ? ORDER BY created_at ASC`)
       .bind(ownerId)
       .all<MachineRow>();
-    return res.results ?? [];
+    const now = Date.now();
+    return (res.results ?? []).map((m) => {
+      const isOnline = m.last_seen_at
+        ? Math.abs(now - new Date(m.last_seen_at).getTime()) < 45000
+        : false;
+      return {
+        ...m,
+        status: isOnline ? 'online' : 'offline',
+      };
+    });
   }
 
   async getById(id: string): Promise<MachineRow | null> {
-    return this.db
+    const row = await this.db
       .prepare(`SELECT * FROM machines WHERE id = ?`)
       .bind(id)
       .first<MachineRow>();
+    if (!row) return null;
+    const isOnline = row.last_seen_at
+      ? Math.abs(Date.now() - new Date(row.last_seen_at).getTime()) < 45000
+      : false;
+    return {
+      ...row,
+      status: isOnline ? 'online' : 'offline',
+    };
   }
 
   async updateHeartbeat(id: string, lastSeenAt: string): Promise<void> {
