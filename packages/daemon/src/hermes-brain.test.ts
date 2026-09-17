@@ -123,33 +123,53 @@ describe('HermesBrain Memory Operations', () => {
     expect(brain.determineEffort('rearchitect status check')).toBe('high');
   });
 
-  it('prepares task context with auto-resolved path and tuned effort', async () => {
-    const projectDir = path.join(tmpDir, 'remote-hands');
-    fs.mkdirSync(projectDir, { recursive: true });
+  it('prepares task context with auto-resolved path, dynamic architecture, and tuned effort', async () => {
+    const projectDir = path.join(tmpDir, 'my-project');
+    const webAppDir = path.join(projectDir, 'apps/web');
+    fs.mkdirSync(webAppDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(projectDir, 'package.json'),
+      JSON.stringify({
+        name: 'my-project',
+        workspaces: ['apps/*'],
+      }),
+      'utf-8',
+    );
+
+    fs.writeFileSync(
+      path.join(webAppDir, 'package.json'),
+      JSON.stringify({
+        name: '@my-project/web',
+        dependencies: { react: '^18.0.0', vite: '^5.0.0' },
+      }),
+      'utf-8',
+    );
+
     const brain = new HermesBrain(tmpDir);
     await brain.ensureInitialized({
-      name: 'remote-hands',
+      name: 'my-project',
       path: projectDir,
-      aliases: ['remote hands'],
+      aliases: ['my project'],
     });
 
     const ctx = await brain.prepareTaskContext({
-      prompt: 'in remote hands make header sticky',
+      prompt: 'in my project update web header',
       workspace_path: null,
       effort: null,
     });
 
     expect(ctx.resolvedWorkspacePath).toBe(projectDir);
     expect(ctx.recommendedEffort).toBe('medium');
-    expect(ctx.augmentedPrompt).toContain('in remote hands make header sticky');
+    expect(ctx.augmentedPrompt).toContain('in my project update web header');
     expect(ctx.augmentedPrompt).toContain('[Hermes Memory:');
     expect(ctx.augmentedPrompt).toContain('Target workspace:');
-    expect(ctx.augmentedPrompt).toContain('Remote Hands Architecture:');
-    expect(ctx.augmentedPrompt).toContain('Learned Recipes:');
+    expect(ctx.augmentedPrompt).toContain('Monorepo Packages:');
+    expect(ctx.augmentedPrompt).toContain('`apps/web`: @my-project/web (React, Vite)');
+    expect(ctx.augmentedPrompt).toContain('Relevant Package(s) for task: `apps/web`');
     expect(ctx.augmentedPrompt).toContain('Execution Speed Directives:');
 
-    const recipes = await brain.extractLearnedRecipes();
-    expect(recipes.length).toBeGreaterThan(0);
-    expect(recipes[0]).toContain('Mobile chat sticky header');
+    const discovered = brain.discoverWorkspaceArchitecture(projectDir, 'fix web header');
+    expect(discovered).toContain('`apps/web`: @my-project/web (React, Vite)');
   });
 });

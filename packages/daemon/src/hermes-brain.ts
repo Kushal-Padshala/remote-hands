@@ -82,9 +82,6 @@ export class HermesBrain {
       projectsMarkdown || '- None registered yet',
       '',
       '## Learned Skills & Recipes',
-      '- Mobile chat sticky header: use `position: sticky; top: 0; z-index: 50;` with `overflow-x: clip` on `html, body` and flex constraints (`min-height: 0`)',
-      '- Mobile chat virtual keyboard: use window.visualViewport resize listener to adjust height and keep header & input in place without jumping',
-      '- Voice input continuous recording: restart recognition automatically on onend unless user clicked stop',
       '',
       '## Recent Activity',
       '',
@@ -234,18 +231,108 @@ export class HermesBrain {
     return recipes;
   }
 
-  getProjectArchitectureMap(workspacePath: string): string {
-    const base = path.basename(workspacePath).toLowerCase();
-    if (base === 'remote-hands' || base === 'remotehands') {
-      return [
-        'Remote Hands Architecture:',
-        '- Web UI Chat & Mobile: apps/web/src/screens/LiveTaskScreen.tsx, apps/web/src/styles.css, apps/web/src/App.tsx, apps/web/src/screens/HistoryTab.tsx',
-        '- Cloudflare Backend API: apps/cloudflare/src/worker.ts, apps/cloudflare/src/routes/tasks.ts, apps/cloudflare/src/d1/tasks-repository.ts',
-        '- Daemon & Agent Runner: packages/daemon/src/agy-runner.ts, packages/daemon/src/hermes-brain.ts',
-        '- Fast Verification: run targeted test files (e.g. `npx vitest run <file>`) instead of full test suite.',
-      ].join('\n');
+  discoverWorkspaceArchitecture(workspacePath: string, prompt?: string): string {
+    if (!fs.existsSync(workspacePath)) return '';
+
+    const lines: string[] = [];
+    const lowerPrompt = (prompt || '').toLowerCase();
+    const pkgJsonPath = path.join(workspacePath, 'package.json');
+
+    if (fs.existsSync(pkgJsonPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'));
+        const pkgName = pkg.name || path.basename(workspacePath);
+        lines.push(`Workspace: ${pkgName}`);
+
+        const workspaces = Array.isArray(pkg.workspaces)
+          ? pkg.workspaces
+          : (pkg.workspaces?.packages && Array.isArray(pkg.workspaces.packages))
+            ? pkg.workspaces.packages
+            : null;
+
+        if (workspaces && workspaces.length > 0) {
+          lines.push('Monorepo Packages:');
+          const matchedPackages: string[] = [];
+          for (const pattern of workspaces) {
+            const cleanPattern = pattern.replace(/\/\*$/, '');
+            const targetDir = path.join(workspacePath, cleanPattern);
+            if (fs.existsSync(targetDir) && fs.statSync(targetDir).isDirectory()) {
+              const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+              for (const entry of entries) {
+                if (entry.isDirectory() && !entry.name.startsWith('.')) {
+                  const subDir = path.join(targetDir, entry.name);
+                  const relPath = path.relative(workspacePath, subDir);
+                  const subPkgPath = path.join(subDir, 'package.json');
+                  let subDesc = '';
+                  if (fs.existsSync(subPkgPath)) {
+                    try {
+                      const subPkg = JSON.parse(fs.readFileSync(subPkgPath, 'utf-8'));
+                      const subName = subPkg.name || entry.name;
+                      const deps = { ...(subPkg.dependencies || {}), ...(subPkg.devDependencies || {}) };
+                      const frameworks: string[] = [];
+                      if (deps.react) frameworks.push('React');
+                      if (deps.vite) frameworks.push('Vite');
+                      if (deps.next) frameworks.push('Next.js');
+                      if (deps.vue) frameworks.push('Vue');
+                      if (deps.express) frameworks.push('Express');
+                      if (deps.hono) frameworks.push('Hono');
+                      if (deps.wrangler || subPkg.name?.includes('cloudflare')) frameworks.push('Cloudflare');
+                      if (deps.vitest) frameworks.push('Vitest');
+                      if (deps.jest) frameworks.push('Jest');
+                      subDesc = `${subName}${frameworks.length > 0 ? ` (${frameworks.join(', ')})` : ''}`;
+                    } catch {}
+                  }
+                  lines.push(`- \`${relPath}\`${subDesc ? `: ${subDesc}` : ''}`);
+
+                  if (lowerPrompt) {
+                    const words = relPath.toLowerCase().split(/[\/_-]/);
+                    if (words.some((w) => w.length > 2 && lowerPrompt.includes(w))) {
+                      matchedPackages.push(relPath);
+                    }
+                  }
+                }
+              }
+            }
+          }
+          if (matchedPackages.length > 0) {
+            lines.push(`Relevant Package(s) for task: ${matchedPackages.map((p) => `\`${p}\``).join(', ')}`);
+          }
+        } else {
+          const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+          const scripts = pkg.scripts || {};
+          const details: string[] = [];
+          if (deps.react) details.push('React');
+          if (deps.vue) details.push('Vue');
+          if (deps.next) details.push('Next.js');
+          if (deps.express) details.push('Express');
+          if (scripts.test) details.push(`test: \`${scripts.test}\``);
+          if (details.length > 0) {
+            lines.push(`Stack: ${details.join(', ')}`);
+          }
+        }
+      } catch {}
+    } else if (fs.existsSync(path.join(workspacePath, 'Cargo.toml'))) {
+      lines.push('Workspace Type: Rust (Cargo)');
+    } else if (
+      fs.existsSync(path.join(workspacePath, 'pyproject.toml')) ||
+      fs.existsSync(path.join(workspacePath, 'requirements.txt'))
+    ) {
+      lines.push('Workspace Type: Python');
+    } else if (fs.existsSync(path.join(workspacePath, 'go.mod'))) {
+      lines.push('Workspace Type: Go');
     }
-    return '';
+
+    try {
+      const topDirs = fs
+        .readdirSync(workspacePath, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules' && e.name !== 'dist')
+        .map((e) => e.name);
+      if (topDirs.length > 0 && !lines.some((l) => l.includes('Monorepo Packages'))) {
+        lines.push(`Directories: ${topDirs.map((d) => `\`${d}/\``).join(', ')}`);
+      }
+    } catch {}
+
+    return lines.join('\n');
   }
 
   async prepareTaskContext(task: {
@@ -260,7 +347,7 @@ export class HermesBrain {
     const snippets: string[] = [];
     if (resolvedPath) {
       snippets.push(`Target workspace: "${resolvedPath}". Execute directly in this workspace.`);
-      const archMap = this.getProjectArchitectureMap(resolvedPath);
+      const archMap = this.discoverWorkspaceArchitecture(resolvedPath, task.prompt);
       if (archMap) {
         snippets.push(archMap);
       }
@@ -273,9 +360,8 @@ export class HermesBrain {
       return words.some((w) => lowerPrompt.includes(w));
     });
 
-    const activeRecipes = matchingRecipes.length > 0 ? matchingRecipes : recipes.slice(0, 3);
-    if (activeRecipes.length > 0) {
-      snippets.push(`Learned Recipes:\n${activeRecipes.map((r) => `- ${r}`).join('\n')}`);
+    if (matchingRecipes.length > 0) {
+      snippets.push(`Learned Recipes:\n${matchingRecipes.map((r) => `- ${r}`).join('\n')}`);
     }
 
     snippets.push(
