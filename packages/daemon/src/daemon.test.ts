@@ -157,6 +157,32 @@ describe('runDaemonOnce', () => {
     expect(result).toEqual({ claimed: true, taskId, status: 'cancelled' });
     expect(runnerAborted).toBe(true);
   });
+
+  it('does not stream frames for coding tasks', async () => {
+    const store = new MemoryTaskStore({
+      machines: [machine()],
+      tasks: [task({ kind: 'coding' })],
+    });
+    const pushedFrames: any[] = [];
+    const mockSource = {
+      captureFrame: async () => ({
+        jpegBase64: 'fake-frame',
+        capturedAt: new Date().toISOString(),
+      }),
+    };
+
+    await runDaemonOnce({
+      userId,
+      config,
+      runtime,
+      store,
+      runner: new StaticAgentRunner({ events: [], summary: 'Done', conversationId: null }),
+      frameSource: mockSource,
+      onFrame: (f) => pushedFrames.push(f),
+    });
+
+    expect(pushedFrames.length).toBe(0);
+  });
 });
 
 

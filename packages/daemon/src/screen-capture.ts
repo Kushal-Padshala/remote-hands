@@ -2,11 +2,37 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as net from 'node:net';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type { BrowserFrame, FrameSource } from './frame-stream.js';
 
-const execFileAsync = promisify(execFile);
+export const CANDIDATE_FRAME_PATHS = [
+  '/tmp/rh_screen_frame.jpg',
+  '/tmp/rh_screen_frame.png',
+  '/tmp/shot.png',
+  '/tmp/shot.jpg',
+  path.join(os.homedir(), '.config/browser-harness/tmp/shot.png'),
+];
+
+export function cleanupStaleFrameFiles(cutoffTimeMs?: number): void {
+  for (const candidate of CANDIDATE_FRAME_PATHS) {
+    try {
+      if (fs.existsSync(candidate)) {
+        if (cutoffTimeMs !== undefined) {
+          const stat = fs.statSync(candidate);
+          if (stat.mtimeMs < cutoffTimeMs) {
+            fs.unlinkSync(candidate);
+          }
+        } else {
+          fs.unlinkSync(candidate);
+        }
+      }
+    } catch {}
+  }
+}
+
+export interface DefaultFrameSourceOptions {
+  taskStartTime?: number | undefined;
+  browserActive?: boolean | undefined;
+}
 
 export class DefaultFrameSource implements FrameSource {
   private lastCapturedHash: string | null = null;
@@ -15,6 +41,21 @@ export class DefaultFrameSource implements FrameSource {
   private activeWs: any = null;
   private activeWsUrl: string | null = null;
   private messageSeq = 0;
+  private taskStartTime: number;
+  private browserActive: boolean;
+  private initialTargetIds = new Set<string>();
+  private initialUrls = new Map<string, string>();
+  private initialRecorded = false;
+
+  constructor(options?: DefaultFrameSourceOptions) {
+    this.taskStartTime = options?.taskStartTime ?? Date.now();
+    this.browserActive = options?.browserActive ?? false;
+    cleanupStaleFrameFiles(this.taskStartTime);
+  }
+
+  setBrowserActive(active: boolean): void {
+    this.browserActive = active;
+  }
 
   async captureFrame(): Promise<BrowserFrame | null> {
     const fileResult = await this.captureFromFiles();
@@ -22,11 +63,6 @@ export class DefaultFrameSource implements FrameSource {
 
     const cdpResult = await this.captureFromCdp();
     if (cdpResult !== undefined) return cdpResult;
-
-    if (process.platform === 'darwin') {
-      const nativeResult = await this.captureFromMacScreen();
-      if (nativeResult !== undefined) return nativeResult;
-    }
 
     return null;
   }
@@ -60,29 +96,23 @@ export class DefaultFrameSource implements FrameSource {
   }
 
   private async captureFromFiles(): Promise<BrowserFrame | null | undefined> {
-    const candidatePaths = [
-      '/tmp/rh_screen_frame.jpg',
-      '/tmp/rh_screen_frame.png',
-      '/tmp/shot.png',
-      '/tmp/shot.jpg',
-      path.join(os.homedir(), '.config/browser-harness/tmp/shot.png'),
-    ];
-
     const now = Date.now();
-    for (const candidate of candidatePaths) {
+    for (const candidate of CANDIDATE_FRAME_PATHS) {
       try {
         if (!fs.existsSync(candidate)) continue;
         const stat = await fs.promises.stat(candidate);
-        if (now - stat.mtimeMs > 5000) continue;
+        if (stat.mtimeMs < this.taskStartTime) continue;
+        if (now - stat.mtimeMs > 60000) continue;
         const buf = await fs.promises.readFile(candidate);
         if (buf.length === 0) continue;
 
+        this.browserActive = true;
         const ext = path.extname(candidate).toLowerCase();
         const mime = ext === '.png' ? 'image/png' : 'image/jpeg';
         const base64 = `data:${mime};base64,${buf.toString('base64')}`;
 
         if (base64 === this.lastCapturedHash) {
-          if (now - this.lastEmitTime >= 2000 && this.lastCapturedFrame) {
+          if (now - this.lastEmitTime >= 1500 && this.lastCapturedFrame) {
             this.lastEmitTime = now;
             return {
               ...this.lastCapturedFrame,
@@ -105,6 +135,19 @@ export class DefaultFrameSource implements FrameSource {
     return undefined;
   }
 
+  private recordInitialPages(pages: Array<{ id?: string; url?: string }>): void {
+    if (this.initialRecorded) return;
+    this.initialRecorded = true;
+    for (const p of pages) {
+      if (p.id) {
+        this.initialTargetIds.add(p.id);
+        if (p.url) {
+          this.initialUrls.set(p.id, p.url);
+        }
+      }
+    }
+  }
+
   private async captureFromCdp(): Promise<BrowserFrame | null | undefined> {
     try {
       const controller = new AbortController();
@@ -123,31 +166,33 @@ export class DefaultFrameSource implements FrameSource {
       const pages = targets.filter((t) => t.type === 'page' && t.webSocketDebuggerUrl);
       if (pages.length === 0) return undefined;
 
+      this.recordInitialPages(pages);
+
       const harnessTargetId = await this.getHarnessTargetId();
-      let target = harnessTargetId ? pages.find((p) => p.id === harnessTargetId) : undefined;
+      let target: (typeof pages)[number] | undefined;
+
+      if (harnessTargetId) {
+        const found = pages.find((p) => p.id === harnessTargetId);
+        if (found) {
+          const isPreExisting = this.initialTargetIds.has(found.id!);
+          const urlChanged = found.url && found.url !== this.initialUrls.get(found.id!);
+          if (this.browserActive || !isPreExisting || urlChanged) {
+            target = found;
+          }
+        }
+      }
 
       if (!target) {
         const markedPages = pages.filter((p) => p.title?.includes('🐴'));
-        target = markedPages.length > 0 ? markedPages[markedPages.length - 1] : undefined;
-      }
-
-      if (!target && pages.length > 1 && process.platform === 'darwin') {
-        try {
-          const { stdout } = await execFileAsync(
-            'osascript',
-            ['-e', 'tell application "Google Chrome" to get URL of active tab of front window'],
-            { timeout: 300 },
-          );
-          const frontUrl = stdout.trim();
-          if (frontUrl) {
-            const matched = pages.find((p) => p.url === frontUrl);
-            if (matched) target = matched;
+        for (let i = markedPages.length - 1; i >= 0; i--) {
+          const p = markedPages[i]!;
+          const isPreExisting = this.initialTargetIds.has(p.id!);
+          const urlChanged = p.url && p.url !== this.initialUrls.get(p.id!);
+          if (this.browserActive || !isPreExisting || urlChanged) {
+            target = p;
+            break;
           }
-        } catch {}
-      }
-
-      if (!target) {
-        target = pages[pages.length - 1] ?? pages[0];
+        }
       }
 
       if (!target?.webSocketDebuggerUrl) return undefined;
@@ -186,30 +231,41 @@ export class DefaultFrameSource implements FrameSource {
 
       const reqId = ++this.messageSeq;
       const base64Data = await new Promise<string | null>((resolve) => {
+        let settled = false;
+        const cleanup = () => {
+          clearTimeout(timeout);
+          try {
+            if (this.activeWs?.removeEventListener) {
+              this.activeWs.removeEventListener('message', handler);
+            } else if (this.activeWs) {
+              this.activeWs.onmessage = null;
+            }
+          } catch {}
+        };
+
         const timeout = setTimeout(() => {
-          if (this.activeWs) {
-            try {
-              this.activeWs.close();
-            } catch {}
-            this.activeWs = null;
-            this.activeWsUrl = null;
-          }
+          if (settled) return;
+          settled = true;
+          cleanup();
           resolve(null);
         }, 800);
 
         const handler = (event: any) => {
+          if (settled) return;
           try {
             const raw =
               typeof event.data === 'string'
                 ? event.data
                 : new TextDecoder().decode(event.data);
             const msg = JSON.parse(raw);
-            if (msg.id === reqId && msg.result?.data) {
-              clearTimeout(timeout);
-              if (this.activeWs?.removeEventListener) {
-                this.activeWs.removeEventListener('message', handler);
+            if (msg.id === reqId) {
+              settled = true;
+              cleanup();
+              if (msg.result?.data) {
+                resolve(msg.result.data);
+              } else {
+                resolve(null);
               }
-              resolve(msg.result.data);
             }
           } catch {}
         };
@@ -229,19 +285,23 @@ export class DefaultFrameSource implements FrameSource {
             }),
           );
         } catch {
-          clearTimeout(timeout);
-          resolve(null);
+          if (!settled) {
+            settled = true;
+            cleanup();
+            resolve(null);
+          }
         }
       });
 
       if (!base64Data) return undefined;
 
+      this.browserActive = true;
       const now = Date.now();
       const mime = 'image/jpeg';
       const base64 = `data:${mime};base64,${base64Data}`;
 
       if (base64 === this.lastCapturedHash) {
-        if (now - this.lastEmitTime >= 2000 && this.lastCapturedFrame) {
+        if (now - this.lastEmitTime >= 1500 && this.lastCapturedFrame) {
           this.lastEmitTime = now;
           return {
             ...this.lastCapturedFrame,
@@ -262,37 +322,5 @@ export class DefaultFrameSource implements FrameSource {
     } catch {
       return undefined;
     }
-  }
-
-  private async captureFromMacScreen(): Promise<BrowserFrame | null | undefined> {
-    const tmpFile = `/tmp/rh_screencap_${Date.now()}.jpg`;
-    try {
-      await execFileAsync('screencapture', ['-m', '-x', '-t', 'jpg', '-T', '0', tmpFile], {
-        timeout: 1000,
-      });
-
-      if (fs.existsSync(tmpFile)) {
-        const stat = await fs.promises.stat(tmpFile);
-        if (stat.size > 500) {
-          const buf = await fs.promises.readFile(tmpFile);
-          await fs.promises.unlink(tmpFile).catch(() => {});
-          const base64 = `data:image/jpeg;base64,${buf.toString('base64')}`;
-          if (base64 === this.lastCapturedHash) {
-            return null;
-          }
-          this.lastCapturedHash = base64;
-          return {
-            jpegBase64: base64,
-            capturedAt: new Date().toISOString(),
-          };
-        }
-        await fs.promises.unlink(tmpFile).catch(() => {});
-      }
-    } catch {
-      try {
-        if (fs.existsSync(tmpFile)) await fs.promises.unlink(tmpFile);
-      } catch {}
-    }
-    return undefined;
   }
 }

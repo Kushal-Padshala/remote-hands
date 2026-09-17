@@ -4,6 +4,7 @@ import {
   type TaskRow,
   type ApprovalRow,
   type MachineRow,
+  type TaskKind,
 } from '@remote-hands/shared';
 import { apiClient } from '../api/client.js';
 import { FrameViewer } from '../components/FrameViewer.js';
@@ -13,6 +14,33 @@ import { MarkdownView } from '../components/MarkdownView.js';
 import { ThinkingOrb } from 'thinking-orbs';
 import { VoiceButton } from '../components/VoiceButton.js';
 import { useVoiceInput } from '../hooks/useVoiceInput.js';
+
+export function inferTaskKind(prompt: string): TaskKind {
+  const lower = prompt.toLowerCase();
+  const codingWords = [
+    'fix', 'bug', 'code', 'file', 'refactor', 'test', 'build', 'compile',
+    'git', 'commit', 'branch', 'merge', 'pr ', 'pull request', 'repo',
+    'npm', 'pnpm', 'yarn', 'pip', 'python', 'typescript', 'javascript',
+    'css', 'html', 'component', 'function', 'method', 'variable', 'import',
+    'export', 'error', 'exception', 'stack trace', 'terminal', 'shell',
+    'script', 'bash', 'zsh', 'lint', 'prettier', 'vitest', 'jest',
+  ];
+  for (const w of codingWords) {
+    if (lower.includes(w)) return 'coding';
+  }
+
+  const browserWords = [
+    'http://', 'https://', 'www.', '.com', '.org', '.io', '.net', '.dev',
+    'browse', 'browser', 'website', 'web page', 'webpage', 'page', 'chrome',
+    'google', 'search online', 'look up online', 'visit ', 'navigate to',
+    'fill out', 'sign in to', 'log in to', 'click on', 'open url', 'open ',
+  ];
+  for (const w of browserWords) {
+    if (lower.includes(w)) return 'browser';
+  }
+
+  return 'browser';
+}
 
 export interface LiveTaskScreenProps {
   task?: TaskRow | undefined;
@@ -123,6 +151,7 @@ function getActiveWorkingInfo(messages: ChatMessage[]): {
 export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFactory }: LiveTaskScreenProps) {
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(task?.id ?? null);
   const [conversationId, setConversationId] = useState<string | undefined>(task?.conversation_id ?? undefined);
+  const [taskKind, setTaskKind] = useState<TaskKind>(task?.kind ?? 'browser');
   const [frameBase64, setFrameBase64] = useState<string | null>(null);
   const [showFrame, setShowFrame] = useState(true);
   const [activeApproval, setActiveApproval] = useState<ApprovalRow | null>(null);
@@ -132,6 +161,20 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
   const [sendingMessage, setSendingMessage] = useState(false);
   const frameExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (task?.kind) {
+      setTaskKind(task.kind);
+    }
+  }, [task?.kind]);
+
+  useEffect(() => {
+    setFrameBase64(null);
+    if (frameExpiryTimerRef.current) {
+      clearTimeout(frameExpiryTimerRef.current);
+      frameExpiryTimerRef.current = null;
+    }
+  }, [currentTaskId]);
 
   const updateFrame = (nextBase64: string | null) => {
     if (frameExpiryTimerRef.current) {
@@ -406,6 +449,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         const msg = parseResult.message;
 
         if (msg.type === 'task.frame') {
+          if (msg.task_id && currentTaskId && msg.task_id !== currentTaskId) return;
           updateFrame(msg.jpeg_base64);
         } else if (msg.type === 'task.event') {
           if ((msg.event as any)?.id) {
@@ -444,22 +488,18 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         } catch {}
       }
     };
-  }, [currentTaskId, webSocketFactory, task?.owner_id]);
+  }, [currentTaskId, webSocketFactory]);
 
   const [autoSendVoice, setAutoSendVoice] = useState(false);
   const voiceBasePromptRef = useRef('');
 
-  const handleSendMessage = async (overridePrompt?: string) => {
-    const text = (typeof overridePrompt === 'string' ? overridePrompt : chatInput).trim();
+  const handleSendMessage = async (textToSend?: string) => {
+    const text = (textToSend ?? chatInput).trim();
     if (!text || sendingMessage || !targetMachineId) return;
-
-    if (isVoiceListening) {
-      stopVoiceListening();
-    }
 
     setSendingMessage(true);
     setChatInput('');
-    setIsWorking(true);
+    setFrameBase64(null);
 
     const userMsgId = `user-${Date.now()}`;
     setMessages((prev) => [
@@ -484,16 +524,20 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         } catch {}
       }
 
+      const targetKind = task?.kind ?? inferTaskKind(text);
+      setTaskKind(targetKind);
+
       const nextTask = await apiClient.createTask({
         machine_id: targetMachineId,
         prompt: text,
-        kind: task?.kind ?? 'browser',
+        kind: targetKind,
         mode: task?.mode ?? 'default',
         conversation_id: resolvedConversationId,
         workspace_path: task?.workspace_path ?? undefined,
         model: 'gemini-3.8-flash-high',
         effort: 'high',
       });
+      setFrameBase64(null);
       setCurrentTaskId(nextTask.id);
       if (nextTask.conversation_id) {
         setConversationId(nextTask.conversation_id);
@@ -660,7 +704,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             </div>
           </div>
         </div>
-        {frameBase64 ? (
+        {taskKind !== 'coding' && frameBase64 ? (
           <button className="chat-nav-btn" onClick={() => setShowFrame(!showFrame)}>
             <span>📺</span>
             <span>{showFrame ? 'Hide' : 'Screen'}</span>
@@ -758,7 +802,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           </div>
         )}
 
-        {showFrame && frameBase64 && (
+        {taskKind !== 'coding' && showFrame && frameBase64 && (
           <div className="chat-inline-frame" style={{ margin: '8px 0 12px 0' }}>
             <FrameViewer frameBase64={frameBase64} onClose={() => setShowFrame(false)} />
           </div>

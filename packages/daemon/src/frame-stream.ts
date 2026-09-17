@@ -38,7 +38,7 @@ export class ThrottledFrameStream {
     const timeSinceLast = now - this.lastEmittedAt;
 
     if (frame.jpegBase64 === this.lastFrameData) {
-      if (timeSinceLast < 2500) {
+      if (timeSinceLast < 1500) {
         return false;
       }
     }
@@ -96,6 +96,10 @@ export class ThrottledFrameStream {
     } else {
       this.pollTimer = setTimeout(poll, interval);
     }
+  }
+
+  isRunning(): boolean {
+    return this.running;
   }
 
   stop(): void {

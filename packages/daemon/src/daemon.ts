@@ -5,7 +5,7 @@ import type { RuntimeMetadata } from './runtime.js';
 import type { TaskStore } from './task-store.js';
 import type { BrowserFrame, FrameSource } from './frame-stream.js';
 import { ThrottledFrameStream } from './frame-stream.js';
-import { DefaultFrameSource } from './screen-capture.js';
+import { DefaultFrameSource, cleanupStaleFrameFiles } from './screen-capture.js';
 
 export interface RunDaemonOnceInput {
   userId: string;
@@ -38,22 +38,38 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
   const running = await input.store.markTaskRunning(claimed.id);
   await input.store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
 
-  const frameStream = new ThrottledFrameStream({
-    source: input.frameSource ?? new DefaultFrameSource(),
-    minIntervalMs: 1000,
-    onFrame: (frame) => {
-      try {
-        if (input.onFrame) {
-          input.onFrame(frame);
-        }
-        if (input.store.pushFrame) {
-          input.store.pushFrame(running.id, frame).catch(() => {});
-        }
-      } catch {}
-    },
+  const taskStartTime = Date.now();
+  cleanupStaleFrameFiles(taskStartTime);
+
+  const isBrowserKind = running.kind === 'browser';
+  const canCaptureFrames = running.kind !== 'coding';
+
+  let frameStream: ThrottledFrameStream | null = null;
+  const frameSource = input.frameSource ?? new DefaultFrameSource({
+    taskStartTime,
+    browserActive: isBrowserKind,
   });
 
-  frameStream.start(1000, { immediate: true });
+  if (canCaptureFrames) {
+    frameStream = new ThrottledFrameStream({
+      source: frameSource,
+      minIntervalMs: 1000,
+      onFrame: (frame) => {
+        try {
+          if (input.onFrame) {
+            input.onFrame(frame);
+          }
+          if (input.store.pushFrame) {
+            input.store.pushFrame(running.id, frame).catch(() => {});
+          }
+        } catch {}
+      },
+    });
+
+    if (isBrowserKind) {
+      frameStream.start(1000);
+    }
+  }
 
   const abortController = new AbortController();
   let cancelled = false;
@@ -76,6 +92,26 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
       async (event) => {
         try {
           streamedCount++;
+          if (event.kind === 'tool_call') {
+            const tool = String((event.payload as any)?.tool || '');
+            const cmd = String(
+              (event.payload as any)?.input?.CommandLine ||
+              (event.payload as any)?.input?.command ||
+              ''
+            );
+            if (
+              tool.includes('browser') ||
+              cmd.includes('browser-harness') ||
+              cmd.includes('open http')
+            ) {
+              if (frameSource instanceof DefaultFrameSource) {
+                frameSource.setBrowserActive(true);
+              }
+              if (frameStream && !frameStream.isRunning()) {
+                frameStream.start(1000);
+              }
+            }
+          }
           await input.store.appendEvent(running.id, event);
         } catch {}
       },
@@ -139,6 +175,8 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
     return { claimed: true, taskId: running.id, status: 'failed' };
   } finally {
     clearInterval(cancelPoll);
-    frameStream.stop();
+    if (frameStream) {
+      frameStream.stop();
+    }
   }
 }
