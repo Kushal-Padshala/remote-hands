@@ -15,6 +15,7 @@ import {
 
 import { requireOwnerSession, requireSession } from '../auth/session.js';
 import { TasksRepository } from '../d1/tasks-repository.js';
+import { getTaskRoomStub } from '../realtime/room-router.js';
 import { ForbiddenError, NotFoundError } from '../http/errors.js';
 import { jsonOk } from '../http/json.js';
 import type { Env } from '../env.js';
@@ -30,8 +31,9 @@ export async function handleCreateTask(request: Request, env: Env): Promise<Resp
     kind: body.kind,
     mode: body.mode,
     workspacePath: body.workspace_path,
-    model: body.model,
+    model: body.model || 'gemini-3.8-flash-high',
     effort: body.effort,
+    conversationId: body.conversation_id,
     parentTaskId: body.parent_task_id,
   });
 
@@ -133,6 +135,25 @@ export async function handleCompleteTask(taskId: string, request: Request, env: 
     conversation_id: completed.conversation_id ?? undefined,
   });
 
+  try {
+    const room = getTaskRoomStub(taskId, env);
+    await room.fetch(new Request('https://internal/event', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'task.event',
+        event: {
+          id: Date.now(),
+          task_id: taskId,
+          owner_id: task.owner_id,
+          seq: 999999,
+          kind: 'status',
+          payload: { status: 'done' },
+          created_at: new Date().toISOString(),
+        },
+      }),
+    }));
+  } catch {}
+
   return jsonOk({ task: completed });
 }
 
@@ -152,6 +173,25 @@ export async function handleFailTask(taskId: string, request: Request, env: Env)
     finished_at: failed.finished_at,
     error: failed.error ?? undefined,
   });
+
+  try {
+    const room = getTaskRoomStub(taskId, env);
+    await room.fetch(new Request('https://internal/event', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'task.event',
+        event: {
+          id: Date.now(),
+          task_id: taskId,
+          owner_id: task.owner_id,
+          seq: 999999,
+          kind: 'status',
+          payload: { status: 'failed' },
+          created_at: new Date().toISOString(),
+        },
+      }),
+    }));
+  } catch {}
 
   return jsonOk({ task: failed });
 }

@@ -3,6 +3,7 @@ import { appendEvent } from '@remote-hands/control-plane';
 import { requireSession } from '../auth/session.js';
 import { TasksRepository } from '../d1/tasks-repository.js';
 import { EventsRepository } from '../d1/events-repository.js';
+import { getTaskRoomStub } from '../realtime/room-router.js';
 import { NotFoundError } from '../http/errors.js';
 import { jsonOk } from '../http/json.js';
 import type { Env } from '../env.js';
@@ -44,5 +45,14 @@ export async function handleAppendEvent(taskId: string, request: Request, env: E
   );
 
   await eventsRepo.append(eventRow);
+
+  try {
+    const room = getTaskRoomStub(taskId, env);
+    await room.fetch(new Request('https://internal/event', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'task.event', event: eventRow }),
+    }));
+  } catch {}
+
   return jsonOk({ event: eventRow }, 201);
 }

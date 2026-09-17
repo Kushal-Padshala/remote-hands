@@ -86,6 +86,20 @@ export class TaskRoom {
   }
 
   async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (request.method === 'POST' && (url.pathname === '/event' || url.pathname.endsWith('/events'))) {
+      try {
+        const body = (await request.json()) as RealtimeMessage;
+        this.relayMessage(null, body);
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      } catch {
+        return new Response('Invalid event payload', { status: 400 });
+      }
+    }
+
     const upgradeHeader = request.headers.get('Upgrade');
     if (upgradeHeader !== 'websocket') {
       return new Response('Expected Upgrade: websocket', { status: 426 });
