@@ -26,7 +26,30 @@ export const DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT =
   '1. Desktop Etiquette: NEVER steal window focus or bring windows to the front. On macOS, NEVER run `tell application ... to activate` or manipulate `front window`. Keep all browser, terminal, and background commands quiet and non-intrusive without switching active tabs or desktop focus.\n' +
   '2. Browser Automation: For web browsing, searching, or portals (e.g. Brightspace, web dashboards), use `browser-harness` or background CDP / curl. When launching Chrome profiles, use background flags without calling AppleScript activate.\n' +
   '3. Screen Capture: For visual or browser tasks, capture screenshots (e.g. via `capture_screenshot()` or saving to `/tmp/rh_screen_frame.jpg`) so the live view streams to the user\'s phone.\n' +
-  '4. Formatting: Format all output in clean GitHub-flavored Markdown with tables, bold labels, and syntax-highlighted code blocks for phone screens.]';
+  '4. Formatting: Format all output in clean GitHub-flavored Markdown with tables, bold labels, and syntax-highlighted code blocks for phone screens.\n' +
+  '5. Mandatory Final Report: Always conclude every task with a clear, comprehensive markdown report explaining your findings, console errors, status checks, actions taken, and final outcome. Never finish a turn without explaining your results to the user in text.]';
+
+export function extractSummaryFromTranscript(conversationId: string): string | null {
+  const candidateDirs = [
+    path.join(os.homedir(), '.gemini/antigravity-cli/brain', conversationId, '.system_generated/logs'),
+    path.join(os.homedir(), '.gemini/antigravity-ide/brain', conversationId, '.system_generated/logs'),
+  ];
+  for (const dir of candidateDirs) {
+    const transcriptFile = path.join(dir, 'transcript.jsonl');
+    if (fs.existsSync(transcriptFile)) {
+      try {
+        const lines = fs.readFileSync(transcriptFile, 'utf-8').split('\n').filter(Boolean);
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const entry = JSON.parse(lines[i]!);
+          if (entry.source === 'MODEL' && typeof entry.content === 'string' && entry.content.trim().length > 0) {
+            return entry.content.trim();
+          }
+        }
+      } catch {}
+    }
+  }
+  return null;
+}
 
 type AgyArgConfig = Pick<DaemonConfig, 'agyCommand'> & {
   systemPrompt?: string | undefined;
@@ -136,11 +159,22 @@ export function parseAgyStreamLine(line: string): AgentStreamRecord | null {
       }
     }
 
-    if (step.step_type === 'agent_response') {
+    if (
+      step.step_type === 'agent_response' ||
+      step.step_type === 'planner_response' ||
+      step.step_type === 'model_response' ||
+      step.step_type === 'message'
+    ) {
       if (step.text_delta) {
         return {
           kind: 'agent_text',
           payload: { text: step.text_delta },
+        };
+      }
+      if (step.content || step.text || step.response) {
+        return {
+          kind: 'agent_text',
+          payload: { text: String(step.content || step.text || step.response) },
         };
       }
       if (step.usage?.thinking_tokens && step.state === 'DONE') {
@@ -173,10 +207,23 @@ export function parseAgyStreamLine(line: string): AgentStreamRecord | null {
     }
   }
 
+  if (record.type === 'PLANNER_RESPONSE' && typeof record.content === 'string' && record.content.trim().length > 0) {
+    return {
+      kind: 'agent_text',
+      payload: { text: record.content.trim() },
+    };
+  }
+
   if (record.event === 'result' && record.result) {
     const res = record.result;
     const isError = res.status === 'ERROR' || Boolean(res.error);
-    const summary = res.response || res.error || (isError ? 'Task failed' : 'Task completed without text output');
+    let summary = res.response || res.content || res.summary || res.error || '';
+    if (!summary && res.conversation_id) {
+      summary = extractSummaryFromTranscript(res.conversation_id) || '';
+    }
+    if (!summary) {
+      summary = isError ? 'Task failed' : 'Task completed';
+    }
     return {
       kind: 'result',
       payload: {
@@ -360,6 +407,20 @@ export class ProcessAgentRunner implements AgentRunner {
           if (code !== 0 && events.length === 0) {
             reject(new Error(`Agent process exited with code ${code}`));
             return;
+          }
+          if ((!summary || summary === 'Task completed' || summary === 'Task completed without text output') && conversationId) {
+            const transcriptSummary = extractSummaryFromTranscript(conversationId);
+            if (transcriptSummary) {
+              summary = transcriptSummary;
+              const hasText = events.some((e) => e.kind === 'agent_text');
+              if (!hasText) {
+                const textEvent: EventInput = { kind: 'agent_text', payload: { text: transcriptSummary } };
+                events.push(textEvent);
+                if (onEvent) {
+                  onEvent(textEvent);
+                }
+              }
+            }
           }
           const isFailed = code !== 0 || hasFatalError;
           const defaultSummary = isFailed

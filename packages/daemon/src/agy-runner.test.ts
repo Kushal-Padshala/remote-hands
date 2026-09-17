@@ -140,6 +140,32 @@ describe('parseAgyStreamLine', () => {
       },
     });
   });
+
+  it('parses planner_response step updates with content into agent text', () => {
+    expect(
+      parseAgyStreamLine(
+        '{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":5,"state":"DONE","step_type":"planner_response","content":"Task completed successfully."}}',
+      ),
+    ).toEqual({
+      kind: 'agent_text',
+      payload: {
+        text: 'Task completed successfully.',
+      },
+    });
+  });
+
+  it('parses raw PLANNER_RESPONSE log objects into agent text', () => {
+    expect(
+      parseAgyStreamLine(
+        '{"type":"PLANNER_RESPONSE","content":"Final summary report"}',
+      ),
+    ).toEqual({
+      kind: 'agent_text',
+      payload: {
+        text: 'Final summary report',
+      },
+    });
+  });
 });
 
 describe('StaticAgentRunner', () => {
