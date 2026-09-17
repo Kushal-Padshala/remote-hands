@@ -131,6 +131,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
   const [chatInput, setChatInput] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const frameExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const updateFrame = (nextBase64: string | null) => {
     if (frameExpiryTimerRef.current) {
@@ -144,6 +145,27 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
       }, 5000);
     }
   };
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+    }
+  }, [chatInput]);
+
+  useEffect(() => {
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+    if (!vv) return;
+
+    const handleViewportChange = () => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    vv.addEventListener('resize', handleViewportChange);
+    return () => {
+      vv.removeEventListener('resize', handleViewportChange);
+    };
+  }, []);
 
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     if (task?.prompt) {
@@ -525,11 +547,17 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
     setChatInput(voiceBasePromptRef.current);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
     }
+  };
+
+  const handleFocus = () => {
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 120);
   };
 
   const handleApprove = async (approvalId: string) => {
@@ -582,6 +610,12 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
   };
 
   const activeInfo = getActiveWorkingInfo(messages);
+  const promptSuggestions = [
+    'Check git status & recent changes',
+    'Open browser and search web',
+    'Inspect running processes',
+    'Run tests and verify build',
+  ];
 
   return (
     <div className="chat-screen">
@@ -640,7 +674,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         {messages.length === 0 && (
           <div className="chat-welcome-state">
             <div className="chat-welcome-icon">
-              <ThinkingOrb state="breathing" size={64} theme="dark" role="presentation" />
+              <ThinkingOrb state="breathing" size={56} theme="dark" role="presentation" />
             </div>
             <h3 className="chat-welcome-title">New Task on {resolvedMachineName}</h3>
             <p className="chat-welcome-desc">
@@ -652,6 +686,22 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
                 <span>Computer offline. Run <code>rh start</code> in terminal to connect.</span>
               </div>
             )}
+            <div className="chat-suggestions-grid">
+              {promptSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  className="chat-suggestion-chip"
+                  onClick={() => {
+                    setChatInput(suggestion);
+                    textareaRef.current?.focus();
+                  }}
+                >
+                  <span className="suggestion-spark">✦</span>
+                  <span>{suggestion}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -678,7 +728,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             return (
               <div key={item.message.id} className="chat-bubble-agent">
                 <div className="chat-agent-header">
-                  <span>⚡</span>
+                  <span className="chat-agent-spark">✦</span>
                   <span>agy</span>
                 </div>
                 <MarkdownView
@@ -752,48 +802,58 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           </div>
         )}
 
-        <div className="chat-input-row">
-          <input
-            type="text"
+        <div className="chat-composer-card">
+          <textarea
+            ref={textareaRef}
+            rows={1}
             className="chat-input-field"
             data-testid="task-prompt-input"
             placeholder={`Message agy on ${resolvedMachineName}...`}
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onFocus={handleFocus}
             disabled={sendingMessage}
           />
-          <VoiceButton
-            isListening={isVoiceListening}
-            isSupported={isVoiceSupported}
-            onToggle={handleToggleVoice}
-            disabled={sendingMessage}
-          />
-          {isWorking ? (
-            <button
-              className="chat-send-button stop"
-              data-testid="stop-task-btn"
-              onClick={handleStopTask}
-              aria-label="Stop task"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="4" y="4" width="16" height="16" rx="2" />
-              </svg>
-            </button>
-          ) : (
-            <button
-              className="chat-send-button"
-              data-testid="submit-task-btn"
-              onClick={() => handleSendMessage()}
-              disabled={!chatInput.trim() || sendingMessage}
-              aria-label="Send message"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="19" x2="12" y2="5" />
-                <polyline points="5 12 12 5 19 12" />
-              </svg>
-            </button>
-          )}
+          <div className="chat-composer-actions">
+            <div className="chat-composer-left">
+              <VoiceButton
+                isListening={isVoiceListening}
+                isSupported={isVoiceSupported}
+                onToggle={handleToggleVoice}
+                disabled={sendingMessage}
+              />
+              <div className="chat-model-pill">
+                <span className="model-pill-dot" />
+                <span>Hermes</span>
+              </div>
+            </div>
+            {isWorking ? (
+              <button
+                className="chat-send-button stop"
+                data-testid="stop-task-btn"
+                onClick={handleStopTask}
+                aria-label="Stop task"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="4" y="4" width="16" height="16" rx="2" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                className="chat-send-button"
+                data-testid="submit-task-btn"
+                onClick={() => handleSendMessage()}
+                disabled={!chatInput.trim() || sendingMessage}
+                aria-label="Send message"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'translateY(-0.5px)' }}>
+                  <line x1="12" y1="19" x2="12" y2="5" />
+                  <polyline points="5 12 12 5 19 12" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
