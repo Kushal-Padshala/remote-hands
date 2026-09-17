@@ -41,6 +41,7 @@ export class DefaultFrameSource implements FrameSource {
       try {
         if (!fs.existsSync(candidate)) continue;
         const stat = await fs.promises.stat(candidate);
+        if (now - stat.mtimeMs > 5000) continue;
         const buf = await fs.promises.readFile(candidate);
         if (buf.length === 0) continue;
 
@@ -90,8 +91,10 @@ export class DefaultFrameSource implements FrameSource {
       const pages = targets.filter((t) => t.type === 'page' && t.webSocketDebuggerUrl);
       if (pages.length === 0) return undefined;
 
-      let target = pages[0];
-      if (pages.length > 1 && process.platform === 'darwin') {
+      const harnessTab = pages.find((p) => p.title?.includes('🐴'));
+      let target = harnessTab;
+
+      if (!target && pages.length > 1 && process.platform === 'darwin') {
         try {
           const { stdout } = await execFileAsync(
             'osascript',
@@ -104,6 +107,10 @@ export class DefaultFrameSource implements FrameSource {
             if (matched) target = matched;
           }
         } catch {}
+      }
+
+      if (!target) {
+        target = pages[pages.length - 1] ?? pages[0];
       }
 
       if (!target?.webSocketDebuggerUrl) return undefined;

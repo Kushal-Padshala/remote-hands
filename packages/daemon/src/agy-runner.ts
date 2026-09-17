@@ -106,11 +106,73 @@ const resultRecord = z.object({
   duration_seconds: z.number().optional(),
 });
 
+export function getDetectedChromeProfiles(): string {
+  try {
+    const candidatePaths = [
+      path.join(os.homedir(), 'Library/Application Support/Google/Chrome/Local State'),
+      path.join(os.homedir(), '.config/google-chrome/Local State'),
+      process.env.LOCALAPPDATA
+        ? path.join(process.env.LOCALAPPDATA, 'Google/Chrome/User Data/Local State')
+        : '',
+    ].filter(Boolean);
+
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        const data = JSON.parse(raw);
+        const infoCache = data.profile?.info_cache;
+        if (infoCache && typeof infoCache === 'object') {
+          const lines: string[] = [];
+          for (const [dirName, info] of Object.entries(infoCache) as [string, any][]) {
+            const name = info?.name || dirName;
+            const email = info?.user_name || '';
+            const isPersonal =
+              name.toLowerCase().includes('personal') ||
+              dirName === 'Profile 4' ||
+              (email && !email.includes('business') && !email.includes('info') && !email.includes('edu') && !email.includes('feed'));
+            lines.push(
+              `- Directory: "${dirName}" | Name: "${name}" | Email: "${email}"${
+                isPersonal ? ' [Personal Profile]' : ''
+              }`,
+            );
+          }
+          if (lines.length > 0) {
+            return (
+              'Available Chrome Profiles on this machine:\n' +
+              lines.join('\n') +
+              '\n\nBrowser Task Execution SOP (Strict Zero Command Spam):\n' +
+              '- Target Browser/Profile: When the user asks for their personal profile, use the profile tagged [Personal Profile] (e.g. "Profile 4", "kushal", kushalp5454@gmail.com).\n' +
+              '- In browser-harness, open the target page directly: `new_tab("<url>")` and `wait_for_load()`.\n' +
+              '- Do NOT run terminal commands (ls, find, cat Local State, python inspect, ps aux, browser-harness --doctor) to search for Chrome profiles or test browser-harness health. Jump directly to opening the page and performing the actions.\n' +
+              '- Live Streaming: The remote-hands daemon streams the active 🐴 tab directly to the phone in real time.'
+            );
+          }
+        }
+      }
+    }
+  } catch {}
+  return '';
+}
+
+export function getDefaultRemoteHandsSystemPrompt(): string {
+  const profileInfo = getDetectedChromeProfiles();
+  return profileInfo
+    ? `${DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT}\n\n${profileInfo}`
+    : DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT;
+}
+
+export function getDefaultRemoteHandsReminder(): string {
+  const profileInfo = getDetectedChromeProfiles();
+  return profileInfo
+    ? `${DEFAULT_REMOTE_HANDS_REMINDER}\n\n${profileInfo}`
+    : DEFAULT_REMOTE_HANDS_REMINDER;
+}
+
 export function buildAgyArgs(task: Task, config: AgyArgConfig): readonly string[] {
   const promptText = config.systemPrompt
     ? (!task.conversation_id
         ? `${config.systemPrompt}\n\n${task.prompt}`
-        : `${DEFAULT_REMOTE_HANDS_REMINDER}\n\n${task.prompt}`)
+        : `${getDefaultRemoteHandsReminder()}\n\n${task.prompt}`)
     : task.prompt;
 
   const args = [config.agyCommand, '-p', promptText, '--output-format', 'stream-json'];
@@ -341,7 +403,7 @@ export class ProcessAgentRunner implements AgentRunner {
 
   constructor(agyCommand: string = 'agy', systemPrompt?: string) {
     this.agyCommand = agyCommand;
-    this.systemPrompt = systemPrompt ?? DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT;
+    this.systemPrompt = systemPrompt ?? getDefaultRemoteHandsSystemPrompt();
   }
 
   async run(
