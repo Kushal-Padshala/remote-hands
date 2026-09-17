@@ -5,6 +5,7 @@ import { ensureWranglerLogin, defaultRunner } from '../cloudflare/wrangler.js';
 import { checkBrowserHarness } from '../system/browser-harness.js';
 import { defaultFileSystem } from '../cloudflare/project.js';
 import { checkAgyPermissions, ensureAgyPermissions } from '../system/agy-permissions.js';
+import { checkMacFullDiskAccess, ensureMacPermissions } from '../system/mac-permissions.js';
 
 export async function doctorCommand(args: string[], context: CommandContext = {}): Promise<number> {
   const stdout = context.stdout ?? console.log;
@@ -65,18 +66,15 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
   }
 
   if (process.platform === 'darwin') {
-    let fdaGranted = false;
-    try {
-      const fsModule = await import('node:fs');
-      fsModule.readdirSync(path.join(os.homedir(), 'Library', 'Safari'));
-      fdaGranted = true;
-    } catch {}
-
+    const fdaGranted = checkMacFullDiskAccess();
     if (fdaGranted) {
       stdout('[✓] macOS Full Disk Access: granted');
     } else {
       stdout('[!] macOS Full Disk Access: not granted (System Settings -> Privacy & Security -> Full Disk Access)');
       stdout('    Grant Full Disk Access to Antigravity IDE / Terminal to prevent permission prompts when away');
+      if (args.includes('--fix') && !context.runner) {
+        await ensureMacPermissions(stdout, 74);
+      }
     }
   }
 

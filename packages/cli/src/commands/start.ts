@@ -5,6 +5,7 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { setupCommand, type CommandContext } from './setup.js';
 import { daemonCommand } from './daemon.js';
 import { c } from '../output/ui.js';
+import { ensureMacPermissions } from '../system/mac-permissions.js';
 
 export interface StartOptions {
   clamshell?: boolean | undefined;
@@ -104,6 +105,10 @@ export async function startCommand(args: string[], context: CommandContext = {})
           c.yellow(`╰${hr}\n`),
       );
     }
+  }
+
+  if (process.platform === 'darwin' && !runner && !once && !args.includes('--skip-permissions')) {
+    await ensureMacPermissions(stdout, termWidth);
   }
 
   const onSignal = () => {

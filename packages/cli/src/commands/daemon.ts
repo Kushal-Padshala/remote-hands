@@ -12,6 +12,7 @@ import {
 import type { CommandContext } from './setup.js';
 import { c } from '../output/ui.js';
 import { ensureAgyPermissions } from '../system/agy-permissions.js';
+import { ensureMacPermissions } from '../system/mac-permissions.js';
 
 interface LocalDaemonConfig {
   cloudflareApiUrl: string;
@@ -46,6 +47,10 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
   const machineName = rawConfig.machineName || os.hostname() || 'primary-laptop';
 
   await ensureAgyPermissions(context.fs);
+
+  if (process.platform === 'darwin' && !context.runner && !once && !args.includes('--skip-permissions')) {
+    await ensureMacPermissions(stdout, 74);
+  }
 
   const client = new CloudflareControlPlaneClient({
     baseUrl: rawConfig.cloudflareApiUrl,
