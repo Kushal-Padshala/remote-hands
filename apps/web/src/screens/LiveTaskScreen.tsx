@@ -793,6 +793,14 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
               </button>
               <button
                 type="button"
+                className="voice-stop-btn"
+                onClick={stopVoiceListening}
+                title="Stop recording and keep text"
+              >
+                Stop
+              </button>
+              <button
+                type="button"
                 className="voice-cancel-btn"
                 onClick={handleCancelVoice}
               >

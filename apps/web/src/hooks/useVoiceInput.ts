@@ -99,36 +99,37 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
     }
   }, [clearRestartTimer, clearSilenceTimer]);
 
-  const startListening = useCallback(() => {
+  const setupAndStartRecognition = useCallback(() => {
     if (typeof window === 'undefined') return;
     const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognitionClass) {
       setError('Speech recognition is not supported in this browser.');
+      setIsListening(false);
+      shouldBeListeningRef.current = false;
       return;
     }
 
-    clearSilenceTimer();
-    clearRestartTimer();
-    setError(null);
-    setTranscript('');
-    setInterimTranscript('');
-    finalTranscriptRef.current = '';
-    shouldBeListeningRef.current = true;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.onstart = null;
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
+        recognitionRef.current.abort();
+      } catch {}
+      recognitionRef.current = null;
+    }
 
     try {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.abort();
-        } catch {}
-      }
-
       const recognition = new SpeechRecognitionClass();
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en-US';
 
       recognition.onstart = () => {
-        setIsListening(true);
+        if (shouldBeListeningRef.current) {
+          setIsListening(true);
+        }
       };
 
       recognition.onresult = (event: SpeechRecognitionEvent) => {
@@ -180,7 +181,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
       };
 
       recognition.onerror = (event: { error: string; message?: string }) => {
-        if (event.error === 'no-speech') {
+        if (event.error === 'no-speech' || event.error === 'aborted') {
           return;
         }
         if (event.error === 'not-allowed') {
@@ -189,13 +190,17 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
           setError('Microphone access was denied. Please allow microphone permissions.');
           return;
         }
-        if (event.error === 'aborted') {
+        if (shouldBeListeningRef.current) {
+          clearRestartTimer();
+          restartTimerRef.current = setTimeout(() => {
+            if (shouldBeListeningRef.current) {
+              setupAndStartRecognition();
+            }
+          }, 200);
           return;
         }
-        if (!shouldBeListeningRef.current) {
-          setIsListening(false);
-          setError(`Speech recognition error: ${event.error}`);
-        }
+        setIsListening(false);
+        setError(`Speech recognition error: ${event.error}`);
       };
 
       recognition.onend = () => {
@@ -207,12 +212,10 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
             return;
           } catch {
             restartTimerRef.current = setTimeout(() => {
-              if (shouldBeListeningRef.current && recognitionRef.current) {
-                try {
-                  recognitionRef.current.start();
-                } catch {}
+              if (shouldBeListeningRef.current) {
+                setupAndStartRecognition();
               }
-            }, 200);
+            }, 100);
             return;
           }
         }
@@ -228,11 +231,39 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
       recognitionRef.current = recognition;
       recognition.start();
     } catch (err: any) {
-      setError(err?.message || 'Could not start speech recognition');
-      setIsListening(false);
-      shouldBeListeningRef.current = false;
+      if (shouldBeListeningRef.current) {
+        clearRestartTimer();
+        restartTimerRef.current = setTimeout(() => {
+          if (shouldBeListeningRef.current) {
+            setupAndStartRecognition();
+          }
+        }, 200);
+      } else {
+        setError(err?.message || 'Could not start speech recognition');
+        setIsListening(false);
+        shouldBeListeningRef.current = false;
+      }
     }
   }, [clearRestartTimer, clearSilenceTimer, onSpeechEnd, onTranscriptChange, silenceTimeoutMs, stopListening]);
+
+  const startListening = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognitionClass) {
+      setError('Speech recognition is not supported in this browser.');
+      return;
+    }
+
+    clearSilenceTimer();
+    clearRestartTimer();
+    setError(null);
+    setTranscript('');
+    setInterimTranscript('');
+    finalTranscriptRef.current = '';
+    shouldBeListeningRef.current = true;
+    setIsListening(true);
+    setupAndStartRecognition();
+  }, [clearRestartTimer, clearSilenceTimer, setupAndStartRecognition]);
 
   const toggleListening = useCallback(() => {
     if (shouldBeListeningRef.current) {
