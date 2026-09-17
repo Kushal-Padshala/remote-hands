@@ -17,7 +17,7 @@ import {
 
 import { requireOwnerSession, requireSession } from '../auth/session.js';
 import { TasksRepository } from '../d1/tasks-repository.js';
-import { getTaskRoomStub } from '../realtime/room-router.js';
+import { getTaskRoomStub, getMachineRoomStub } from '../realtime/room-router.js';
 import { ForbiddenError, NotFoundError } from '../http/errors.js';
 import { jsonOk } from '../http/json.js';
 import type { Env } from '../env.js';
@@ -41,6 +41,22 @@ export async function handleCreateTask(request: Request, env: Env): Promise<Resp
 
   const repo = new TasksRepository(env.DB);
   await repo.create(task as TaskRow);
+
+  try {
+    const machineRoom = getMachineRoomStub(body.machine_id, env);
+    await machineRoom.fetch(new Request('https://internal/event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'task.event',
+        task_id: task.id,
+        event: {
+          kind: 'status',
+          payload: { status: 'queued', task_id: task.id },
+        },
+      }),
+    }));
+  } catch {}
 
   return jsonOk({ task }, 201);
 }

@@ -66,7 +66,7 @@ export class TaskRoom {
       if (clientWs === senderWs) continue;
 
       if (message.type === 'task.event' || message.type === 'task.frame' || message.type === 'approval.requested') {
-        if (!meta.role || meta.role === 'phone') {
+        if (!meta.role || meta.role === 'phone' || (message.type === 'task.event' && meta.role === 'daemon')) {
           try {
             clientWs.send(payload);
           } catch {}

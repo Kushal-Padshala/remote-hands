@@ -80,6 +80,27 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
     stdout(`${c.brightGreen('✔')} Realtime relay connected to Cloudflare edge`);
   } catch {}
 
+  let triggerClaim: (() => void) | null = null;
+  const waitForNextPoll = (ms: number) =>
+    new Promise<void>((resolve) => {
+      let timer: any = null;
+      const done = () => {
+        if (timer) clearTimeout(timer);
+        triggerClaim = null;
+        resolve();
+      };
+      triggerClaim = done;
+      timer = setTimeout(done, ms);
+    });
+
+  if (realtime) {
+    realtime.onMessage(() => {
+      if (triggerClaim) {
+        triggerClaim();
+      }
+    });
+  }
+
   const heartbeatInterval = setInterval(async () => {
     try {
       await client.heartbeat(machineId);
@@ -91,6 +112,9 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
     if (!isRunning) return;
     isRunning = false;
     clearInterval(heartbeatInterval);
+    if (triggerClaim) {
+      triggerClaim();
+    }
     try {
       realtime?.close();
     } catch {}
@@ -110,7 +134,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
             machineName,
             agyCommand: 'agy',
             workspaceAllowlist: [],
-            pollIntervalMs: 2000,
+            pollIntervalMs: 1000,
             heartbeatIntervalMs: 15000,
           },
           runtime,
@@ -120,6 +144,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
 
         if (result.claimed) {
           stdout(`[Task ${result.taskId}] Completed with status: ${result.status}`);
+          continue;
         }
       } catch {}
 
@@ -127,7 +152,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
         break;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await waitForNextPoll(1000);
     }
   } finally {
     stop();
