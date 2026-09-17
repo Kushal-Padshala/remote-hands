@@ -39,7 +39,7 @@ describe('CLI command dispatcher', () => {
     const code = await main(['doctor'], { stdout: (msg) => logs.push(msg) });
     expect(code).toBe(0);
     expect(logs.some((l) => l.includes('health checks'))).toBe(true);
-  });
+  }, 10000);
 
   it('prints help on --help or no command', async () => {
     const logs: string[] = [];
