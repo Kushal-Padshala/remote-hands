@@ -9,6 +9,7 @@ export interface AgentRunResult {
   summary: string;
   conversationId: string | null;
   durationSeconds?: number;
+  status?: 'done' | 'failed';
 }
 
 export interface AgentRunner {
@@ -99,15 +100,19 @@ export function parseAgyStreamLine(line: string): AgentStreamRecord | null {
         };
       }
       if (step.state === 'DONE') {
-        const out = typeof step.tool_info?.output === 'string'
-          ? step.tool_info.output
-          : JSON.stringify(step.tool_info?.output ?? '');
+        const rawOut = step.tool_info?.output;
+        const out = typeof rawOut === 'string'
+          ? rawOut
+          : rawOut !== undefined
+            ? JSON.stringify(rawOut)
+            : '';
+        const isOk = !step.error && step.status !== 'ERROR';
         return {
           kind: 'tool_result',
           payload: {
             call_id: String(step.step_index ?? ''),
-            ok: true,
-            output: out,
+            ok: isOk,
+            output: out || (step.error ? String(step.error) : ''),
           },
         };
       }
@@ -129,6 +134,16 @@ export function parseAgyStreamLine(line: string): AgentStreamRecord | null {
       }
     }
 
+    if (step.step_type === 'error_message' || step.error) {
+      return {
+        kind: 'error',
+        payload: {
+          message: String(step.error || 'Execution error'),
+          fatal: false,
+        },
+      };
+    }
+
     if (step.thinking) {
       return {
         kind: 'thinking',
@@ -138,12 +153,15 @@ export function parseAgyStreamLine(line: string): AgentStreamRecord | null {
   }
 
   if (record.event === 'result' && record.result) {
+    const res = record.result;
+    const isError = res.status === 'ERROR' || Boolean(res.error);
+    const summary = res.response || res.error || (isError ? 'Task failed' : 'Task completed without text output');
     return {
       kind: 'result',
       payload: {
-        summary: record.result.response || 'Task completed successfully',
-        conversation_id: record.result.conversation_id,
-        duration_seconds: record.result.duration_seconds,
+        summary,
+        conversation_id: res.conversation_id,
+        duration_seconds: res.duration_seconds,
       },
     };
   }
@@ -242,10 +260,18 @@ export class ProcessAgentRunner implements AgentRunner {
       let summary = '';
       let conversationId: string | null = null;
       let buffer = '';
+      let hasFatalError = false;
+      let lastErrorMessage = '';
 
       let eventQueue: Promise<void> = Promise.resolve();
       const handleEvent = (parsed: EventInput) => {
         events.push(parsed);
+        if (parsed.kind === 'error') {
+          if ((parsed.payload as any)?.fatal) {
+            hasFatalError = true;
+          }
+          lastErrorMessage = (parsed.payload as any)?.message || lastErrorMessage;
+        }
         if (parsed.kind === 'result') {
           summary = (parsed.payload as any).summary || summary;
           conversationId = (parsed.payload as any).conversation_id || conversationId;
@@ -292,16 +318,26 @@ export class ProcessAgentRunner implements AgentRunner {
             reject(new Error(`Agent process exited with code ${code}`));
             return;
           }
+          const isFailed = code !== 0 || hasFatalError;
+          const defaultSummary = isFailed
+            ? (lastErrorMessage || `Task failed (exit code ${code})`)
+            : 'Task completed';
           resolve({
             events,
-            summary: summary || `Task completed (exit code ${code})`,
+            summary: summary || defaultSummary,
             conversationId,
+            status: isFailed ? 'failed' : 'done',
           });
         }).catch(() => {
+          const isFailed = code !== 0 || hasFatalError;
+          const defaultSummary = isFailed
+            ? (lastErrorMessage || `Task failed (exit code ${code})`)
+            : 'Task completed';
           resolve({
             events,
-            summary: summary || `Task completed (exit code ${code})`,
+            summary: summary || defaultSummary,
             conversationId,
+            status: isFailed ? 'failed' : 'done',
           });
         });
       });

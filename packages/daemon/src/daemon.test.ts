@@ -119,5 +119,21 @@ describe('runDaemonOnce', () => {
     expect(store.taskById(taskId)?.error).toBe('agy failed');
     expect(store.eventsForTask(taskId).map((event) => event.kind)).toContain('error');
   });
+
+  it('marks task failed when the runner returns failed status', async () => {
+    const store = new MemoryTaskStore({ machines: [machine()], tasks: [task()] });
+    const runner = new StaticAgentRunner({
+      events: [{ kind: 'error', payload: { message: 'Quota exceeded', fatal: true } }],
+      summary: 'Quota exceeded',
+      conversationId: null,
+      status: 'failed',
+    });
+
+    const result = await runDaemonOnce({ userId, config, runtime, store, runner });
+
+    expect(result).toEqual({ claimed: true, taskId, status: 'failed' });
+    expect(store.taskById(taskId)?.status).toBe('failed');
+    expect(store.taskById(taskId)?.error).toBe('Quota exceeded');
+  });
 });
 

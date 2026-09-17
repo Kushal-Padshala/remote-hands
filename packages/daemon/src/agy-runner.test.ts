@@ -87,6 +87,50 @@ describe('parseAgyStreamLine', () => {
       },
     });
   });
+
+  it('parses error result stream records into failure result events', () => {
+    expect(
+      parseAgyStreamLine(
+        '{"event":"result","result":{"conversation_id":"conv-1","status":"ERROR","response":"","error":"quota exceeded"}}',
+      ),
+    ).toEqual({
+      kind: 'result',
+      payload: {
+        summary: 'quota exceeded',
+        conversation_id: 'conv-1',
+        duration_seconds: undefined,
+      },
+    });
+  });
+
+  it('parses step_update error messages into error events', () => {
+    expect(
+      parseAgyStreamLine(
+        '{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":3,"state":"DONE","step_type":"error_message","error":"tool failed"}}',
+      ),
+    ).toEqual({
+      kind: 'error',
+      payload: {
+        message: 'tool failed',
+        fatal: false,
+      },
+    });
+  });
+
+  it('marks tool results as not ok when tool step has error', () => {
+    expect(
+      parseAgyStreamLine(
+        '{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":2,"state":"DONE","step_type":"tool","error":"denied","tool_info":{"name":"run_command"}}}',
+      ),
+    ).toEqual({
+      kind: 'tool_result',
+      payload: {
+        call_id: '2',
+        ok: false,
+        output: 'denied',
+      },
+    });
+  });
 });
 
 describe('StaticAgentRunner', () => {

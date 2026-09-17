@@ -57,12 +57,22 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
         },
       });
     }
-    await input.store.appendEvent(running.id, { kind: 'status', payload: { status: 'done' } });
-    await input.store.completeTask(running.id, {
-      summary: result.summary,
-      conversationId: result.conversationId,
-    });
-    return { claimed: true, taskId: running.id, status: 'done' };
+    const hasFatalError = result.events.some((e) => e.kind === 'error' && (e.payload as any)?.fatal);
+    const isFailed = result.status === 'failed' || hasFatalError;
+    const finalStatus = isFailed ? 'failed' : 'done';
+
+    await input.store.appendEvent(running.id, { kind: 'status', payload: { status: finalStatus } });
+    if (isFailed) {
+      await input.store.failTask(running.id, {
+        error: result.summary || 'Task failed',
+      });
+    } else {
+      await input.store.completeTask(running.id, {
+        summary: result.summary,
+        conversationId: result.conversationId,
+      });
+    }
+    return { claimed: true, taskId: running.id, status: finalStatus };
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     await input.store.appendEvent(running.id, {
