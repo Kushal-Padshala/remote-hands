@@ -9,7 +9,7 @@ export interface HermesProjectEntry {
 }
 
 export interface HermesContext {
-  resolvedWorkspacePath?: string;
+  resolvedWorkspacePath?: string | undefined;
   recommendedEffort: 'low' | 'medium' | 'high';
   augmentedPrompt: string;
 }
@@ -143,7 +143,7 @@ export class HermesBrain {
         const normalized = candidate.toLowerCase().trim();
         if (normalized.length < 2) continue;
         const regex = new RegExp(`\\b${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-        if (regex.test(lowerPrompt) || lowerPrompt.includes(normalized)) {
+        if ((regex.test(lowerPrompt) || lowerPrompt.includes(normalized)) && fs.existsSync(project.path)) {
           return project.path;
         }
       }
@@ -205,8 +205,8 @@ export class HermesBrain {
   async recordTaskCompletion(params: {
     prompt: string;
     summary: string;
-    workspacePath?: string;
-    conversationId?: string | null;
+    workspacePath?: string | undefined;
+    conversationId?: string | null | undefined;
   }): Promise<void> {
     const memoryFile = this.getMemoryPath();
     if (!fs.existsSync(memoryFile)) {

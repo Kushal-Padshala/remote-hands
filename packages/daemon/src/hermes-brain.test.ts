@@ -47,18 +47,20 @@ describe('HermesBrain Memory Operations', () => {
   });
 
   it('resolves workspace path from prompt referencing project name or alias', async () => {
+    const projectDir = path.join(tmpDir, 'remote-hands');
+    fs.mkdirSync(projectDir, { recursive: true });
     const brain = new HermesBrain(tmpDir);
     await brain.ensureInitialized({
       name: 'remote-hands',
-      path: '/mock/path/remote-hands',
+      path: projectDir,
       aliases: ['remote hands', 'rh'],
     });
 
     const resolved1 = await brain.resolveWorkspace('Can you go to remote hands and fix the header?');
-    expect(resolved1).toBe('/mock/path/remote-hands');
+    expect(resolved1).toBe(projectDir);
 
     const resolved2 = await brain.resolveWorkspace('in remote-hands update styles');
-    expect(resolved2).toBe('/mock/path/remote-hands');
+    expect(resolved2).toBe(projectDir);
 
     const resolvedNone = await brain.resolveWorkspace('tell me a joke');
     expect(resolvedNone).toBeUndefined();
@@ -73,10 +75,12 @@ describe('HermesBrain Memory Operations', () => {
   });
 
   it('prepares task context with auto-resolved path and tuned effort', async () => {
+    const projectDir = path.join(tmpDir, 'remote-hands');
+    fs.mkdirSync(projectDir, { recursive: true });
     const brain = new HermesBrain(tmpDir);
     await brain.ensureInitialized({
       name: 'remote-hands',
-      path: '/mock/path/remote-hands',
+      path: projectDir,
       aliases: ['remote hands'],
     });
 
@@ -86,7 +90,7 @@ describe('HermesBrain Memory Operations', () => {
       effort: null,
     });
 
-    expect(ctx.resolvedWorkspacePath).toBe('/mock/path/remote-hands');
+    expect(ctx.resolvedWorkspacePath).toBe(projectDir);
     expect(ctx.recommendedEffort).toBe('medium');
     expect(ctx.augmentedPrompt).toContain('in remote hands make header sticky');
   });

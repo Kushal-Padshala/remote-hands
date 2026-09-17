@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { Task } from '@remote-hands/shared';
-import { buildAgyArgs, parseAgyStreamLine, StaticAgentRunner } from './agy-runner.js';
+import { buildAgyArgs, parseAgyStreamLine, StaticAgentRunner, ProcessAgentRunner } from './agy-runner.js';
+import { HermesBrain } from './hermes-brain.js';
 
 function task(overrides: Partial<Task> = {}): Task {
   return {
@@ -204,4 +208,46 @@ describe('StaticAgentRunner', () => {
     });
   });
 });
+
+describe('ProcessAgentRunner with HermesBrain', () => {
+  it('uses hermes brain to resolve workspace path and effort when omitted', async () => {
+    const memoryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-hermes-test-'));
+    const testRepoDir = path.join(memoryDir, 'test-repo');
+    fs.mkdirSync(testRepoDir, { recursive: true });
+
+    const fakeBin = path.join(memoryDir, 'fake-agy');
+    fs.writeFileSync(
+      fakeBin,
+      '#!/bin/sh\necho \'{"type":"text","text":"ok"}\'\necho \'{"type":"result","summary":"done"}\'\nexit 0\n',
+      'utf-8',
+    );
+    fs.chmodSync(fakeBin, 0o755);
+
+    const brain = new HermesBrain(memoryDir);
+    await brain.ensureInitialized({
+      name: 'test-repo',
+      path: testRepoDir,
+      aliases: ['test-repo'],
+    });
+
+    const runner = new ProcessAgentRunner(fakeBin, undefined, brain);
+    const testTask = task({
+      prompt: 'in test-repo fix header',
+      workspace_path: null,
+      effort: null,
+    });
+
+    const res = await runner.run(testTask);
+    expect(res.status).toBe('done');
+    expect(testTask.workspace_path).toBe(testRepoDir);
+    expect(testTask.effort).toBe('medium');
+
+    const memoryContent = await brain.loadMemory();
+    expect(memoryContent).toContain('in test-repo fix header');
+
+    fs.rmSync(memoryDir, { recursive: true, force: true });
+  });
+});
+
+
 

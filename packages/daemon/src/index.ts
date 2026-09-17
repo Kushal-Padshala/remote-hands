@@ -5,6 +5,7 @@ export * from './cloudflare-task-store.js';
 export * from './config.js';
 export * from './daemon.js';
 export * from './frame-stream.js';
+export * from './hermes-brain.js';
 export * from './memory-task-store.js';
 export * from './realtime-client.js';
 export * from './runtime.js';

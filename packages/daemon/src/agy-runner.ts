@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import { z } from 'zod';
 import type { DaemonConfig } from './config.js';
 import type { EventInput } from './task-store.js';
+import { HermesBrain } from './hermes-brain.js';
 
 export interface AgentRunResult {
   events: readonly EventInput[];
@@ -395,10 +396,12 @@ export class StaticAgentRunner implements AgentRunner {
 export class ProcessAgentRunner implements AgentRunner {
   private agyCommand: string;
   private systemPrompt?: string;
+  private hermesBrain: HermesBrain;
 
-  constructor(agyCommand: string = 'agy', systemPrompt?: string) {
+  constructor(agyCommand: string = 'agy', systemPrompt?: string, hermesBrain?: HermesBrain) {
     this.agyCommand = agyCommand;
     this.systemPrompt = systemPrompt ?? getDefaultRemoteHandsSystemPrompt();
+    this.hermesBrain = hermesBrain ?? new HermesBrain();
   }
 
   async run(
@@ -406,6 +409,14 @@ export class ProcessAgentRunner implements AgentRunner {
     onEvent?: (event: EventInput) => Promise<void> | void,
     signal?: AbortSignal,
   ): Promise<AgentRunResult> {
+    const hermesContext = await this.hermesBrain.prepareTaskContext(task);
+    if (!task.workspace_path && hermesContext.resolvedWorkspacePath) {
+      task.workspace_path = hermesContext.resolvedWorkspacePath;
+    }
+    if (!task.effort && hermesContext.recommendedEffort) {
+      task.effort = hermesContext.recommendedEffort;
+    }
+
     if (task.workspace_path) {
       try {
         const settingsPath = path.join(os.homedir(), '.gemini/antigravity-cli/settings.json');
@@ -555,9 +566,18 @@ export class ProcessAgentRunner implements AgentRunner {
           const defaultSummary = isFailed
             ? (lastErrorMessage || `Task failed (exit code ${code})`)
             : 'Task completed';
+          const finalSummary = summary || defaultSummary;
+          void this.hermesBrain
+            .recordTaskCompletion({
+              prompt: task.prompt,
+              summary: finalSummary,
+              workspacePath: task.workspace_path || undefined,
+              conversationId,
+            })
+            .catch(() => {});
           resolve({
             events,
-            summary: summary || defaultSummary,
+            summary: finalSummary,
             conversationId,
             status: isFailed ? 'failed' : 'done',
           });
