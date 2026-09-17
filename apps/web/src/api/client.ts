@@ -23,11 +23,14 @@ function resolveDefaultBaseUrl(providedUrl?: string): string {
   }
   if (typeof window !== 'undefined') {
     const host = window.location.host;
-    if (host.includes('remote-hands-web.')) {
-      return window.location.origin.replace('remote-hands-web.', 'remote-hands-backend.');
+    if (host.includes('pages.dev') || host.includes('remote-hands') || host.includes('workers.dev')) {
+      return 'https://remote-hands-backend.remote-hands-cloudflare.workers.dev';
+    }
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'http://localhost:8787';
     }
   }
-  return '';
+  return 'https://remote-hands-backend.remote-hands-cloudflare.workers.dev';
 }
 
 export class WebApiClient {

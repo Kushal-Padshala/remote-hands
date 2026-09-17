@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import type { MachineRow } from '@remote-hands/shared';
+import { apiClient } from '../api/client.js';
 
 export interface MachinesScreenProps {
   machines: MachineRow[];
@@ -16,6 +18,49 @@ export function MachinesScreen({
   loading,
   onGoToPairing,
 }: MachinesScreenProps) {
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testFeedback, setTestFeedback] = useState<{ id: string; online: boolean; text: string } | null>(null);
+  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
+
+  const handleCopy = (e: React.MouseEvent, cmd: string) => {
+    e.stopPropagation();
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(cmd);
+      setCopiedCmd(cmd);
+      setTimeout(() => setCopiedCmd(null), 2000);
+    }
+  };
+
+  const handleTestConnection = async (e: React.MouseEvent, machine: MachineRow) => {
+    e.stopPropagation();
+    setTestingId(machine.id);
+    setTestFeedback(null);
+    try {
+      const fresh = await apiClient.listMachines();
+      const updated = fresh.find((m) => m.id === machine.id);
+      const isNowOnline = updated
+        ? updated.status === 'online' &&
+          Boolean(updated.last_seen_at && Date.now() - new Date(updated.last_seen_at).getTime() < 45000)
+        : false;
+      onRefresh();
+      setTestFeedback({
+        id: machine.id,
+        online: isNowOnline,
+        text: isNowOnline
+          ? 'Connected! Computer is online and ready.'
+          : 'Still offline. Start rh start in terminal on this computer, then test again.',
+      });
+    } catch (err: any) {
+      setTestFeedback({
+        id: machine.id,
+        online: false,
+        text: err?.message || 'Connection test failed. Check network.',
+      });
+    } finally {
+      setTestingId(null);
+    }
+  };
+
   return (
     <div className="screen-content">
       <div className="section-header">
@@ -67,7 +112,9 @@ export function MachinesScreen({
 
       <div className="machines-list">
         {machines.map((machine) => {
-          const isOnline = machine.status === 'online';
+          const isOnline =
+            machine.status === 'online' &&
+            Boolean(machine.last_seen_at && Date.now() - new Date(machine.last_seen_at).getTime() < 45000);
           return (
             <div
               key={machine.id}
@@ -97,22 +144,69 @@ export function MachinesScreen({
                 </div>
               </div>
 
+              {!isOnline && (
+                <div className="connection-box" onClick={(e) => e.stopPropagation()}>
+                  <div className="connection-box-row">
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      To connect, run in terminal:
+                    </span>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <code className="inline-code">rh start</code>
+                      <button
+                        className="btn-ghost"
+                        style={{ padding: '2px 6px', fontSize: '0.6875rem' }}
+                        onClick={(e) => handleCopy(e, 'rh start')}
+                      >
+                        {copiedCmd === 'rh start' ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                  {testFeedback && testFeedback.id === machine.id && (
+                    <div className={`connection-feedback ${testFeedback.online ? 'connection-feedback-success' : 'connection-feedback-warning'}`}>
+                      {testFeedback.online ? '✓' : '⚠️'} {testFeedback.text}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {isOnline && testFeedback && testFeedback.id === machine.id && (
+                <div className="connection-feedback connection-feedback-success" onClick={(e) => e.stopPropagation()}>
+                  ✓ {testFeedback.text}
+                </div>
+              )}
+
               <div className="machine-card-footer">
                 <span className="badge-badge">agy {machine.agy_version || 'ready'}</span>
-                <button
-                  className="btn-create-task"
-                  data-testid={`create-task-btn-${machine.id}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelectMachine(machine);
-                  }}
-                >
-                  <span>New Task</span>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                    <polyline points="12 5 19 12 12 19" />
-                  </svg>
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    className="btn-test-connection"
+                    disabled={testingId === machine.id}
+                    onClick={(e) => handleTestConnection(e, machine)}
+                  >
+                    {testingId === machine.id ? (
+                      <span className="spinner" style={{ width: 12, height: 12 }} />
+                    ) : (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                      </svg>
+                    )}
+                    <span>{testingId === machine.id ? 'Checking...' : isOnline ? 'Check' : 'Test Connection'}</span>
+                  </button>
+                  <button
+                    className="btn-create-task"
+                    data-testid={`create-task-btn-${machine.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectMachine(machine);
+                    }}
+                  >
+                    <span>New Task</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                      <polyline points="12 5 19 12 12 19" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
           );

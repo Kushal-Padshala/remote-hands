@@ -102,6 +102,9 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
 
   const resolvedMachineName = machineName || machine?.name || 'Remote Mac';
   const targetMachineId = task?.machine_id || machine?.id;
+  const isMachineOnline =
+    machine?.status === 'online' &&
+    Boolean(machine?.last_seen_at && Date.now() - new Date(machine.last_seen_at).getTime() < 45000);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({ behavior: 'smooth' });
@@ -418,16 +421,21 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           </div>
           <div className="chat-nav-info">
             <div className="chat-nav-title">{resolvedMachineName}</div>
-            <div className={`chat-nav-status ${isWorking ? 'working' : 'ready'}`}>
+            <div className={`chat-nav-status ${isWorking ? 'working' : isMachineOnline ? 'ready' : 'offline'}`}>
               {isWorking ? (
                 <>
                   <ThinkingOrb state="working" size={20} theme="dark" role="presentation" />
                   <span>agy working...</span>
                 </>
-              ) : (
+              ) : isMachineOnline ? (
                 <>
                   <span className="status-dot" />
                   <span>Online · Ready</span>
+                </>
+              ) : (
+                <>
+                  <span className="status-dot" style={{ background: 'var(--accent-amber)' }} />
+                  <span style={{ color: 'var(--accent-amber)' }}>Offline · rh start needed</span>
                 </>
               )}
             </div>
@@ -459,6 +467,12 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             <p className="chat-welcome-desc">
               Message agy below to perform browsing, coding, and system actions directly on this machine.
             </p>
+            {!isMachineOnline && (
+              <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: '0.8125rem', color: '#fbbf24' }}>
+                <span>⚠️</span>
+                <span>Computer offline. Run <code>rh start</code> in terminal to connect.</span>
+              </div>
+            )}
           </div>
         )}
 

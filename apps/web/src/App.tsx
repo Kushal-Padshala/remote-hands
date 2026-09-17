@@ -9,7 +9,20 @@ import { PairingModal } from './components/PairingModal.js';
 import { InstallModal } from './components/InstallModal.js';
 
 export function App() {
-  const [machines, setMachines] = useState<MachineRow[]>([]);
+  const [machines, setMachines] = useState<MachineRow[]>(() => {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('rh_cached_machines');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+        }
+      } catch {}
+    }
+    return [];
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,6 +43,7 @@ export function App() {
       localStorage.removeItem('rh_token');
       localStorage.removeItem('rh_pairing_code');
       localStorage.removeItem('rh_api_url');
+      localStorage.removeItem('rh_cached_machines');
     } catch {}
     setPairingCode(undefined);
     setError(null);
@@ -75,6 +89,11 @@ export function App() {
     try {
       const list = await apiClient.listMachines();
       setMachines(list);
+      if (typeof localStorage !== 'undefined' && list.length > 0) {
+        try {
+          localStorage.setItem('rh_cached_machines', JSON.stringify(list));
+        } catch {}
+      }
     } catch (err: any) {
       const msg = err?.message || 'Failed to load machines';
       setError(msg);
