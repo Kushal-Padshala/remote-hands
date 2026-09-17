@@ -11,6 +11,7 @@ import {
 } from '@remote-hands/daemon';
 import type { CommandContext } from './setup.js';
 import { c } from '../output/ui.js';
+import { ensureAgyPermissions } from '../system/agy-permissions.js';
 
 interface LocalDaemonConfig {
   cloudflareApiUrl: string;
@@ -43,6 +44,8 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
 
   const machineId = rawConfig.machineId || 'primary-machine';
   const machineName = rawConfig.machineName || os.hostname() || 'primary-laptop';
+
+  await ensureAgyPermissions(context.fs);
 
   const client = new CloudflareControlPlaneClient({
     baseUrl: rawConfig.cloudflareApiUrl,

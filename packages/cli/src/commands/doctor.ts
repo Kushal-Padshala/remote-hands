@@ -4,6 +4,7 @@ import type { CommandContext } from './setup.js';
 import { ensureWranglerLogin, defaultRunner } from '../cloudflare/wrangler.js';
 import { checkBrowserHarness } from '../system/browser-harness.js';
 import { defaultFileSystem } from '../cloudflare/project.js';
+import { checkAgyPermissions, ensureAgyPermissions } from '../system/agy-permissions.js';
 
 export async function doctorCommand(args: string[], context: CommandContext = {}): Promise<number> {
   const stdout = context.stdout ?? console.log;
@@ -33,6 +34,18 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
     stdout('[✓] AI coding agent: agy is installed');
   } else {
     stdout('[!] AI coding agent: agy CLI not found on PATH');
+  }
+
+  const permsConfigured = await checkAgyPermissions(fs);
+  if (permsConfigured) {
+    stdout('[✓] AI coding agent: headless permissions and trusted workspaces configured');
+  } else {
+    const repaired = await ensureAgyPermissions(fs);
+    if (repaired) {
+      stdout('[✓] AI coding agent: repaired headless tool permissions & workspaces');
+    } else {
+      stdout('[!] AI coding agent: headless permissions could not be configured');
+    }
   }
 
   const cfAuth = await ensureWranglerLogin(runner);

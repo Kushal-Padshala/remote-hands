@@ -1,5 +1,8 @@
 import type { Task } from '@remote-hands/shared';
 import { spawn } from 'node:child_process';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
 import { z } from 'zod';
 import type { DaemonConfig } from './config.js';
 import type { EventInput } from './task-store.js';
@@ -260,6 +263,23 @@ export class ProcessAgentRunner implements AgentRunner {
   }
 
   async run(task: Task, onEvent?: (event: EventInput) => Promise<void> | void): Promise<AgentRunResult> {
+    if (task.workspace_path) {
+      try {
+        const settingsPath = path.join(os.homedir(), '.gemini/antigravity-cli/settings.json');
+        if (fs.existsSync(settingsPath)) {
+          const raw = fs.readFileSync(settingsPath, 'utf-8');
+          const obj = JSON.parse(raw);
+          const workspaces: string[] = Array.isArray(obj.trustedWorkspaces) ? obj.trustedWorkspaces : [];
+          const resolved = path.resolve(task.workspace_path);
+          if (!workspaces.includes(resolved)) {
+            workspaces.push(resolved);
+            obj.trustedWorkspaces = workspaces;
+            fs.writeFileSync(settingsPath, JSON.stringify(obj, null, 2), 'utf-8');
+          }
+        }
+      } catch {}
+    }
+
     const args = buildAgyArgs(task, {
       agyCommand: this.agyCommand,
       systemPrompt: this.systemPrompt,

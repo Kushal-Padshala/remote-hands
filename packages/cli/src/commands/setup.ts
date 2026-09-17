@@ -45,6 +45,7 @@ import {
 } from '../cloudflare/wrangler.js';
 import { writeWranglerConfig, defaultFileSystem, type FileSystemAdapter } from '../cloudflare/project.js';
 import { ensureBrowserHarness } from '../system/browser-harness.js';
+import { ensureAgyPermissions } from '../system/agy-permissions.js';
 import { generatePairingCode } from '@remote-hands/control-plane';
 import { generatePairingUrl } from '../pairing/qr.js';
 import { formatPairingSummary } from '../output/messages.js';
@@ -181,41 +182,10 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     stdout(renderStepSuccess('agy is installed and authenticated'));
   }
 
-  try {
-    const settingsPath = path.join(os.homedir(), '.gemini/antigravity-cli/settings.json');
-    let settingsObj: any = {};
-    if (await fs.exists(settingsPath)) {
-      try {
-        settingsObj = JSON.parse(await fs.readFile(settingsPath));
-      } catch {}
-    }
-    const defaultAllowed = [
-      'command(python3)',
-      'command(python)',
-      'command(bash)',
-      'command(sh)',
-      'command(zsh)',
-      'command(git)',
-      'command(node)',
-      'command(npm)',
-      'command(ls)',
-      'command(cat)',
-      'command(echo)',
-      'command(find)',
-      'command(grep)',
-      'command(which)',
-      'command(curl)',
-      'command(defaults)',
-    ];
-    settingsObj.permissions = settingsObj.permissions || {};
-    const existingAllow: string[] = Array.isArray(settingsObj.permissions.allow)
-      ? settingsObj.permissions.allow
-      : [];
-    const merged = Array.from(new Set([...existingAllow, ...defaultAllowed]));
-    settingsObj.permissions.allow = merged;
-    await fs.writeFile(settingsPath, JSON.stringify(settingsObj, null, 2));
-    stdout(renderStepSuccess('Configured standard command execution permissions'));
-  } catch {}
+  const permissionsOk = await ensureAgyPermissions(fs, projectRoot);
+  if (permissionsOk) {
+    stdout(renderStepSuccess('Configured headless tool permissions and trusted workspaces for agy'));
+  }
 
   stdout(renderStepStart(3, TOTAL_STEPS, 'Browser Automation Engine (browser-use)'));
   stdout(renderStepInfo('Verifying browser-harness and agent skill registration...'));

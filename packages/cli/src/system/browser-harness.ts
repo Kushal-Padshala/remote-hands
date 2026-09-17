@@ -60,6 +60,13 @@ export async function registerBrowserHarnessSkill(
     await fs.writeFile(globalSkillPath, skillContent);
   } catch {}
 
+  const cliSkills = path.join(homeDir, '.gemini', 'antigravity-cli', 'skills', 'browser-harness');
+  const cliSkillPath = path.join(cliSkills, 'SKILL.md');
+
+  try {
+    await fs.writeFile(cliSkillPath, skillContent);
+  } catch {}
+
   return true;
 }
 
