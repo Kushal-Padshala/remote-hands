@@ -38,10 +38,11 @@ export const DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT =
   '   - Available pre-imported helpers: `new_tab(url)`, `goto_url(url)`, `click_at_xy(x, y)`, `fill_input(selector, text)`, `type_text(text)`, `press_key(key)`, `scroll(x, y, dy)`, `js("expression")`, `wait_for_load()`, `wait_for_element(selector)`, `page_info()`, `list_tabs()`, `switch_tab(id)`.\n' +
   '   - To open any URL in the user\'s desktop browser, use `open "<url>"`.\n' +
   '3. Live Screen Streaming: Every action and page state is captured and streamed live to the user\'s phone in real time.\n' +
-  '4. Decisive Completion: Once the task is completed or verified, provide a clean, concise markdown summary of what was accomplished.]';
+  '4. Decisive Completion: Once the task is completed or verified, provide a clean, concise markdown summary of what was accomplished.\n' +
+  '5. Direct Execution & Zero-Scan Speed: Go directly to the relevant code files. Never execute broad filesystem sweeps or repetitive file slice reads. Read substantial chunks at once. Run targeted test files (e.g. `npx vitest run <path>`) rather than whole-repo test suites. Avoid redundant web searches for known standards.]';
 
 export const DEFAULT_REMOTE_HANDS_REMINDER =
-  '[Context Reminder: Remote Hands autonomous control plane. Take immediate action on the user\'s request. For browser actions, use `browser-harness <<\'PY\' ... PY` with `new_tab`, `goto_url`, `click_at_xy`, `fill_input`, `js`. All actions stream live to the phone. Provide a clean, direct final summary.]';
+  '[Context Reminder: Remote Hands autonomous control plane. Take immediate action on the user\'s request. For browser actions, use `browser-harness <<\'PY\' ... PY`. For codebase tasks, edit target files directly without exploratory scans and run targeted tests. All actions stream live to the phone. Provide a clean, direct final summary.]';
 
 export function extractSummaryFromTranscript(conversationId: string): string | null {
   const candidateDirs = [

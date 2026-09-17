@@ -142,6 +142,14 @@ describe('HermesBrain Memory Operations', () => {
     expect(ctx.resolvedWorkspacePath).toBe(projectDir);
     expect(ctx.recommendedEffort).toBe('medium');
     expect(ctx.augmentedPrompt).toContain('in remote hands make header sticky');
-    expect(ctx.augmentedPrompt).toContain('[Hermes Memory: Target workspace resolved to');
+    expect(ctx.augmentedPrompt).toContain('[Hermes Memory:');
+    expect(ctx.augmentedPrompt).toContain('Target workspace:');
+    expect(ctx.augmentedPrompt).toContain('Remote Hands Architecture:');
+    expect(ctx.augmentedPrompt).toContain('Learned Recipes:');
+    expect(ctx.augmentedPrompt).toContain('Execution Speed Directives:');
+
+    const recipes = await brain.extractLearnedRecipes();
+    expect(recipes.length).toBeGreaterThan(0);
+    expect(recipes[0]).toContain('Mobile chat sticky header');
   });
 });

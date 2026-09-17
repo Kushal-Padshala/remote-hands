@@ -83,6 +83,8 @@ export class HermesBrain {
       '',
       '## Learned Skills & Recipes',
       '- Mobile chat sticky header: use `position: sticky; top: 0; z-index: 50;` with `overflow-x: clip` on `html, body` and flex constraints (`min-height: 0`)',
+      '- Mobile chat virtual keyboard: use window.visualViewport resize listener to adjust height and keep header & input in place without jumping',
+      '- Voice input continuous recording: restart recognition automatically on onend unless user clicked stop',
       '',
       '## Recent Activity',
       '',
@@ -210,6 +212,42 @@ export class HermesBrain {
     return 'medium';
   }
 
+  async extractLearnedRecipes(): Promise<string[]> {
+    const content = await this.loadMemory();
+    const lines = content.split('\n');
+    const recipes: string[] = [];
+    let inRecipes = false;
+
+    for (const line of lines) {
+      if (/^#{1,3}\s+Learned Skills & Recipes/i.test(line.trim())) {
+        inRecipes = true;
+        continue;
+      }
+      if (inRecipes && /^#{1,3}\s+/.test(line.trim())) {
+        inRecipes = false;
+        break;
+      }
+      if (inRecipes && line.trim().startsWith('- ')) {
+        recipes.push(line.trim().slice(2).trim());
+      }
+    }
+    return recipes;
+  }
+
+  getProjectArchitectureMap(workspacePath: string): string {
+    const base = path.basename(workspacePath).toLowerCase();
+    if (base === 'remote-hands' || base === 'remotehands') {
+      return [
+        'Remote Hands Architecture:',
+        '- Web UI Chat & Mobile: apps/web/src/screens/LiveTaskScreen.tsx, apps/web/src/styles.css, apps/web/src/App.tsx, apps/web/src/screens/HistoryTab.tsx',
+        '- Cloudflare Backend API: apps/cloudflare/src/worker.ts, apps/cloudflare/src/routes/tasks.ts, apps/cloudflare/src/d1/tasks-repository.ts',
+        '- Daemon & Agent Runner: packages/daemon/src/agy-runner.ts, packages/daemon/src/hermes-brain.ts',
+        '- Fast Verification: run targeted test files (e.g. `npx vitest run <file>`) instead of full test suite.',
+      ].join('\n');
+    }
+    return '';
+  }
+
   async prepareTaskContext(task: {
     prompt: string;
     workspace_path?: string | null;
@@ -219,10 +257,32 @@ export class HermesBrain {
     const resolvedPath = task.workspace_path || (await this.resolveWorkspace(task.prompt));
     const recommendedEffort = this.determineEffort(task.prompt, task.effort);
 
-    let contextSnippet = '';
+    const snippets: string[] = [];
     if (resolvedPath) {
-      contextSnippet = `\n[Hermes Memory: Target workspace resolved to "${resolvedPath}". Execute directly in this workspace.]`;
+      snippets.push(`Target workspace: "${resolvedPath}". Execute directly in this workspace.`);
+      const archMap = this.getProjectArchitectureMap(resolvedPath);
+      if (archMap) {
+        snippets.push(archMap);
+      }
     }
+
+    const recipes = await this.extractLearnedRecipes();
+    const lowerPrompt = task.prompt.toLowerCase();
+    const matchingRecipes = recipes.filter((r) => {
+      const words = r.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
+      return words.some((w) => lowerPrompt.includes(w));
+    });
+
+    const activeRecipes = matchingRecipes.length > 0 ? matchingRecipes : recipes.slice(0, 3);
+    if (activeRecipes.length > 0) {
+      snippets.push(`Learned Recipes:\n${activeRecipes.map((r) => `- ${r}`).join('\n')}`);
+    }
+
+    snippets.push(
+      'Execution Speed Directives: Target relevant source files directly without full repo exploratory sweeps. Read generous line ranges. Run targeted test files (e.g. `npx vitest run <path>`) rather than full repo test suites.',
+    );
+
+    const contextSnippet = snippets.length > 0 ? `\n[Hermes Memory:\n${snippets.join('\n\n')}\n]` : '';
 
     return {
       resolvedWorkspacePath: resolvedPath || undefined,

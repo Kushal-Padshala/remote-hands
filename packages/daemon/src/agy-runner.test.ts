@@ -245,7 +245,8 @@ describe('ProcessAgentRunner with HermesBrain', () => {
 
     const capturedArgs = fs.readFileSync(capturedArgsFile, 'utf-8');
     expect(capturedArgs).toContain('-p');
-    expect(capturedArgs).toContain('[Hermes Memory: Target workspace resolved to');
+    expect(capturedArgs).toContain('[Hermes Memory:');
+    expect(capturedArgs).toContain('Target workspace:');
     expect(capturedArgs).toContain('in test-repo fix header');
 
     const memoryContent = await brain.loadMemory();
