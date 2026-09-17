@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
@@ -32,19 +33,19 @@ export class HermesBrain {
   async ensureInitialized(defaultProject?: HermesProjectEntry): Promise<string> {
     const memoryFile = this.getMemoryPath();
     if (fs.existsSync(memoryFile)) {
-      const existing = fs.readFileSync(memoryFile, 'utf-8');
+      const existing = await fsPromises.readFile(memoryFile, 'utf-8');
       if (defaultProject) {
         const projects = await this.listProjects();
         if (!projects.some((p) => p.path === defaultProject.path || p.name === defaultProject.name)) {
           const updated = this.appendProjectToContent(existing, defaultProject);
-          fs.writeFileSync(memoryFile, updated, 'utf-8');
+          await fsPromises.writeFile(memoryFile, updated, 'utf-8');
           return updated;
         }
       }
       return existing;
     }
 
-    fs.mkdirSync(this.memoryDir, { recursive: true });
+    await fsPromises.mkdir(this.memoryDir, { recursive: true });
 
     const initialProjects: HermesProjectEntry[] = [];
     if (defaultProject) {
@@ -87,7 +88,7 @@ export class HermesBrain {
       '',
     ].join('\n');
 
-    fs.writeFileSync(memoryFile, initialContent, 'utf-8');
+    await fsPromises.writeFile(memoryFile, initialContent, 'utf-8');
     return initialContent;
   }
 
@@ -96,26 +97,23 @@ export class HermesBrain {
     if (!fs.existsSync(memoryFile)) {
       return this.ensureInitialized();
     }
-    return fs.readFileSync(memoryFile, 'utf-8');
+    return fsPromises.readFile(memoryFile, 'utf-8');
   }
 
   async listProjects(): Promise<HermesProjectEntry[]> {
     const content = await this.loadMemory();
     const projects: HermesProjectEntry[] = [];
-    const sectionIndex = content.indexOf('## Known Projects');
-    if (sectionIndex === -1) return projects;
+    const lines = content.split('\n');
 
-    const nextSectionIndex = content.indexOf('## ', sectionIndex + 17);
-    const sectionText =
-      nextSectionIndex === -1
-        ? content.slice(sectionIndex + 17)
-        : content.slice(sectionIndex + 17, nextSectionIndex);
+    let inKnownProjects = false;
+    let currentBlock: string[] = [];
 
-    const projectBlocks = sectionText.split(/\n- \*\*/).filter(Boolean);
-    for (const block of projectBlocks) {
-      const nameMatch = block.match(/^([^*]+)\*\*/);
-      const pathMatch = block.match(/Path:\s*`([^`]+)`/);
-      const aliasMatch = block.match(/Aliases:\s*([^\n]+)/);
+    const flushBlock = (block: string[]) => {
+      if (block.length === 0) return;
+      const text = block.join('\n');
+      const nameMatch = text.match(/^- \*\*([^*]+)\*\*/);
+      const pathMatch = text.match(/Path:\s*`([^`]+)`/);
+      const aliasMatch = text.match(/Aliases:\s*([^\n]+)/);
 
       if (nameMatch && pathMatch) {
         const name = nameMatch[1]!.trim();
@@ -128,7 +126,29 @@ export class HermesBrain {
           aliases: aliases.length > 0 ? aliases : [name],
         });
       }
+    };
+
+    for (const line of lines) {
+      if (/^#{1,3}\s+Known Projects/i.test(line.trim())) {
+        inKnownProjects = true;
+        continue;
+      }
+      if (inKnownProjects && /^#{1,3}\s+/.test(line.trim())) {
+        inKnownProjects = false;
+        flushBlock(currentBlock);
+        currentBlock = [];
+        continue;
+      }
+      if (inKnownProjects) {
+        if (line.trim().startsWith('- **')) {
+          flushBlock(currentBlock);
+          currentBlock = [line];
+        } else if (currentBlock.length > 0) {
+          currentBlock.push(line);
+        }
+      }
     }
+    flushBlock(currentBlock);
 
     return projects;
   }
@@ -137,15 +157,24 @@ export class HermesBrain {
     const projects = await this.listProjects();
     const lowerPrompt = prompt.toLowerCase();
 
+    const candidatesWithProjects: { candidate: string; path: string }[] = [];
     for (const project of projects) {
       const candidates = [project.name, ...project.aliases, path.basename(project.path)];
       for (const candidate of candidates) {
         const normalized = candidate.toLowerCase().trim();
-        if (normalized.length < 2) continue;
-        const regex = new RegExp(`\\b${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-        if ((regex.test(lowerPrompt) || lowerPrompt.includes(normalized)) && fs.existsSync(project.path)) {
-          return project.path;
+        if (normalized.length >= 2) {
+          candidatesWithProjects.push({ candidate: normalized, path: project.path });
         }
+      }
+    }
+
+    candidatesWithProjects.sort((a, b) => b.candidate.length - a.candidate.length);
+
+    for (const { candidate, path: candidatePath } of candidatesWithProjects) {
+      const escaped = candidate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const boundaryRegex = new RegExp(`(^|[^\\w@])${escaped}([^\\w]|$)`, 'i');
+      if (boundaryRegex.test(lowerPrompt) && fs.existsSync(candidatePath)) {
+        return candidatePath;
       }
     }
 
@@ -159,11 +188,6 @@ export class HermesBrain {
 
     const lower = prompt.toLowerCase();
 
-    const lowPatterns = ['git status', 'git diff', 'ls ', 'which ', 'list files', 'status check', 'view log'];
-    for (const p of lowPatterns) {
-      if (lower.includes(p)) return 'low';
-    }
-
     const highPatterns = [
       'architect',
       'redesign',
@@ -176,6 +200,11 @@ export class HermesBrain {
     ];
     for (const p of highPatterns) {
       if (lower.includes(p)) return 'high';
+    }
+
+    const lowPatterns = ['git status', 'git diff', 'ls ', 'which ', 'list files', 'status check', 'view log'];
+    for (const p of lowPatterns) {
+      if (lower.includes(p)) return 'low';
     }
 
     return 'medium';
@@ -213,9 +242,26 @@ export class HermesBrain {
       await this.ensureInitialized();
     }
 
-    const content = fs.readFileSync(memoryFile, 'utf-8');
+    let content = await fsPromises.readFile(memoryFile, 'utf-8');
+
+    if (params.workspacePath && fs.existsSync(params.workspacePath)) {
+      const projects = await this.listProjects();
+      const alreadyKnown = projects.some(
+        (p) => p.path === params.workspacePath || path.resolve(p.path) === path.resolve(params.workspacePath!),
+      );
+      if (!alreadyKnown) {
+        const baseName = path.basename(params.workspacePath);
+        const newProject: HermesProjectEntry = {
+          name: baseName,
+          path: params.workspacePath,
+          aliases: [baseName.replace(/-/g, ' '), baseName],
+        };
+        content = this.appendProjectToContent(content, newProject);
+      }
+    }
+
     const timestamp = new Date().toISOString();
-    const entry = [
+    const newEntry = [
       `- **[${timestamp}]**`,
       `  - Prompt: "${params.prompt.replace(/\n/g, ' ')}"`,
       `  - Summary: ${params.summary.replace(/\n/g, ' ')}`,
@@ -225,14 +271,25 @@ export class HermesBrain {
       .filter(Boolean)
       .join('\n');
 
-    let updated: string;
-    if (content.includes('## Recent Activity')) {
-      updated = content.replace('## Recent Activity', `## Recent Activity\n${entry}\n`);
+    const activityHeaderRegex = /^#{1,3}\s+Recent Activity/m;
+    const match = content.match(activityHeaderRegex);
+
+    if (match && match.index !== undefined) {
+      const headerPos = match.index;
+      const afterHeader = content.slice(headerPos + match[0].length);
+      const existingEntries = afterHeader
+        .split(/\n(?=- \*\*\[)/)
+        .map((e) => e.trim())
+        .filter(Boolean);
+
+      const cappedEntries = [newEntry, ...existingEntries].slice(0, 25);
+      const beforeHeader = content.slice(0, headerPos + match[0].length);
+      content = `${beforeHeader}\n${cappedEntries.join('\n\n')}\n`;
     } else {
-      updated = `${content}\n\n## Recent Activity\n${entry}\n`;
+      content = `${content.trim()}\n\n## Recent Activity\n${newEntry}\n`;
     }
 
-    fs.writeFileSync(memoryFile, updated, 'utf-8');
+    await fsPromises.writeFile(memoryFile, content, 'utf-8');
   }
 
   private appendProjectToContent(content: string, project: HermesProjectEntry): string {
@@ -240,9 +297,11 @@ export class HermesBrain {
     if (content.includes('## Known Projects\n- None registered yet')) {
       return content.replace('## Known Projects\n- None registered yet', `## Known Projects\n${projectSnippet}`);
     }
-    if (content.includes('## Known Projects')) {
-      return content.replace('## Known Projects', `## Known Projects\n${projectSnippet}\n`);
+    const match = content.match(/^#{1,3}\s+Known Projects/m);
+    if (match && match.index !== undefined) {
+      const insertPos = match.index + match[0].length;
+      return `${content.slice(0, insertPos)}\n${projectSnippet}\n${content.slice(insertPos).replace(/^\n*/, '')}`;
     }
-    return `${content}\n\n## Known Projects\n${projectSnippet}\n`;
+    return `${content.trim()}\n\n## Known Projects\n${projectSnippet}\n`;
   }
 }

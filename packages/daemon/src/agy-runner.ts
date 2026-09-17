@@ -434,7 +434,12 @@ export class ProcessAgentRunner implements AgentRunner {
       } catch {}
     }
 
-    const args = buildAgyArgs(task, {
+    const effectiveTask: Task = {
+      ...task,
+      prompt: hermesContext.augmentedPrompt,
+    };
+
+    const args = buildAgyArgs(effectiveTask, {
       agyCommand: this.agyCommand,
       systemPrompt: this.systemPrompt,
     });
@@ -534,7 +539,7 @@ export class ProcessAgentRunner implements AgentRunner {
           const parsed = parseAgyStreamLine(buffer);
           if (parsed) handleEvent(parsed);
         }
-        eventQueue.then(() => {
+        eventQueue.then(async () => {
           if (signal?.aborted) {
             resolve({
               events,
@@ -567,14 +572,14 @@ export class ProcessAgentRunner implements AgentRunner {
             ? (lastErrorMessage || `Task failed (exit code ${code})`)
             : 'Task completed';
           const finalSummary = summary || defaultSummary;
-          void this.hermesBrain
-            .recordTaskCompletion({
+          try {
+            await this.hermesBrain.recordTaskCompletion({
               prompt: task.prompt,
               summary: finalSummary,
               workspacePath: task.workspace_path || undefined,
               conversationId,
-            })
-            .catch(() => {});
+            });
+          } catch {}
           resolve({
             events,
             summary: finalSummary,

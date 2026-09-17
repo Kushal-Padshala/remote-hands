@@ -210,15 +210,16 @@ describe('StaticAgentRunner', () => {
 });
 
 describe('ProcessAgentRunner with HermesBrain', () => {
-  it('uses hermes brain to resolve workspace path and effort when omitted', async () => {
+  it('uses hermes brain to resolve workspace path, effort, and pass augmented prompt', async () => {
     const memoryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-hermes-test-'));
     const testRepoDir = path.join(memoryDir, 'test-repo');
     fs.mkdirSync(testRepoDir, { recursive: true });
 
+    const capturedArgsFile = path.join(memoryDir, 'captured-args.txt');
     const fakeBin = path.join(memoryDir, 'fake-agy');
     fs.writeFileSync(
       fakeBin,
-      '#!/bin/sh\necho \'{"type":"text","text":"ok"}\'\necho \'{"type":"result","summary":"done"}\'\nexit 0\n',
+      `#!/bin/sh\nprintf "%s\\n" "$@" > "${capturedArgsFile}"\necho '{"type":"text","text":"ok"}'\necho '{"type":"result","summary":"done"}'\nexit 0\n`,
       'utf-8',
     );
     fs.chmodSync(fakeBin, 0o755);
@@ -242,12 +243,18 @@ describe('ProcessAgentRunner with HermesBrain', () => {
     expect(testTask.workspace_path).toBe(testRepoDir);
     expect(testTask.effort).toBe('medium');
 
+    const capturedArgs = fs.readFileSync(capturedArgsFile, 'utf-8');
+    expect(capturedArgs).toContain('-p');
+    expect(capturedArgs).toContain('[Hermes Memory: Target workspace resolved to');
+    expect(capturedArgs).toContain('in test-repo fix header');
+
     const memoryContent = await brain.loadMemory();
     expect(memoryContent).toContain('in test-repo fix header');
 
     fs.rmSync(memoryDir, { recursive: true, force: true });
   });
 });
+
 
 
 

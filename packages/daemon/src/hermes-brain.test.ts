@@ -31,19 +31,41 @@ describe('HermesBrain Memory Operations', () => {
     expect(projects[0]?.name).toBe('remote-hands');
   });
 
-  it('records task completion into MEMORY.md history', async () => {
+  it('records task completion into MEMORY.md history and caps at 25 entries', async () => {
     const brain = new HermesBrain(tmpDir);
     await brain.ensureInitialized();
-    await brain.recordTaskCompletion({
-      prompt: 'make header sticky',
-      summary: 'Updated LiveTaskScreen.tsx with sticky styling',
-      workspacePath: '/mock/path/remote-hands',
-      conversationId: 'conv-123',
-    });
+
+    for (let i = 1; i <= 30; i++) {
+      await brain.recordTaskCompletion({
+        prompt: `prompt ${i}`,
+        summary: `summary ${i}`,
+        conversationId: `conv-${i}`,
+      });
+    }
 
     const content = await brain.loadMemory();
-    expect(content).toContain('make header sticky');
-    expect(content).toContain('conv-123');
+    expect(content).toContain('prompt 30');
+    expect(content).toContain('prompt 6');
+    expect(content).not.toContain('prompt 5\n');
+  });
+
+  it('automatically learns new workspace into Known Projects on task completion', async () => {
+    const newRepoDir = path.join(tmpDir, 'new-service');
+    fs.mkdirSync(newRepoDir, { recursive: true });
+    const brain = new HermesBrain(tmpDir);
+    await brain.ensureInitialized();
+
+    await brain.recordTaskCompletion({
+      prompt: 'build new service',
+      summary: 'scaffolded new-service',
+      workspacePath: newRepoDir,
+    });
+
+    const projects = await brain.listProjects();
+    expect(projects.some((p) => p.path === newRepoDir && p.name === 'new-service')).toBe(true);
+
+    const resolved = await brain.resolveWorkspace('run tests in new service');
+    expect(resolved).toBe(newRepoDir);
   });
 
   it('resolves workspace path from prompt referencing project name or alias', async () => {
@@ -66,12 +88,39 @@ describe('HermesBrain Memory Operations', () => {
     expect(resolvedNone).toBeUndefined();
   });
 
+  it('does not trigger false-positive matches on substrings of English words', async () => {
+    const cliDir = path.join(tmpDir, 'cli');
+    fs.mkdirSync(cliDir, { recursive: true });
+    const rhDir = path.join(tmpDir, 'rh');
+    fs.mkdirSync(rhDir, { recursive: true });
+
+    const brain = new HermesBrain(tmpDir);
+    await brain.ensureInitialized({
+      name: 'cli',
+      path: cliDir,
+      aliases: ['cli'],
+    });
+    await brain.ensureInitialized({
+      name: 'rh',
+      path: rhDir,
+      aliases: ['rh'],
+    });
+
+    expect(await brain.resolveWorkspace('please click the login button')).toBeUndefined();
+    expect(await brain.resolveWorkspace('listen to the musical rhythm')).toBeUndefined();
+    expect(await brain.resolveWorkspace('apply changes')).toBeUndefined();
+
+    expect(await brain.resolveWorkspace('run the cli tool')).toBe(cliDir);
+    expect(await brain.resolveWorkspace('start rh daemon')).toBe(rhDir);
+  });
+
   it('determines appropriate effort level based on task complexity', () => {
     const brain = new HermesBrain(tmpDir);
     expect(brain.determineEffort('make the header sticky')).toBe('medium');
     expect(brain.determineEffort('fix css padding bug')).toBe('medium');
     expect(brain.determineEffort('rearchitect the entire database and redesign control plane')).toBe('high');
     expect(brain.determineEffort('check git status')).toBe('low');
+    expect(brain.determineEffort('rearchitect status check')).toBe('high');
   });
 
   it('prepares task context with auto-resolved path and tuned effort', async () => {
@@ -93,5 +142,6 @@ describe('HermesBrain Memory Operations', () => {
     expect(ctx.resolvedWorkspacePath).toBe(projectDir);
     expect(ctx.recommendedEffort).toBe('medium');
     expect(ctx.augmentedPrompt).toContain('in remote hands make header sticky');
+    expect(ctx.augmentedPrompt).toContain('[Hermes Memory: Target workspace resolved to');
   });
 });
