@@ -59,6 +59,22 @@ export class TasksRepository {
     return res.results ?? [];
   }
 
+  async listByMachine(ownerId: string, machineId: string): Promise<TaskRow[]> {
+    const res = await this.db
+      .prepare(`SELECT * FROM tasks WHERE owner_id = ? AND machine_id = ? ORDER BY created_at DESC`)
+      .bind(ownerId, machineId)
+      .all<TaskRow>();
+    return res.results ?? [];
+  }
+
+  async listByConversation(conversationId: string): Promise<TaskRow[]> {
+    const res = await this.db
+      .prepare(`SELECT * FROM tasks WHERE conversation_id = ? ORDER BY created_at ASC`)
+      .bind(conversationId)
+      .all<TaskRow>();
+    return res.results ?? [];
+  }
+
   async listQueuedForMachine(machineId: string): Promise<TaskRow[]> {
     const res = await this.db
       .prepare(`SELECT * FROM tasks WHERE machine_id = ? AND status = 'queued' ORDER BY created_at ASC`)

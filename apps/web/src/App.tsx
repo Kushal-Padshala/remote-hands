@@ -5,6 +5,7 @@ import { MachinesScreen } from './screens/MachinesScreen.js';
 import { NewTaskScreen } from './screens/NewTaskScreen.js';
 import { LiveTaskScreen } from './screens/LiveTaskScreen.js';
 import { PairingTab } from './screens/PairingTab.js';
+import { HistoryTab } from './screens/HistoryTab.js';
 import { PairingModal } from './components/PairingModal.js';
 import { InstallModal } from './components/InstallModal.js';
 
@@ -27,7 +28,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
 
   const [currentScreen, setCurrentScreen] = useState<'machines' | 'new-task' | 'live-task'>('machines');
-  const [activeTab, setActiveTab] = useState<'devices' | 'pairing'>('devices');
+  const [activeTab, setActiveTab] = useState<'devices' | 'history' | 'pairing'>('devices');
   const [selectedMachine, setSelectedMachine] = useState<MachineRow | null>(null);
   const [activeTask, setActiveTask] = useState<TaskRow | null>(null);
   const [submittingTask, setSubmittingTask] = useState(false);
@@ -181,6 +182,24 @@ export function App() {
     setCurrentScreen('live-task');
   };
 
+  const handleSelectHistoricalTask = (task: TaskRow) => {
+    const matched = machines.find((m) => m.id === task.machine_id);
+    const machine = matched || ({
+      id: task.machine_id,
+      owner_id: task.owner_id,
+      name: 'Remote Machine',
+      hostname: 'remote',
+      daemon_version: '0.1.0',
+      agy_version: null,
+      status: 'offline',
+      last_seen_at: task.created_at,
+      created_at: task.created_at,
+    } as MachineRow);
+    setSelectedMachine(machine);
+    setActiveTask(task);
+    setCurrentScreen('live-task');
+  };
+
   const handleCreateTask = async (prompt: string, kind: TaskKind, mode: TaskMode) => {
     if (!selectedMachine) return;
     setSubmittingTask(true);
@@ -201,7 +220,7 @@ export function App() {
   };
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${currentScreen === 'live-task' ? 'chat-mode' : ''}`}>
       {currentScreen !== 'live-task' && (
         <header className="app-header">
           <div className="brand-group">
@@ -260,6 +279,13 @@ export function App() {
               onClick={() => setActiveTab('devices')}
             >
               <span>💻 Devices</span>
+            </button>
+            <button
+              type="button"
+              className={`segmented-button ${activeTab === 'history' ? 'active' : ''}`}
+              onClick={() => setActiveTab('history')}
+            >
+              <span>💬 History</span>
             </button>
             <button
               type="button"
@@ -322,6 +348,13 @@ export function App() {
               onGoToPairing={() => setActiveTab('pairing')}
             />
           </>
+        )}
+
+        {currentScreen === 'machines' && activeTab === 'history' && (
+          <HistoryTab
+            machines={machines}
+            onSelectTask={handleSelectHistoricalTask}
+          />
         )}
 
         {currentScreen === 'machines' && activeTab === 'pairing' && (

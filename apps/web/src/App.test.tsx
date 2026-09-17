@@ -368,4 +368,139 @@ describe('Web App Workflow', () => {
 
     delete (window as any).SpeechRecognition;
   });
+
+  it('adjusts viewport height and keeps header and input aligned when mobile keyboard opens', async () => {
+    vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+    const socket = new MockSocket();
+
+    const listeners: Record<string, ((...args: any[]) => void)[]> = {};
+    const mockVisualViewport = {
+      height: 844,
+      offsetTop: 0,
+      addEventListener: (event: string, cb: (...args: any[]) => void) => {
+        listeners[event] = listeners[event] || [];
+        listeners[event].push(cb);
+      },
+      removeEventListener: (event: string, cb: (...args: any[]) => void) => {
+        if (listeners[event]) {
+          listeners[event] = listeners[event].filter((fn) => fn !== cb);
+        }
+      },
+    };
+
+    Object.defineProperty(window, 'visualViewport', {
+      value: mockVisualViewport,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, 'innerHeight', {
+      value: 844,
+      writable: true,
+      configurable: true,
+    });
+
+    const { unmount } = render(
+      <LiveTaskScreen
+        task={fakeTask}
+        onBack={() => {}}
+        webSocketFactory={() => socket as any}
+      />,
+    );
+
+    expect(document.documentElement.classList.contains('chat-mode-active')).toBe(true);
+    expect(document.body.classList.contains('chat-mode-active')).toBe(true);
+
+    const chatScreen = document.querySelector('.chat-screen') as HTMLElement;
+    expect(chatScreen).not.toBeNull();
+    expect(chatScreen.style.height).toBe('844px');
+
+    const promptInput = screen.getByTestId('task-prompt-input');
+    fireEvent.focus(promptInput);
+
+    mockVisualViewport.height = 508;
+    for (const listener of listeners['resize'] || []) {
+      listener();
+    }
+
+    await waitFor(() => {
+      expect(chatScreen.style.height).toBe('508px');
+      const inputContainer = document.querySelector('.chat-input-container');
+      expect(inputContainer?.classList.contains('keyboard-open')).toBe(true);
+      expect(document.documentElement.style.getPropertyValue('--visual-viewport-height')).toBe('508px');
+    });
+
+    unmount();
+    expect(document.documentElement.classList.contains('chat-mode-active')).toBe(false);
+    expect(document.body.classList.contains('chat-mode-active')).toBe(false);
+  });
+
+  it('renders history tab, displays past tasks, and continues conversation in same thread', async () => {
+    const historicalTask: TaskRow = {
+      id: 'task-hist-1',
+      owner_id: 'owner-1',
+      machine_id: 'mach-1',
+      prompt: 'Check the database migrations',
+      kind: 'coding',
+      mode: 'default',
+      status: 'done',
+      conversation_id: 'conv-hist-1',
+      parent_task_id: null,
+      workspace_path: '/Users/test/project',
+      model: 'gemini-3.8-flash-high',
+      effort: 'high',
+      result_summary: 'All 3 migrations executed successfully.',
+      error: null,
+      created_at: new Date(Date.now() - 3600000).toISOString(),
+      started_at: new Date(Date.now() - 3500000).toISOString(),
+      finished_at: new Date(Date.now() - 3400000).toISOString(),
+    };
+
+    vi.spyOn(apiClient, 'listMachines').mockResolvedValue([fakeMachine]);
+    vi.spyOn(apiClient, 'listTasks').mockResolvedValue([historicalTask]);
+    vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+    const createSpy = vi.spyOn(apiClient, 'createTask').mockResolvedValue({
+      ...historicalTask,
+      id: 'task-hist-2',
+      prompt: 'Now add an index',
+      status: 'queued',
+      result_summary: null,
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Work Laptop')).toBeDefined();
+    });
+
+    const historyTabBtn = screen.getByText('💬 History');
+    fireEvent.click(historyTabBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Check the database migrations')).toBeDefined();
+      expect(screen.getByText('Completed')).toBeDefined();
+      expect(screen.getByText('All 3 migrations executed successfully.')).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByText('Check the database migrations'));
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Check the database migrations').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('All 3 migrations executed successfully.').length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByTestId('stop-task-btn')).toBeNull();
+      expect(screen.getByTestId('submit-task-btn')).toBeDefined();
+    });
+
+    const textarea = screen.getByTestId('task-prompt-input');
+    fireEvent.change(textarea, { target: { value: 'Now add an index' } });
+    fireEvent.click(screen.getByTestId('submit-task-btn'));
+
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversation_id: 'conv-hist-1',
+          prompt: 'Now add an index',
+        }),
+      );
+    });
+  });
 });

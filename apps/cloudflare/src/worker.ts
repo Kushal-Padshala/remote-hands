@@ -8,6 +8,7 @@ import { handleSetupOwner } from './routes/setup.js';
 import { handleStartPairing, handleClaimPairing, handleCreatePhoneSession } from './routes/pairing.js';
 import { handleListMachines, handleGetMachine, handleMachineHeartbeat } from './routes/machines.js';
 import {
+  handleListTasks,
   handleCreateTask,
   handleClaimNextTask,
   handleGetTask,
@@ -80,6 +81,10 @@ export default {
         if (subaction === 'heartbeat' && method === 'POST') {
           return await handleMachineHeartbeat(machineId, request, env);
         }
+      }
+
+      if (method === 'GET' && pathname === '/tasks') {
+        return await handleListTasks(request, env);
       }
 
       if (method === 'POST' && pathname === '/tasks') {

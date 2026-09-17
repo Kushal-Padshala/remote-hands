@@ -88,6 +88,15 @@ function createMockD1(): D1Database {
         if (q.startsWith('SELECT * FROM tasks WHERE id = ?')) {
           return { success: true, results: tables.tasks.filter((t) => t.id === bound[0]) as T[] };
         }
+        if (q.startsWith('SELECT * FROM tasks WHERE owner_id = ? AND machine_id = ?')) {
+          return { success: true, results: tables.tasks.filter((t) => t.owner_id === bound[0] && t.machine_id === bound[1]) as T[] };
+        }
+        if (q.startsWith('SELECT * FROM tasks WHERE conversation_id = ?')) {
+          return { success: true, results: tables.tasks.filter((t) => t.conversation_id === bound[0]) as T[] };
+        }
+        if (q.startsWith('SELECT * FROM tasks WHERE owner_id = ?')) {
+          return { success: true, results: tables.tasks.filter((t) => t.owner_id === bound[0]) as T[] };
+        }
         if (q.startsWith('UPDATE tasks SET')) {
           const item = tables.tasks.find((t) => t.id === bound[6]);
           if (item) {
@@ -322,5 +331,35 @@ describe('tasks and approvals route lifecycle', () => {
     );
     expect(completeRes.status).toBe(200);
 
+    const listAllRes = await worker.fetch(
+      new Request('https://example.com/tasks', {
+        headers: { Authorization: `Bearer ${phoneToken}` },
+      }),
+      env,
+    );
+    expect(listAllRes.status).toBe(200);
+    const listAllData = (await listAllRes.json()) as any;
+    expect(listAllData.tasks).toHaveLength(1);
+    expect(listAllData.tasks[0].id).toBe(taskId);
+
+    const listMachineRes = await worker.fetch(
+      new Request(`https://example.com/tasks?machine_id=${machineId}`, {
+        headers: { Authorization: `Bearer ${phoneToken}` },
+      }),
+      env,
+    );
+    expect(listMachineRes.status).toBe(200);
+    const listMachineData = (await listMachineRes.json()) as any;
+    expect(listMachineData.tasks).toHaveLength(1);
+
+    const listOtherMachineRes = await worker.fetch(
+      new Request('https://example.com/tasks?machine_id=other-mac', {
+        headers: { Authorization: `Bearer ${phoneToken}` },
+      }),
+      env,
+    );
+    expect(listOtherMachineRes.status).toBe(200);
+    const listOtherData = (await listOtherMachineRes.json()) as any;
+    expect(listOtherData.tasks).toHaveLength(0);
   });
 });

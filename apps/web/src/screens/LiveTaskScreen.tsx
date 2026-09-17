@@ -165,11 +165,24 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
   const [showFrame, setShowFrame] = useState(true);
   const [activeApproval, setActiveApproval] = useState<ApprovalRow | null>(null);
   const [decidingApproval, setDecidingApproval] = useState(false);
-  const [isWorking, setIsWorking] = useState<boolean>(Boolean(task));
+
+  const isTaskActive = (t?: TaskRow | null) =>
+    Boolean(t && (t.status === 'queued' || t.status === 'claimed' || t.status === 'running'));
+
+  const [isWorking, setIsWorking] = useState<boolean>(isTaskActive(task));
   const [chatInput, setChatInput] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const frameExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (task) {
+      setCurrentTaskId(task.id);
+      setConversationId(task.conversation_id ?? undefined);
+      if (task.kind) setTaskKind(task.kind);
+      setIsWorking(isTaskActive(task));
+    }
+  }, [task?.id]);
 
   useEffect(() => {
     if (task?.kind) {
@@ -205,35 +218,165 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
     }
   }, [chatInput]);
 
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const list: ChatMessage[] = [];
+    if (task?.prompt) {
+      list.push({
+        id: `user-${task.id}`,
+        type: 'user',
+        text: task.prompt,
+        time: task.created_at,
+      });
+    }
+    if (task?.result_summary) {
+      list.push({
+        id: `agent-summary-${task.id}`,
+        type: 'agent',
+        text: task.result_summary === 'Task completed without text output'
+          ? 'Task completed successfully.'
+          : task.result_summary,
+        time: task.finished_at || task.created_at,
+      });
+    } else if (task?.status === 'failed' && task?.error) {
+      list.push({
+        id: `error-${task.id}`,
+        type: 'error',
+        text: task.error,
+        time: task.finished_at || task.created_at,
+      });
+    }
+    return list;
+  });
+
   useEffect(() => {
-    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
-    if (!vv) return;
+    if (!task?.conversation_id) return;
+    let isCancelled = false;
 
-    const handleViewportChange = () => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    };
+    apiClient.listTasks({ conversation_id: task.conversation_id }).then((tasks) => {
+      if (isCancelled || tasks.length <= 1) return;
+      const conversationMessages: ChatMessage[] = [];
+      for (const t of tasks) {
+        if (t.prompt) {
+          conversationMessages.push({
+            id: `user-${t.id}`,
+            type: 'user',
+            text: t.prompt,
+            time: t.created_at,
+          });
+        }
+        if (t.result_summary) {
+          conversationMessages.push({
+            id: `agent-${t.id}`,
+            type: 'agent',
+            text: t.result_summary === 'Task completed without text output'
+              ? 'Task completed successfully.'
+              : t.result_summary,
+            time: t.finished_at || t.created_at,
+          });
+        } else if (t.status === 'failed' && t.error) {
+          conversationMessages.push({
+            id: `error-${t.id}`,
+            type: 'error',
+            text: t.error,
+            time: t.finished_at || t.created_at,
+          });
+        }
+      }
+      if (conversationMessages.length > 0) {
+        setMessages(conversationMessages);
+      }
+    }).catch(() => {});
 
-    vv.addEventListener('resize', handleViewportChange);
     return () => {
-      vv.removeEventListener('resize', handleViewportChange);
+      isCancelled = true;
+    };
+  }, [task?.conversation_id]);
+
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const chatScrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
+  const [viewportOffsetTop, setViewportOffsetTop] = useState<number>(0);
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+
+  const scrollToBottom = (smooth = true) => {
+    const el = chatScrollAreaRef.current;
+    if (!el) return;
+    if (smooth && typeof el.scrollTo === 'function') {
+      el.scrollTo({
+        top: el.scrollHeight,
+        behavior: 'smooth',
+      });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
+  };
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.add('chat-mode-active');
+      document.body.classList.add('chat-mode-active');
+    }
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.documentElement.classList.remove('chat-mode-active');
+        document.body.classList.remove('chat-mode-active');
+      }
     };
   }, []);
 
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    if (task?.prompt) {
-      return [
-        {
-          id: `user-${task.id}`,
-          type: 'user',
-          text: task.prompt,
-          time: task.created_at,
-        },
-      ];
-    }
-    return [];
-  });
+  useEffect(() => {
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
 
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+    const updateViewport = () => {
+      if (!vv) return;
+      const height = Math.round(vv.height);
+      const offsetTop = Math.round(vv.offsetTop);
+      const keyboardOpen = typeof window !== 'undefined' && window.innerHeight - height > 100;
+
+      setViewportHeight(height);
+      setViewportOffsetTop(offsetTop);
+      setIsKeyboardOpen(keyboardOpen);
+
+      if (typeof document !== 'undefined') {
+        document.documentElement.style.setProperty('--visual-viewport-height', `${height}px`);
+        document.documentElement.style.setProperty('--visual-viewport-offset-top', `${offsetTop}px`);
+      }
+
+      if (typeof window !== 'undefined' && (window.scrollY !== 0 || window.scrollX !== 0)) {
+        window.scrollTo(0, 0);
+      }
+    };
+
+    updateViewport();
+
+    if (vv) {
+      vv.addEventListener('resize', updateViewport);
+      vv.addEventListener('scroll', updateViewport);
+    }
+
+    const handleWindowScroll = () => {
+      if (typeof window !== 'undefined' && (window.scrollY !== 0 || window.scrollX !== 0)) {
+        window.scrollTo(0, 0);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('scroll', handleWindowScroll, { passive: true });
+    }
+
+    return () => {
+      if (vv) {
+        vv.removeEventListener('resize', updateViewport);
+        vv.removeEventListener('scroll', updateViewport);
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('scroll', handleWindowScroll);
+      }
+      if (typeof document !== 'undefined') {
+        document.documentElement.style.removeProperty('--visual-viewport-height');
+        document.documentElement.style.removeProperty('--visual-viewport-offset-top');
+      }
+    };
+  }, []);
 
   const [liveMachine, setLiveMachine] = useState<MachineRow | undefined>(machine);
   const lastActivityRef = useRef<number>(Date.now());
@@ -272,8 +415,14 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
   const isMachineOnline = isWorking || isRecentlyActive || isFreshHeartbeat;
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView?.({ behavior: 'smooth' });
+    scrollToBottom(true);
   }, [messages, isWorking]);
+
+  useEffect(() => {
+    if (viewportHeight !== null) {
+      scrollToBottom(false);
+    }
+  }, [viewportHeight]);
 
   useEffect(() => {
     if (!currentTaskId) return;
@@ -615,9 +764,23 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
   };
 
   const handleFocus = () => {
+    if (typeof window !== 'undefined') {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    }
     setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 120);
+      if (typeof window !== 'undefined') {
+        window.scrollTo(0, 0);
+      }
+      scrollToBottom(false);
+    }, 50);
+    setTimeout(() => {
+      if (typeof window !== 'undefined') {
+        window.scrollTo(0, 0);
+      }
+      scrollToBottom(true);
+    }, 250);
   };
 
   const handleApprove = async (approvalId: string) => {
@@ -678,7 +841,14 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
   ];
 
   return (
-    <div className="chat-screen">
+    <div
+      className="chat-screen"
+      style={{
+        height: viewportHeight ? `${viewportHeight}px` : undefined,
+        maxHeight: viewportHeight ? `${viewportHeight}px` : undefined,
+        transform: viewportOffsetTop > 0 ? `translateY(${viewportOffsetTop}px)` : undefined,
+      }}
+    >
       <header className="chat-nav-header" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
         <button className="chat-nav-back-circle" onClick={onBack} aria-label="Back to machines">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
@@ -730,7 +900,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         )}
       </header>
 
-      <div className="chat-scroll-area">
+      <div ref={chatScrollAreaRef} className="chat-scroll-area">
         {messages.length === 0 && (
           <div className="chat-welcome-state">
             <div className="chat-welcome-icon">
@@ -827,7 +997,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="chat-input-container">
+      <div className={`chat-input-container ${isKeyboardOpen ? 'keyboard-open' : ''}`}>
         {isVoiceListening && (
           <div className="voice-listening-banner" data-testid="voice-listening-banner">
             <div className="voice-listening-left">

@@ -22,6 +22,27 @@ import { ForbiddenError, NotFoundError } from '../http/errors.js';
 import { jsonOk } from '../http/json.js';
 import type { Env } from '../env.js';
 
+export async function handleListTasks(request: Request, env: Env): Promise<Response> {
+  const session = await requireOwnerSession(request, env.DB);
+  const url = new URL(request.url);
+  const machineId = url.searchParams.get('machine_id');
+  const conversationId = url.searchParams.get('conversation_id');
+
+  const repo = new TasksRepository(env.DB);
+  let tasks: TaskRow[];
+
+  if (conversationId) {
+    tasks = await repo.listByConversation(conversationId);
+    tasks = tasks.filter((t) => t.owner_id === session.owner_id);
+  } else if (machineId) {
+    tasks = await repo.listByMachine(session.owner_id, machineId);
+  } else {
+    tasks = await repo.listByOwner(session.owner_id);
+  }
+
+  return jsonOk({ tasks });
+}
+
 export async function handleCreateTask(request: Request, env: Env): Promise<Response> {
   const session = await requireOwnerSession(request, env.DB);
   const body = createTaskRequestSchema.parse(await request.json());

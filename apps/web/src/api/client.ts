@@ -111,6 +111,19 @@ export class WebApiClient {
     return res?.machines ?? [];
   }
 
+  async listTasks(options?: { machine_id?: string; conversation_id?: string }): Promise<TaskRow[]> {
+    const params = new URLSearchParams();
+    if (options?.machine_id) {
+      params.set('machine_id', options.machine_id);
+    }
+    if (options?.conversation_id) {
+      params.set('conversation_id', options.conversation_id);
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const res = await this.request<{ tasks?: TaskRow[] }>(`/tasks${query}`, 'GET');
+    return res?.tasks ?? [];
+  }
+
   async createTask(params: {
     machine_id: string;
     prompt: string;
