@@ -38,5 +38,6 @@ export interface TaskStore {
   appendEvent<K extends EventKind>(taskId: string, input: EventInput<K>): Promise<TaskEvent<K>>;
   completeTask(taskId: string, input: CompleteTaskInput): Promise<Task>;
   failTask(taskId: string, input: FailTaskInput): Promise<Task>;
+  pushFrame?(taskId: string, frame: { jpegBase64: string; capturedAt: string }): Promise<void>;
 }
 

@@ -22,7 +22,11 @@ export interface AgentRunner {
 export type AgentStreamRecord = EventInput;
 
 export const DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT =
-  '[Context: Remote Hands mobile web interface. Format all output using clean, readable GitHub-flavored Markdown. Use markdown tables for multi-row or multi-column data, bold labels, and syntax-highlighted code blocks. Keep answers direct, concise, and structured for phone screens.]';
+  '[Context: Remote Hands mobile control plane. The user is operating their computer remotely from their mobile phone while working on their desktop.\n' +
+  '1. Desktop Etiquette: NEVER steal window focus or bring windows to the front. On macOS, NEVER run `tell application ... to activate` or manipulate `front window`. Keep all browser, terminal, and background commands quiet and non-intrusive without switching active tabs or desktop focus.\n' +
+  '2. Browser Automation: For web browsing, searching, or portals (e.g. Brightspace, web dashboards), use `browser-harness` or background CDP / curl. When launching Chrome profiles, use background flags without calling AppleScript activate.\n' +
+  '3. Screen Capture: For visual or browser tasks, capture screenshots (e.g. via `capture_screenshot()` or saving to `/tmp/rh_screen_frame.jpg`) so the live view streams to the user\'s phone.\n' +
+  '4. Formatting: Format all output in clean GitHub-flavored Markdown with tables, bold labels, and syntax-highlighted code blocks for phone screens.]';
 
 type AgyArgConfig = Pick<DaemonConfig, 'agyCommand'> & {
   systemPrompt?: string | undefined;
@@ -59,8 +63,10 @@ const resultRecord = z.object({
 });
 
 export function buildAgyArgs(task: Task, config: AgyArgConfig): readonly string[] {
-  const promptText = config.systemPrompt && !task.conversation_id
-    ? `${config.systemPrompt}\n\n${task.prompt}`
+  const promptText = config.systemPrompt
+    ? (!task.conversation_id
+        ? `${config.systemPrompt}\n\n${task.prompt}`
+        : `[Context Reminder: Do not activate windows or steal desktop focus. Run in background.]\n\n${task.prompt}`)
     : task.prompt;
 
   const args = [config.agyCommand, '-p', promptText, '--output-format', 'stream-json'];

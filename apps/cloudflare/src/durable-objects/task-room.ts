@@ -87,7 +87,7 @@ export class TaskRoom {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    if (request.method === 'POST' && (url.pathname === '/event' || url.pathname.endsWith('/events'))) {
+    if (request.method === 'POST' && (url.pathname === '/event' || url.pathname.endsWith('/events') || url.pathname.endsWith('/frame') || url.pathname.endsWith('/frames'))) {
       try {
         const body = (await request.json()) as RealtimeMessage;
         this.relayMessage(null, body);

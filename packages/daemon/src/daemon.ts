@@ -3,6 +3,9 @@ import type { AgentRunner } from './agy-runner.js';
 import type { DaemonConfig } from './config.js';
 import type { RuntimeMetadata } from './runtime.js';
 import type { TaskStore } from './task-store.js';
+import type { BrowserFrame, FrameSource } from './frame-stream.js';
+import { ThrottledFrameStream } from './frame-stream.js';
+import { DefaultFrameSource } from './screen-capture.js';
 
 export interface RunDaemonOnceInput {
   userId: string;
@@ -10,6 +13,8 @@ export interface RunDaemonOnceInput {
   runtime: RuntimeMetadata;
   store: TaskStore;
   runner: AgentRunner;
+  onFrame?: ((frame: BrowserFrame) => Promise<void> | void) | undefined;
+  frameSource?: FrameSource | undefined;
 }
 
 export type RunDaemonOnceResult =
@@ -32,6 +37,23 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
 
   const running = await input.store.markTaskRunning(claimed.id);
   await input.store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
+
+  const frameStream = new ThrottledFrameStream({
+    source: input.frameSource ?? new DefaultFrameSource(),
+    minIntervalMs: 800,
+    onFrame: (frame) => {
+      try {
+        if (input.onFrame) {
+          input.onFrame(frame);
+        }
+        if (input.store.pushFrame) {
+          input.store.pushFrame(running.id, frame).catch(() => {});
+        }
+      } catch {}
+    },
+  });
+
+  frameStream.start(800);
 
   try {
     let streamedCount = 0;
@@ -81,6 +103,8 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
     });
     await input.store.failTask(running.id, { error: message });
     return { claimed: true, taskId: running.id, status: 'failed' };
+  } finally {
+    frameStream.stop();
   }
 }
 

@@ -17,6 +17,7 @@ import {
   handleFailTask,
 } from './routes/tasks.js';
 import { handleListEvents, handleAppendEvent } from './routes/events.js';
+import { handlePushFrame } from './routes/frames.js';
 import { handleCreateApproval, handleDecideApproval } from './routes/approvals.js';
 import { handleTaskWebSocket, handleMachineWebSocket } from './routes/websocket.js';
 
@@ -113,6 +114,9 @@ export default {
         }
         if (subaction === 'events' && method === 'POST') {
           return await handleAppendEvent(taskId, request, env);
+        }
+        if ((subaction === 'frames' || subaction === 'frame') && method === 'POST') {
+          return await handlePushFrame(taskId, request, env);
         }
       }
 

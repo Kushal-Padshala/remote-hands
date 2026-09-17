@@ -147,4 +147,11 @@ export class CloudflareControlPlaneClient {
     const data = await this.request<{ machine: MachineRow }>(`/machines/${machineId}`, 'GET');
     return data.machine;
   }
+
+  async pushFrame(taskId: string, jpegBase64: string, capturedAt?: string): Promise<void> {
+    await this.request<{ ok: boolean }>(`/tasks/${taskId}/frames`, 'POST', {
+      jpeg_base64: jpegBase64,
+      captured_at: capturedAt ?? new Date().toISOString(),
+    });
+  }
 }

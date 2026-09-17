@@ -238,4 +238,28 @@ describe('CloudflareControlPlaneClient', () => {
     });
     expect(decided.decision).toBe('approved');
   });
+
+  it('posts frame to tasks/:id/frames', async () => {
+    let capturedUrl = '';
+    let capturedBody: any = null;
+
+    const fakeFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = input.toString();
+      capturedBody = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+
+    const client = new CloudflareControlPlaneClient({
+      baseUrl: 'https://api.example.com',
+      sessionToken: 'test-session-token',
+      fetchFn: fakeFetch as unknown as typeof fetch,
+    });
+
+    await client.pushFrame('task-123', 'fake-jpeg-base64', '2026-09-17T00:00:00.000Z');
+    expect(capturedUrl).toBe('https://api.example.com/tasks/task-123/frames');
+    expect(capturedBody).toEqual({
+      jpeg_base64: 'fake-jpeg-base64',
+      captured_at: '2026-09-17T00:00:00.000Z',
+    });
+  });
 });

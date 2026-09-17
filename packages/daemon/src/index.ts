@@ -8,4 +8,5 @@ export * from './frame-stream.js';
 export * from './memory-task-store.js';
 export * from './realtime-client.js';
 export * from './runtime.js';
+export * from './screen-capture.js';
 export * from './task-store.js';

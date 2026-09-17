@@ -21,4 +21,14 @@ describe('worker health smoke test', () => {
     const res = await worker.fetch(req, fakeEnv);
     expect(res.status).toBe(404);
   });
+
+  it('rejects frame push when unauthenticated', async () => {
+    const req = new Request('https://example.com/tasks/123/frames', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jpeg_base64: 'abc' }),
+    });
+    const res = await worker.fetch(req, fakeEnv);
+    expect(res.status).toBe(401);
+  });
 });

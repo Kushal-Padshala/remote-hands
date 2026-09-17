@@ -121,4 +121,8 @@ export class CloudflareTaskStore implements TaskStore {
     });
     return toTask(row);
   }
+
+  async pushFrame(taskId: string, frame: { jpegBase64: string; capturedAt: string }): Promise<void> {
+    await this.client.pushFrame(taskId, frame.jpegBase64, frame.capturedAt);
+  }
 }
