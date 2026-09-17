@@ -460,6 +460,8 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         mode: task?.mode ?? 'default',
         conversation_id: resolvedConversationId,
         workspace_path: task?.workspace_path ?? undefined,
+        model: 'gemini-3.8-flash-high',
+        effort: 'high',
       });
       setCurrentTaskId(nextTask.id);
       if (nextTask.conversation_id) {

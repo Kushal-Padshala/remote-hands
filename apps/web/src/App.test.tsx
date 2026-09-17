@@ -80,12 +80,14 @@ describe('Web App Workflow', () => {
     fireEvent.click(screen.getByTestId('submit-task-btn'));
 
     await waitFor(() => {
-      expect(apiClient.createTask).toHaveBeenCalledWith({
-        machine_id: fakeMachine.id,
-        prompt: 'Add privacy policy page',
-        kind: 'browser',
-        mode: 'default',
-      });
+      expect(apiClient.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          machine_id: fakeMachine.id,
+          prompt: 'Add privacy policy page',
+          kind: 'browser',
+          mode: 'default',
+        }),
+      );
       expect(screen.getByText('Add privacy policy page')).toBeDefined();
     });
   });

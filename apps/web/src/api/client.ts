@@ -119,6 +119,7 @@ export class WebApiClient {
     conversation_id?: string | undefined;
     workspace_path?: string | null | undefined;
     model?: string | null | undefined;
+    effort?: string | null | undefined;
   }): Promise<TaskRow> {
     const res = await this.request<{ task: TaskRow }>('/tasks', 'POST', params);
     return res.task;
