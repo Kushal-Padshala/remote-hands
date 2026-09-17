@@ -275,7 +275,7 @@ export function App() {
         </div>
       )}
 
-      <main className="app-main">
+      <main className={`app-main ${currentScreen === 'live-task' ? 'chat-mode' : ''}`}>
         {currentScreen === 'machines' && activeTab === 'devices' && (
           <>
             {!isStandalone && (
