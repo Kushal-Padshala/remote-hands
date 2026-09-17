@@ -5,6 +5,7 @@ import { MachinesScreen } from './screens/MachinesScreen.js';
 import { NewTaskScreen } from './screens/NewTaskScreen.js';
 import { LiveTaskScreen } from './screens/LiveTaskScreen.js';
 import { PairingModal } from './components/PairingModal.js';
+import { InstallModal } from './components/InstallModal.js';
 
 export function App() {
   const [machines, setMachines] = useState<MachineRow[]>([]);
@@ -16,6 +17,9 @@ export function App() {
   const [activeTask, setActiveTask] = useState<TaskRow | null>(null);
   const [submittingTask, setSubmittingTask] = useState(false);
   const [showPairModal, setShowPairModal] = useState(false);
+  const [showInstallModal, setShowInstallModal] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isStandalone, setIsStandalone] = useState(false);
   const [pairingCode, setPairingCode] = useState<string | undefined>(undefined);
   const [pasteUrlInput, setPasteUrlInput] = useState('');
 
@@ -76,6 +80,17 @@ export function App() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      const standalone =
+        (window.navigator as any).standalone === true ||
+        window.matchMedia?.('(display-mode: standalone)').matches === true;
+      setIsStandalone(Boolean(standalone));
+
+      const onBeforeInstall = (e: any) => {
+        e.preventDefault();
+        setDeferredPrompt(e);
+      };
+      window.addEventListener('beforeinstallprompt', onBeforeInstall);
+
       const params = new URLSearchParams(window.location.search);
       const api = params.get('api');
       if (api) {
@@ -99,7 +114,14 @@ export function App() {
           }
         } catch {}
       }
+
+      return () => {
+        window.removeEventListener('beforeinstallprompt', onBeforeInstall);
+      };
     }
+  }, []);
+
+  useEffect(() => {
     loadMachines();
 
     const onVisibilityChange = () => {
@@ -158,6 +180,19 @@ export function App() {
             <span className="brand-title">Remote Hands</span>
           </div>
           <div className="header-actions">
+            {!isStandalone && (
+              <button
+                className="btn-header-pill"
+                onClick={() => setShowInstallModal(true)}
+                title="Add to Home Screen"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+                  <line x1="12" y1="18" x2="12.01" y2="18" />
+                </svg>
+                <span>Add to Home</span>
+              </button>
+            )}
             <button
               className="btn-header-ghost"
               onClick={handleClearCache}
@@ -182,6 +217,34 @@ export function App() {
       )}
 
       <main className="app-main">
+        {currentScreen === 'machines' && !isStandalone && (
+          <div
+            className="install-callout"
+            onClick={() => setShowInstallModal(true)}
+          >
+            <div className="install-callout-left">
+              <div className="install-callout-icon">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 5v14M5 12l7 7 7-7" />
+                </svg>
+              </div>
+              <div>
+                <div className="install-callout-title">Add to Home Screen</div>
+                <div className="install-callout-desc">Open Remote Hands fullscreen like an app on your phone</div>
+              </div>
+            </div>
+            <button
+              className="btn-install-trigger"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowInstallModal(true);
+              }}
+            >
+              Add +
+            </button>
+          </div>
+        )}
+
         {currentScreen !== 'live-task' && pairingCode && (
           <div className="info-banner">
             <div className="info-banner-content">
@@ -257,6 +320,12 @@ export function App() {
         isOpen={showPairModal}
         onClose={() => setShowPairModal(false)}
         pairingCode={pairingCode}
+      />
+
+      <InstallModal
+        isOpen={showInstallModal}
+        onClose={() => setShowInstallModal(false)}
+        deferredPrompt={deferredPrompt}
       />
     </div>
   );
