@@ -66,6 +66,17 @@ describe('buildAgyArgs', () => {
 
     expect(args).toContain('[System Context]\n\nAdd a privacy policy page');
   });
+
+  it('prepends reminder prompt on follow-up conversation turn', () => {
+    const args = buildAgyArgs(
+      task({ conversation_id: 'conv-123' }),
+      { agyCommand: 'agy', systemPrompt: '[System Context]' },
+    );
+
+    const promptIdx = args.indexOf('-p');
+    expect(args[promptIdx + 1]).toContain('Context Reminder');
+    expect(args[promptIdx + 1]).toContain('Add a privacy policy page');
+  });
 });
 
 describe('parseAgyStreamLine', () => {
