@@ -57,4 +57,9 @@ describe('DefaultFrameSource', () => {
     const source = new DefaultFrameSource();
     await expect(source.captureFrame()).resolves.toBeDefined();
   });
+
+  it('disposes resources cleanly without error', () => {
+    const source = new DefaultFrameSource();
+    expect(() => source.dispose()).not.toThrow();
+  });
 });

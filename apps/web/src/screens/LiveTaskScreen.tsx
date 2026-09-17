@@ -17,6 +17,17 @@ import { useVoiceInput } from '../hooks/useVoiceInput.js';
 
 export function inferTaskKind(prompt: string): TaskKind {
   const lower = prompt.toLowerCase();
+
+  const explicitBrowserPatterns = [
+    'https://', 'http://', 'www.',
+    '.com', '.org', '.io', '.net', '.dev', '.app', '.ai',
+    'browse ', 'browser', 'navigate to', 'visit ', 'open url',
+    'website', 'webpage', 'web page',
+  ];
+  for (const p of explicitBrowserPatterns) {
+    if (lower.includes(p)) return 'browser';
+  }
+
   const codingWords = [
     'fix', 'bug', 'code', 'file', 'refactor', 'test', 'build', 'compile',
     'git', 'commit', 'branch', 'merge', 'pr ', 'pull request', 'repo',
@@ -29,13 +40,11 @@ export function inferTaskKind(prompt: string): TaskKind {
     if (lower.includes(w)) return 'coding';
   }
 
-  const browserWords = [
-    'http://', 'https://', 'www.', '.com', '.org', '.io', '.net', '.dev',
-    'browse', 'browser', 'website', 'web page', 'webpage', 'page', 'chrome',
-    'google', 'search online', 'look up online', 'visit ', 'navigate to',
-    'fill out', 'sign in to', 'log in to', 'click on', 'open url', 'open ',
+  const genericBrowserWords = [
+    'page', 'chrome', 'google', 'search online', 'look up online',
+    'fill out', 'sign in to', 'log in to', 'click on', 'open ',
   ];
-  for (const w of browserWords) {
+  for (const w of genericBrowserWords) {
     if (lower.includes(w)) return 'browser';
   }
 
@@ -436,6 +445,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
       };
 
       socket.onmessage = (msgEvent: any) => {
+        if (closed) return;
         let rawData: unknown;
         try {
           rawData = JSON.parse(msgEvent.data);
@@ -484,6 +494,10 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
       }
       if (ws) {
         try {
+          ws.onmessage = null;
+          ws.onopen = null;
+          ws.onerror = null;
+          ws.onclose = null;
           ws.close();
         } catch {}
       }
@@ -524,7 +538,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         } catch {}
       }
 
-      const targetKind = task?.kind ?? inferTaskKind(text);
+      const targetKind = inferTaskKind(text);
       setTaskKind(targetKind);
 
       const nextTask = await apiClient.createTask({
@@ -543,6 +557,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         setConversationId(nextTask.conversation_id);
       }
     } catch (err: any) {
+      setChatInput(text);
       alert(err?.message || 'Failed to send message');
       setIsWorking(false);
     } finally {
@@ -571,6 +586,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
     isListening: isVoiceListening,
     startListening: startVoiceListening,
     stopListening: stopVoiceListening,
+    cancelListening: cancelVoiceListening,
   } = useVoiceInput({
     onTranscriptChange: handleTranscriptChange,
     onSpeechEnd: handleSpeechEnd,
@@ -587,7 +603,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
   };
 
   const handleCancelVoice = () => {
-    stopVoiceListening();
+    cancelVoiceListening();
     setChatInput(voiceBasePromptRef.current);
   };
 

@@ -47,7 +47,7 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
   let frameStream: ThrottledFrameStream | null = null;
   const frameSource = input.frameSource ?? new DefaultFrameSource({
     taskStartTime,
-    browserActive: isBrowserKind,
+    browserActive: false,
   });
 
   if (canCaptureFrames) {
@@ -177,6 +177,11 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
     clearInterval(cancelPoll);
     if (frameStream) {
       frameStream.stop();
+    }
+    if (typeof (frameSource as any).dispose === 'function') {
+      try {
+        (frameSource as any).dispose();
+      } catch {}
     }
   }
 }

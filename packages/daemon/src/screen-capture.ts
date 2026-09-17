@@ -57,6 +57,16 @@ export class DefaultFrameSource implements FrameSource {
     this.browserActive = active;
   }
 
+  dispose(): void {
+    if (this.activeWs) {
+      try {
+        this.activeWs.close();
+      } catch {}
+      this.activeWs = null;
+      this.activeWsUrl = null;
+    }
+  }
+
   async captureFrame(): Promise<BrowserFrame | null> {
     const fileResult = await this.captureFromFiles();
     if (fileResult !== undefined) return fileResult;
@@ -176,7 +186,7 @@ export class DefaultFrameSource implements FrameSource {
         if (found) {
           const isPreExisting = this.initialTargetIds.has(found.id!);
           const urlChanged = found.url && found.url !== this.initialUrls.get(found.id!);
-          if (this.browserActive || !isPreExisting || urlChanged) {
+          if (!isPreExisting || urlChanged) {
             target = found;
           }
         }
@@ -188,7 +198,7 @@ export class DefaultFrameSource implements FrameSource {
           const p = markedPages[i]!;
           const isPreExisting = this.initialTargetIds.has(p.id!);
           const urlChanged = p.url && p.url !== this.initialUrls.get(p.id!);
-          if (this.browserActive || !isPreExisting || urlChanged) {
+          if (!isPreExisting || urlChanged) {
             target = p;
             break;
           }
@@ -215,6 +225,9 @@ export class DefaultFrameSource implements FrameSource {
             const connectTimer = setTimeout(() => reject(new Error('timeout')), 500);
             this.activeWs.onopen = () => {
               clearTimeout(connectTimer);
+              try {
+                this.activeWs.onerror = null;
+              } catch {}
               resolve();
             };
             this.activeWs.onerror = (err: any) => {

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import type { MachineRow, TaskRow } from '@remote-hands/shared';
 import { App } from './App.js';
-import { LiveTaskScreen } from './screens/LiveTaskScreen.js';
+import { LiveTaskScreen, inferTaskKind } from './screens/LiveTaskScreen.js';
 import { apiClient } from './api/client.js';
 
 class MockSocket {
@@ -310,6 +310,61 @@ describe('Web App Workflow', () => {
 
     expect(startSpy).toHaveBeenCalled();
     expect(screen.getByTestId('voice-listening-banner')).toBeDefined();
+
+    delete (window as any).SpeechRecognition;
+  });
+
+  it('infers task kind accurately based on URLs, navigation, and coding intent', () => {
+    expect(inferTaskKind('https://news.ycombinator.com/item?id=1 with python code')).toBe('browser');
+    expect(inferTaskKind('browse https://github.com/my-org/repo to check build errors')).toBe('browser');
+    expect(inferTaskKind('Navigate to docs.python.org')).toBe('browser');
+    expect(inferTaskKind('fix this bug where mic recording stops after some time')).toBe('coding');
+    expect(inferTaskKind('run vitest tests on daemon')).toBe('coding');
+    expect(inferTaskKind('Add privacy policy page')).toBe('browser');
+  });
+
+  it('cancels voice listening and restores prompt without triggering dispatch', async () => {
+    let mockInstance: any = null;
+    class MockSpeechRecognition {
+      continuous = true;
+      interimResults = true;
+      lang = 'en-US';
+      onstart: (() => void) | null = null;
+      onresult: ((e: any) => void) | null = null;
+      onerror: ((e: any) => void) | null = null;
+      onend: (() => void) | null = null;
+      start() {
+        mockInstance = this;
+        setTimeout(() => this.onstart?.(), 0);
+      }
+      stop() {
+        setTimeout(() => this.onend?.(), 0);
+      }
+      abort() {}
+    }
+    (window as any).SpeechRecognition = MockSpeechRecognition;
+
+    render(
+      <LiveTaskScreen
+        task={fakeTask}
+        onBack={() => {}}
+        webSocketFactory={() => new MockSocket() as any}
+      />,
+    );
+
+    const voiceBtn = screen.getByTestId('voice-prompt-btn');
+    fireEvent.click(voiceBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('voice-listening-banner')).toBeDefined();
+    });
+
+    const cancelBtn = screen.getByText('Cancel');
+    fireEvent.click(cancelBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('voice-listening-banner')).toBeNull();
+    });
 
     delete (window as any).SpeechRecognition;
   });

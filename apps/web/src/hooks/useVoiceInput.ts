@@ -48,6 +48,7 @@ export interface UseVoiceInputReturn {
   error: string | null;
   startListening: () => void;
   stopListening: () => void;
+  cancelListening: () => void;
   toggleListening: () => void;
   resetTranscript: () => void;
 }
@@ -96,6 +97,26 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
       try {
         recognitionRef.current.stop();
       } catch {}
+    }
+  }, [clearRestartTimer, clearSilenceTimer]);
+
+  const cancelListening = useCallback(() => {
+    clearSilenceTimer();
+    clearRestartTimer();
+    shouldBeListeningRef.current = false;
+    finalTranscriptRef.current = '';
+    setTranscript('');
+    setInterimTranscript('');
+    setIsListening(false);
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.onstart = null;
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
+        recognitionRef.current.abort();
+      } catch {}
+      recognitionRef.current = null;
     }
   }, [clearRestartTimer, clearSilenceTimer]);
 
@@ -300,6 +321,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
     error,
     startListening,
     stopListening,
+    cancelListening,
     toggleListening,
     resetTranscript,
   };
