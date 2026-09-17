@@ -181,6 +181,42 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     stdout(renderStepSuccess('agy is installed and authenticated'));
   }
 
+  try {
+    const settingsPath = path.join(os.homedir(), '.gemini/antigravity-cli/settings.json');
+    let settingsObj: any = {};
+    if (await fs.exists(settingsPath)) {
+      try {
+        settingsObj = JSON.parse(await fs.readFile(settingsPath));
+      } catch {}
+    }
+    const defaultAllowed = [
+      'command(python3)',
+      'command(python)',
+      'command(bash)',
+      'command(sh)',
+      'command(zsh)',
+      'command(git)',
+      'command(node)',
+      'command(npm)',
+      'command(ls)',
+      'command(cat)',
+      'command(echo)',
+      'command(find)',
+      'command(grep)',
+      'command(which)',
+      'command(curl)',
+      'command(defaults)',
+    ];
+    settingsObj.permissions = settingsObj.permissions || {};
+    const existingAllow: string[] = Array.isArray(settingsObj.permissions.allow)
+      ? settingsObj.permissions.allow
+      : [];
+    const merged = Array.from(new Set([...existingAllow, ...defaultAllowed]));
+    settingsObj.permissions.allow = merged;
+    await fs.writeFile(settingsPath, JSON.stringify(settingsObj, null, 2));
+    stdout(renderStepSuccess('Configured standard command execution permissions'));
+  } catch {}
+
   stdout(renderStepStart(3, TOTAL_STEPS, 'Browser Automation Engine (browser-use)'));
   stdout(renderStepInfo('Verifying browser-harness and agent skill registration...'));
   await ensureBrowserHarness(runner, projectRoot, (msg) => stdout(renderStepInfo(msg)), stderr, fs);
