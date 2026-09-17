@@ -34,12 +34,14 @@ export class ThrottledFrameStream {
   }
 
   pushFrame(frame: BrowserFrame): boolean {
-    if (frame.jpegBase64 === this.lastFrameData) {
-      return false;
-    }
-
     const now = Date.now();
     const timeSinceLast = now - this.lastEmittedAt;
+
+    if (frame.jpegBase64 === this.lastFrameData) {
+      if (timeSinceLast < 2500) {
+        return false;
+      }
+    }
 
     if (timeSinceLast >= this.minIntervalMs) {
       this.emit(frame, now);

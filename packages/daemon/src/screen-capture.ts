@@ -9,7 +9,9 @@ const execFileAsync = promisify(execFile);
 
 export class DefaultFrameSource implements FrameSource {
   private lastCapturedHash: string | null = null;
+  private lastCapturedFrame: BrowserFrame | null = null;
   private lastCapturedTime = 0;
+  private lastEmitTime = 0;
 
   async captureFrame(): Promise<BrowserFrame | null> {
     const fileResult = await this.captureFromFiles();
@@ -43,11 +45,6 @@ export class DefaultFrameSource implements FrameSource {
       try {
         if (!fs.existsSync(candidate)) continue;
         const stat = await fs.promises.stat(candidate);
-        if (now - stat.mtimeMs > 5000) {
-          await fs.promises.unlink(candidate).catch(() => {});
-          continue;
-        }
-
         const buf = await fs.promises.readFile(candidate);
         if (buf.length === 0) continue;
 
@@ -56,14 +53,24 @@ export class DefaultFrameSource implements FrameSource {
         const base64 = `data:${mime};base64,${buf.toString('base64')}`;
 
         if (base64 === this.lastCapturedHash) {
+          if (now - this.lastEmitTime >= 2500 && this.lastCapturedFrame) {
+            this.lastEmitTime = now;
+            return {
+              ...this.lastCapturedFrame,
+              capturedAt: new Date().toISOString(),
+            };
+          }
           return null;
         }
 
         this.lastCapturedHash = base64;
-        return {
+        this.lastEmitTime = now;
+        const frame: BrowserFrame = {
           jpegBase64: base64,
           capturedAt: new Date(stat.mtimeMs).toISOString(),
         };
+        this.lastCapturedFrame = frame;
+        return frame;
       } catch {}
     }
     return undefined;
