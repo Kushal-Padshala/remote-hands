@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { MachineRow, TaskKind, TaskMode } from '@remote-hands/shared';
+import { ThinkingOrb } from 'thinking-orbs';
 
 export interface NewTaskScreenProps {
   machine: MachineRow;
@@ -124,7 +125,7 @@ export function NewTaskScreen({ machine, onCreateTask, onCancel, loading }: NewT
         >
           {loading ? (
             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="spinner" />
+              <ThinkingOrb state="connecting" size={20} theme="dark" role="presentation" />
               <span>Starting agy...</span>
             </span>
           ) : (

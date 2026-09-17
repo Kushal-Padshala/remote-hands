@@ -9,6 +9,7 @@ import { FrameViewer } from '../components/FrameViewer.js';
 import { ApprovalSheet } from '../components/ApprovalSheet.js';
 import { StepsDropdown, type ChatStep } from '../components/StepsDropdown.js';
 import { MarkdownView } from '../components/MarkdownView.js';
+import { ThinkingOrb } from 'thinking-orbs';
 
 export interface LiveTaskScreenProps {
   task: TaskRow;
@@ -398,7 +399,11 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
         <div className="chat-nav-center">
           <div className="chat-nav-title">{machineName || 'Remote Mac'}</div>
           <div className={`chat-nav-status ${isWorking ? 'working' : 'ready'}`}>
-            <span className={`status-dot ${isWorking ? 'pulse' : ''}`} />
+            {isWorking ? (
+              <ThinkingOrb state="working" size={20} theme="dark" role="presentation" />
+            ) : (
+              <span className="status-dot" />
+            )}
             <span>{isWorking ? 'agy working...' : 'Ready'}</span>
           </div>
         </div>
@@ -473,9 +478,9 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
           const hasTools = afterUser.some((m) => m.type === 'tool');
           if (!hasThinking && !hasAgent && !hasTools) {
             return (
-              <div className="chat-thinking-indicator">
-                <span className="spinner" />
-                <span>agy is starting up...</span>
+              <div className="chat-orb-container">
+                <ThinkingOrb state="searching" size={64} theme="dark" role="presentation" />
+                <span className="chat-orb-label">agy is analyzing and executing...</span>
               </div>
             );
           }

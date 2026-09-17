@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { ThinkingOrb } from 'thinking-orbs';
 
 export interface ChatStep {
   id: string;
@@ -156,7 +157,7 @@ export function StepsDropdown({ steps, isWorking }: StepsDropdownProps) {
       >
         <div className="steps-header-left">
           {isWorking ? (
-            <span className="steps-pulse-dot" />
+            <ThinkingOrb state="working" size={20} theme="dark" role="presentation" />
           ) : (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--accent-emerald)' }}>
               <polyline points="20 6 9 17 4 12" />
@@ -193,7 +194,10 @@ export function StepsDropdown({ steps, isWorking }: StepsDropdownProps) {
 
                   <div className="step-row-right">
                     {step.toolStatus === 'active' && isWorking ? (
-                      <span className="step-status running">● running</span>
+                      <span className="step-status running" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <ThinkingOrb state="solving" size={20} theme="dark" role="presentation" />
+                        <span>running</span>
+                      </span>
                     ) : (
                       <span className="step-status done">✓</span>
                     )}
