@@ -159,11 +159,41 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  const resolvedMachineName = machineName || machine?.name || 'Remote Mac';
-  const targetMachineId = task?.machine_id || machine?.id;
-  const isMachineOnline =
-    machine?.status === 'online' &&
-    Boolean(machine?.last_seen_at && Date.now() - new Date(machine.last_seen_at).getTime() < 45000);
+  const [liveMachine, setLiveMachine] = useState<MachineRow | undefined>(machine);
+  const lastActivityRef = useRef<number>(Date.now());
+
+  const resolvedMachineName = machineName || liveMachine?.name || machine?.name || 'Remote Mac';
+  const targetMachineId = task?.machine_id || liveMachine?.id || machine?.id;
+
+  useEffect(() => {
+    if (machine) {
+      setLiveMachine(machine);
+    }
+  }, [machine]);
+
+  const handleCheckConnection = async () => {
+    try {
+      const list = await apiClient.listMachines();
+      const match = list.find((m) => m.id === targetMachineId);
+      if (match) {
+        setLiveMachine(match);
+      }
+      lastActivityRef.current = Date.now();
+    } catch {}
+  };
+
+  useEffect(() => {
+    const interval = setInterval(handleCheckConnection, 8000);
+    return () => clearInterval(interval);
+  }, [targetMachineId]);
+
+  const isFreshHeartbeat = Boolean(
+    liveMachine?.status === 'online' &&
+    liveMachine?.last_seen_at &&
+    Date.now() - new Date(liveMachine.last_seen_at).getTime() < 45000
+  );
+  const isRecentlyActive = Date.now() - lastActivityRef.current < 45000;
+  const isMachineOnline = isWorking || isRecentlyActive || isFreshHeartbeat;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({ behavior: 'smooth' });
@@ -273,12 +303,16 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             .slice(lastUserIdx + 1)
             .some((m) => m.type === 'agent' && (m.text?.length ?? 0) > 0);
           if (!hasAgentAfterLastUser && payload?.summary) {
+            const rawSummary = String(payload.summary).trim();
+            const text = rawSummary === 'Task completed without text output'
+              ? 'Task completed successfully.'
+              : rawSummary;
             return [
               ...filtered,
               {
                 id: `result-${Date.now()}`,
                 type: 'agent',
-                text: payload.summary,
+                text,
                 time: new Date().toISOString(),
               },
             ];
@@ -306,6 +340,9 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
       try {
         const list = await apiClient.listEvents(currentTaskId!);
         if (closed) return;
+        if (list.length > 0) {
+          lastActivityRef.current = Date.now();
+        }
         for (const e of list) {
           const key = `${e.id}`;
           if (!seenEventIds.has(key)) {
@@ -341,6 +378,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
 
         const parseResult = safeParseRealtimeMessage(rawData);
         if (!parseResult.ok) return;
+        lastActivityRef.current = Date.now();
         const msg = parseResult.message;
 
         if (msg.type === 'task.frame') {
@@ -486,7 +524,12 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           </div>
           <div className="chat-nav-info">
             <div className="chat-nav-title">{resolvedMachineName}</div>
-            <div className={`chat-nav-status ${isWorking ? 'working' : isMachineOnline ? 'ready' : 'offline'}`}>
+            <div
+              className={`chat-nav-status ${isWorking ? 'working' : isMachineOnline ? 'ready' : 'offline'}`}
+              onClick={handleCheckConnection}
+              title="Tap to check connection"
+              style={{ cursor: 'pointer' }}
+            >
               {isWorking ? (
                 <>
                   <ThinkingOrb state="working" size={20} theme="dark" role="presentation" />

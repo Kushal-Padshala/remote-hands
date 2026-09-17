@@ -89,6 +89,10 @@ export function App() {
     try {
       const list = await apiClient.listMachines();
       setMachines(list);
+      setSelectedMachine((prev) => {
+        if (!prev) return null;
+        return list.find((m) => m.id === prev.id) || prev;
+      });
       if (typeof localStorage !== 'undefined' && list.length > 0) {
         try {
           localStorage.setItem('rh_cached_machines', JSON.stringify(list));
