@@ -21,10 +21,10 @@ export function PairingModal({ isOpen, onClose, pairingUrl, pairingCode }: Pairi
   useEffect(() => {
     if (isOpen && canvasRef.current && activeUrl) {
       QRCode.toCanvas(canvasRef.current, activeUrl, {
-        width: 220,
-        margin: 2,
+        width: 200,
+        margin: 1,
         color: {
-          dark: '#090d16',
+          dark: '#09090b',
           light: '#ffffff',
         },
       }).catch(() => {});
@@ -44,19 +44,22 @@ export function PairingModal({ isOpen, onClose, pairingUrl, pairingCode }: Pairi
   return (
     <div className="sheet-overlay" onClick={onClose}>
       <div className="sheet-content" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-grabber" />
+
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h3 style={{ fontSize: '1.125rem', fontWeight: 600 }}>Pair Your Phone</h3>
+          <h3 style={{ fontSize: '1.05rem', fontWeight: 600 }}>Pair Your Phone</h3>
           <button
-            className="btn"
-            style={{ width: 'auto', padding: '4px 10px', fontSize: '0.875rem' }}
+            className="btn-ghost"
+            style={{ width: 'auto', padding: '4px 8px', borderRadius: '50%' }}
             onClick={onClose}
+            aria-label="Close"
           >
             ✕
           </button>
         </div>
 
-        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: 16 }}>
-          Scan this QR code with your mobile camera to open the direct pairing link on your phone.
+        <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.45 }}>
+          Scan this QR code with your mobile camera to open this remote session directly on your phone.
         </p>
 
         <div
@@ -65,10 +68,11 @@ export function PairingModal({ isOpen, onClose, pairingUrl, pairingCode }: Pairi
             justifyContent: 'center',
             alignItems: 'center',
             background: '#ffffff',
-            borderRadius: 16,
-            padding: 16,
+            borderRadius: 14,
+            padding: 14,
             margin: '0 auto 16px auto',
-            maxWidth: 240,
+            maxWidth: 228,
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4)',
           }}
         >
           <canvas ref={canvasRef} />
@@ -76,14 +80,17 @@ export function PairingModal({ isOpen, onClose, pairingUrl, pairingCode }: Pairi
 
         {pairingCode && (
           <div style={{ textAlign: 'center', marginBottom: 16 }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Pairing Code</div>
+            <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+              Pairing Code
+            </div>
             <div
               style={{
-                fontSize: '1.25rem',
+                fontSize: '1.2rem',
                 fontWeight: 700,
                 letterSpacing: '0.08em',
-                color: 'var(--accent-blue)',
+                color: 'var(--accent-cyan)',
                 fontFamily: 'var(--font-mono)',
+                marginTop: 2,
               }}
             >
               {pairingCode}
@@ -92,10 +99,10 @@ export function PairingModal({ isOpen, onClose, pairingUrl, pairingCode }: Pairi
         )}
 
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn" style={{ flex: 1 }} onClick={handleCopy}>
-            {copied ? '✓ Copied Direct Link' : 'Copy Direct Link'}
+          <button className="btn-ghost" style={{ flex: 1, padding: '10px' }} onClick={handleCopy}>
+            {copied ? '✓ Copied Link' : 'Copy Link'}
           </button>
-          <button className="btn btn-primary" style={{ flex: 1 }} onClick={onClose}>
+          <button className="btn btn-primary" style={{ flex: 1, padding: '10px' }} onClick={onClose}>
             Done
           </button>
         </div>
