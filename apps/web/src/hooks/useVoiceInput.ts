@@ -53,7 +53,7 @@ export interface UseVoiceInputReturn {
 }
 
 export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInputReturn {
-  const { onTranscriptChange, onSpeechEnd, silenceTimeoutMs = 1800 } = options;
+  const { onTranscriptChange, onSpeechEnd, silenceTimeoutMs = 0 } = options;
   const [isSupported, setIsSupported] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
@@ -62,8 +62,9 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finalTranscriptRef = useRef('');
-  const isListeningRef = useRef(false);
+  const shouldBeListeningRef = useRef(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -79,16 +80,24 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
     }
   }, []);
 
+  const clearRestartTimer = useCallback(() => {
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+  }, []);
+
   const stopListening = useCallback(() => {
     clearSilenceTimer();
-    isListeningRef.current = false;
+    clearRestartTimer();
+    shouldBeListeningRef.current = false;
     setIsListening(false);
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
       } catch {}
     }
-  }, [clearSilenceTimer]);
+  }, [clearRestartTimer, clearSilenceTimer]);
 
   const startListening = useCallback(() => {
     if (typeof window === 'undefined') return;
@@ -99,10 +108,12 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
     }
 
     clearSilenceTimer();
+    clearRestartTimer();
     setError(null);
     setTranscript('');
     setInterimTranscript('');
     finalTranscriptRef.current = '';
+    shouldBeListeningRef.current = true;
 
     try {
       if (recognitionRef.current) {
@@ -117,7 +128,6 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
       recognition.lang = typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en-US';
 
       recognition.onstart = () => {
-        isListeningRef.current = true;
         setIsListening(true);
       };
 
@@ -157,7 +167,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
         clearSilenceTimer();
         if (combined.trim().length > 0 && silenceTimeoutMs > 0) {
           silenceTimerRef.current = setTimeout(() => {
-            if (isListeningRef.current) {
+            if (shouldBeListeningRef.current) {
               const textToSend = (finalTranscriptRef.current + (interim ? ' ' + interim : '')).trim();
               stopListening();
               if (textToSend) {
@@ -174,17 +184,39 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
           return;
         }
         if (event.error === 'not-allowed') {
+          shouldBeListeningRef.current = false;
+          setIsListening(false);
           setError('Microphone access was denied. Please allow microphone permissions.');
-        } else if (event.error !== 'aborted') {
+          return;
+        }
+        if (event.error === 'aborted') {
+          return;
+        }
+        if (!shouldBeListeningRef.current) {
+          setIsListening(false);
           setError(`Speech recognition error: ${event.error}`);
         }
-        isListeningRef.current = false;
-        setIsListening(false);
       };
 
       recognition.onend = () => {
         clearSilenceTimer();
-        isListeningRef.current = false;
+        if (shouldBeListeningRef.current) {
+          clearRestartTimer();
+          try {
+            recognition.start();
+            return;
+          } catch {
+            restartTimerRef.current = setTimeout(() => {
+              if (shouldBeListeningRef.current && recognitionRef.current) {
+                try {
+                  recognitionRef.current.start();
+                } catch {}
+              }
+            }, 200);
+            return;
+          }
+        }
+
         setIsListening(false);
         const finalRecorded = finalTranscriptRef.current.trim();
         if (finalRecorded) {
@@ -198,17 +230,17 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
     } catch (err: any) {
       setError(err?.message || 'Could not start speech recognition');
       setIsListening(false);
-      isListeningRef.current = false;
+      shouldBeListeningRef.current = false;
     }
-  }, [clearSilenceTimer, onSpeechEnd, onTranscriptChange, silenceTimeoutMs, stopListening]);
+  }, [clearRestartTimer, clearSilenceTimer, onSpeechEnd, onTranscriptChange, silenceTimeoutMs, stopListening]);
 
   const toggleListening = useCallback(() => {
-    if (isListening) {
+    if (shouldBeListeningRef.current) {
       stopListening();
     } else {
       startListening();
     }
-  }, [isListening, startListening, stopListening]);
+  }, [startListening, stopListening]);
 
   const resetTranscript = useCallback(() => {
     setTranscript('');
@@ -218,14 +250,16 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 
   useEffect(() => {
     return () => {
+      shouldBeListeningRef.current = false;
       clearSilenceTimer();
+      clearRestartTimer();
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
         } catch {}
       }
     };
-  }, [clearSilenceTimer]);
+  }, [clearRestartTimer, clearSilenceTimer]);
 
   return {
     isSupported,

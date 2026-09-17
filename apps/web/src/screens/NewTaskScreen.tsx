@@ -42,7 +42,7 @@ export function NewTaskScreen({ machine, onCreateTask, onCancel, loading }: NewT
     stopListening: stopVoiceListening,
   } = useVoiceInput({
     onTranscriptChange: handleTranscriptChange,
-    silenceTimeoutMs: 2500,
+    silenceTimeoutMs: 0,
   });
 
   const handleToggleVoice = () => {

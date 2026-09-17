@@ -305,6 +305,12 @@ describe('Web App Workflow', () => {
       expect(input.value).toBe('open github and review pull request');
     });
 
+    const startSpy = vi.spyOn(mockInstance, 'start');
+    mockInstance.onend();
+
+    expect(startSpy).toHaveBeenCalled();
+    expect(screen.getByTestId('voice-listening-banner')).toBeDefined();
+
     delete (window as any).SpeechRecognition;
   });
 });

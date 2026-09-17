@@ -508,7 +508,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
   } = useVoiceInput({
     onTranscriptChange: handleTranscriptChange,
     onSpeechEnd: handleSpeechEnd,
-    silenceTimeoutMs: autoSendVoice ? 1800 : 0,
+    silenceTimeoutMs: autoSendVoice ? 3000 : 0,
   });
 
   const handleToggleVoice = () => {
