@@ -16,7 +16,11 @@ export interface AgentRunResult {
 }
 
 export interface AgentRunner {
-  run(task: Task, onEvent?: (event: EventInput) => Promise<void> | void): Promise<AgentRunResult>;
+  run(
+    task: Task,
+    onEvent?: (event: EventInput) => Promise<void> | void,
+    signal?: AbortSignal,
+  ): Promise<AgentRunResult>;
 }
 
 export type AgentStreamRecord = EventInput;
@@ -315,7 +319,11 @@ export class StaticAgentRunner implements AgentRunner {
     this.#result = result;
   }
 
-  async run(_task: Task, onEvent?: (event: EventInput) => Promise<void> | void): Promise<AgentRunResult> {
+  async run(
+    _task: Task,
+    onEvent?: (event: EventInput) => Promise<void> | void,
+    _signal?: AbortSignal,
+  ): Promise<AgentRunResult> {
     if (onEvent) {
       for (const event of this.#result.events) {
         try {
@@ -336,7 +344,11 @@ export class ProcessAgentRunner implements AgentRunner {
     this.systemPrompt = systemPrompt ?? DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT;
   }
 
-  async run(task: Task, onEvent?: (event: EventInput) => Promise<void> | void): Promise<AgentRunResult> {
+  async run(
+    task: Task,
+    onEvent?: (event: EventInput) => Promise<void> | void,
+    signal?: AbortSignal,
+  ): Promise<AgentRunResult> {
     if (task.workspace_path) {
       try {
         const settingsPath = path.join(os.homedir(), '.gemini/antigravity-cli/settings.json');
@@ -365,7 +377,37 @@ export class ProcessAgentRunner implements AgentRunner {
       const proc = spawn(binary, cliArgs, {
         cwd: task.workspace_path || process.cwd(),
         env: process.env,
+        detached: process.platform !== 'win32',
       });
+
+      const killProc = (sig: NodeJS.Signals = 'SIGTERM') => {
+        try {
+          if (proc.pid) {
+            if (process.platform !== 'win32') {
+              try {
+                process.kill(-proc.pid, sig);
+              } catch {
+                proc.kill(sig);
+              }
+            } else {
+              proc.kill(sig);
+            }
+          }
+        } catch {}
+      };
+
+      if (signal?.aborted) {
+        killProc('SIGTERM');
+      } else if (signal) {
+        signal.addEventListener(
+          'abort',
+          () => {
+            killProc('SIGTERM');
+            setTimeout(() => killProc('SIGKILL'), 400);
+          },
+          { once: true },
+        );
+      }
 
       const events: EventInput[] = [];
       let summary = '';
@@ -425,6 +467,15 @@ export class ProcessAgentRunner implements AgentRunner {
           if (parsed) handleEvent(parsed);
         }
         eventQueue.then(() => {
+          if (signal?.aborted) {
+            resolve({
+              events,
+              summary: 'Task cancelled by user',
+              conversationId,
+              status: 'done',
+            });
+            return;
+          }
           if (code !== 0 && events.length === 0) {
             reject(new Error(`Agent process exited with code ${code}`));
             return;
@@ -454,6 +505,15 @@ export class ProcessAgentRunner implements AgentRunner {
             status: isFailed ? 'failed' : 'done',
           });
         }).catch(() => {
+          if (signal?.aborted) {
+            resolve({
+              events,
+              summary: 'Task cancelled by user',
+              conversationId,
+              status: 'done',
+            });
+            return;
+          }
           const isFailed = code !== 0 || hasFatalError;
           const defaultSummary = isFailed
             ? (lastErrorMessage || `Task failed (exit code ${code})`)

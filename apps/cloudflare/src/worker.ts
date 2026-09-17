@@ -15,6 +15,7 @@ import {
   handleMarkTaskRunning,
   handleCompleteTask,
   handleFailTask,
+  handleCancelTask,
 } from './routes/tasks.js';
 import { handleListEvents, handleAppendEvent } from './routes/events.js';
 import { handlePushFrame } from './routes/frames.js';
@@ -108,6 +109,9 @@ export default {
         }
         if (subaction === 'fail' && method === 'POST') {
           return await handleFailTask(taskId, request, env);
+        }
+        if (subaction === 'cancel' && method === 'POST') {
+          return await handleCancelTask(taskId, request, env);
         }
         if (subaction === 'events' && method === 'GET') {
           return await handleListEvents(taskId, request, env);

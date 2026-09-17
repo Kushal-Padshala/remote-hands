@@ -3,6 +3,7 @@ import {
   appendEventResponseSchema,
   completeTaskResponseSchema,
   failTaskResponseSchema,
+  cancelTaskResponseSchema,
   createApprovalResponseSchema,
   decideApprovalResponseSchema,
   taskResponseSchema,
@@ -120,6 +121,12 @@ export class CloudflareControlPlaneClient {
   async failTask(taskId: string, input: FailTaskRequest): Promise<TaskRow> {
     const data = await this.request<unknown>(`/tasks/${taskId}/fail`, 'POST', input);
     const parsed = failTaskResponseSchema.parse(data);
+    return parsed.task;
+  }
+
+  async cancelTask(taskId: string, reason?: string): Promise<TaskRow> {
+    const data = await this.request<unknown>(`/tasks/${taskId}/cancel`, 'POST', { reason });
+    const parsed = cancelTaskResponseSchema.parse(data);
     return parsed.task;
   }
 

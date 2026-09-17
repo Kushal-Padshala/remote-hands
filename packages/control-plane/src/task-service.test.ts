@@ -5,6 +5,7 @@ import {
   transitionTask,
   completeTask,
   failTask,
+  cancelTask,
 } from './task-service.js';
 
 describe('task service lifecycle rules', () => {
@@ -85,4 +86,20 @@ describe('task service lifecycle rules', () => {
     expect(failed.error).toBe('Something crashed');
     expect(failed.finished_at).toBe(now.toISOString());
   });
+
+  it('cancels running task', () => {
+    const task = createTask({
+      ownerId: 'owner-1',
+      machineId: 'machine-1',
+      prompt: 'Do something',
+    }, now);
+    const claimed = claimTask(task, 'machine-1', now);
+    const running = transitionTask(claimed, 'running');
+
+    const cancelled = cancelTask(running, { reason: 'User cancelled' }, now);
+    expect(cancelled.status).toBe('cancelled');
+    expect(cancelled.error).toBe('User cancelled');
+    expect(cancelled.finished_at).toBe(now.toISOString());
+  });
 });
+

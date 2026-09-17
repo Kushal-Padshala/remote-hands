@@ -211,4 +211,31 @@ describe('Web App Workflow', () => {
 
     vi.useRealTimers();
   });
+
+  it('turns submit button into stop button while running and cancels task on click', async () => {
+    vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+    const cancelSpy = vi.spyOn(apiClient, 'cancelTask').mockResolvedValue(fakeTask);
+    const socket = new MockSocket();
+
+    render(
+      <LiveTaskScreen
+        task={fakeTask}
+        onBack={() => {}}
+        webSocketFactory={() => socket as any}
+      />,
+    );
+
+    const stopBtn = screen.getByTestId('stop-task-btn');
+    expect(stopBtn).toBeDefined();
+    expect(screen.queryByTestId('submit-task-btn')).toBeNull();
+
+    fireEvent.click(stopBtn);
+
+    await waitFor(() => {
+      expect(cancelSpy).toHaveBeenCalledWith(fakeTask.id);
+      expect(screen.getByTestId('submit-task-btn')).toBeDefined();
+      expect(screen.queryByTestId('stop-task-btn')).toBeNull();
+    });
+  });
 });
+

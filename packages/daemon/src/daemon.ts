@@ -19,7 +19,7 @@ export interface RunDaemonOnceInput {
 
 export type RunDaemonOnceResult =
   | { claimed: false }
-  | { claimed: true; taskId: string; status: Extract<TaskStatus, 'done' | 'failed'> };
+  | { claimed: true; taskId: string; status: Extract<TaskStatus, 'done' | 'failed' | 'cancelled'> };
 
 export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemonOnceResult> {
   const machine = await input.store.registerMachine({
@@ -55,14 +55,41 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
 
   frameStream.start(2000);
 
+  const abortController = new AbortController();
+  let cancelled = false;
+  const cancelPoll = setInterval(async () => {
+    try {
+      if (input.store.getTask) {
+        const current = await input.store.getTask(running.id);
+        if (current && current.status === 'cancelled') {
+          cancelled = true;
+          abortController.abort();
+        }
+      }
+    } catch {}
+  }, 1000);
+
   try {
     let streamedCount = 0;
-    const result = await input.runner.run(running, async (event) => {
-      try {
-        streamedCount++;
-        await input.store.appendEvent(running.id, event);
-      } catch {}
-    });
+    const result = await input.runner.run(
+      running,
+      async (event) => {
+        try {
+          streamedCount++;
+          await input.store.appendEvent(running.id, event);
+        } catch {}
+      },
+      abortController.signal,
+    );
+
+    if (cancelled || abortController.signal.aborted) {
+      await input.store.appendEvent(running.id, {
+        kind: 'status',
+        payload: { status: 'cancelled' },
+      }).catch(() => {});
+      return { claimed: true, taskId: running.id, status: 'cancelled' };
+    }
+
     if (streamedCount === 0 && result.events) {
       for (const event of result.events) {
         await input.store.appendEvent(running.id, event);
@@ -96,6 +123,13 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
     }
     return { claimed: true, taskId: running.id, status: finalStatus };
   } catch (cause) {
+    if (cancelled || abortController.signal.aborted) {
+      await input.store.appendEvent(running.id, {
+        kind: 'status',
+        payload: { status: 'cancelled' },
+      }).catch(() => {});
+      return { claimed: true, taskId: running.id, status: 'cancelled' };
+    }
     const message = cause instanceof Error ? cause.message : String(cause);
     await input.store.appendEvent(running.id, {
       kind: 'error',
@@ -104,7 +138,7 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
     await input.store.failTask(running.id, { error: message });
     return { claimed: true, taskId: running.id, status: 'failed' };
   } finally {
+    clearInterval(cancelPoll);
     frameStream.stop();
   }
 }
-

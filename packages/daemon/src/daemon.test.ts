@@ -135,5 +135,28 @@ describe('runDaemonOnce', () => {
     expect(store.taskById(taskId)?.status).toBe('failed');
     expect(store.taskById(taskId)?.error).toBe('Quota exceeded');
   });
+
+  it('aborts and marks cancelled when task is cancelled during run', async () => {
+    const store = new MemoryTaskStore({ machines: [machine()], tasks: [task()] });
+    let runnerAborted = false;
+    const runner: AgentRunner = {
+      async run(_task, _onEvent, signal) {
+        if (signal) {
+          signal.addEventListener('abort', () => {
+            runnerAborted = true;
+          });
+        }
+        await store.cancelTask(taskId, 'User stopped task');
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+        return { events: [], summary: 'Done', conversationId: null };
+      },
+    };
+
+    const result = await runDaemonOnce({ userId, config, runtime, store, runner });
+
+    expect(result).toEqual({ claimed: true, taskId, status: 'cancelled' });
+    expect(runnerAborted).toBe(true);
+  });
 });
+
 

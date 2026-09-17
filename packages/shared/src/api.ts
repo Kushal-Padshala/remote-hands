@@ -160,6 +160,17 @@ export const failTaskResponseSchema = z.object({
 });
 export type FailTaskResponse = z.infer<typeof failTaskResponseSchema>;
 
+export const cancelTaskRequestSchema = z.object({
+  reason: z.string().optional(),
+});
+export type CancelTaskRequest = z.infer<typeof cancelTaskRequestSchema>;
+
+export const cancelTaskResponseSchema = z.object({
+  task: taskRowSchema,
+});
+export type CancelTaskResponse = z.infer<typeof cancelTaskResponseSchema>;
+
+
 export const approvalRowSchema = z.object({
   id: z.string().uuid(),
   task_id: z.string().uuid(),

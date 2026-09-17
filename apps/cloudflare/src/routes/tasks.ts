@@ -3,6 +3,7 @@ import {
   createTaskRequestSchema,
   completeTaskRequestSchema,
   failTaskRequestSchema,
+  cancelTaskRequestSchema,
   type TaskRow,
 } from '@remote-hands/shared';
 import {
@@ -11,6 +12,7 @@ import {
   transitionTask,
   completeTask,
   failTask,
+  cancelTask,
 } from '@remote-hands/control-plane';
 
 import { requireOwnerSession, requireSession } from '../auth/session.js';
@@ -195,3 +197,57 @@ export async function handleFailTask(taskId: string, request: Request, env: Env)
 
   return jsonOk({ task: failed });
 }
+
+export async function handleCancelTask(
+  taskId: string,
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  const session = await requireSession(request, env.DB);
+  const repo = new TasksRepository(env.DB);
+  const task = await repo.getById(taskId);
+
+  if (!task || task.owner_id !== session.owner_id) {
+    throw new NotFoundError('Task not found');
+  }
+
+  let reason: string | undefined;
+  try {
+    const raw = await request.json();
+    const parsed = cancelTaskRequestSchema.safeParse(raw);
+    if (parsed.success && parsed.data.reason) {
+      reason = parsed.data.reason;
+    }
+  } catch {}
+
+  const cancelled = cancelTask(task as any, { reason });
+
+  await repo.updateStatus(taskId, 'cancelled', {
+    finished_at: cancelled.finished_at,
+    error: cancelled.error ?? undefined,
+  });
+
+  try {
+    const room = getTaskRoomStub(taskId, env);
+    await room.fetch(
+      new Request('https://internal/event', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'task.event',
+          event: {
+            id: Date.now(),
+            task_id: taskId,
+            owner_id: task.owner_id,
+            seq: 999999,
+            kind: 'status',
+            payload: { status: 'cancelled' },
+            created_at: new Date().toISOString(),
+          },
+        }),
+      }),
+    );
+  } catch {}
+
+  return jsonOk({ task: cancelled });
+}
+

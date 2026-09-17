@@ -122,6 +122,20 @@ export class CloudflareTaskStore implements TaskStore {
     return toTask(row);
   }
 
+  async getTask(taskId: string): Promise<Task | null> {
+    try {
+      const row = await this.client.getTask(taskId);
+      return toTask(row);
+    } catch {
+      return null;
+    }
+  }
+
+  async cancelTask(taskId: string, reason?: string): Promise<Task> {
+    const row = await this.client.cancelTask(taskId, reason);
+    return toTask(row);
+  }
+
   async pushFrame(taskId: string, frame: { jpegBase64: string; capturedAt: string }): Promise<void> {
     await this.client.pushFrame(taskId, frame.jpegBase64, frame.capturedAt);
   }

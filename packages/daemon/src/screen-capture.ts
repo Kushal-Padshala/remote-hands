@@ -10,7 +10,6 @@ const execFileAsync = promisify(execFile);
 export class DefaultFrameSource implements FrameSource {
   private lastCapturedHash: string | null = null;
   private lastCapturedFrame: BrowserFrame | null = null;
-  private lastCapturedTime = 0;
   private lastEmitTime = 0;
 
   async captureFrame(): Promise<BrowserFrame | null> {
@@ -23,9 +22,6 @@ export class DefaultFrameSource implements FrameSource {
     if (process.platform === 'darwin') {
       const nativeResult = await this.captureFromMacScreen();
       if (nativeResult !== undefined) return nativeResult;
-
-      const chromeResult = await this.captureFromChromeTab();
-      if (chromeResult !== undefined) return chromeResult;
     }
 
     return null;
@@ -79,16 +75,142 @@ export class DefaultFrameSource implements FrameSource {
   private async captureFromCdp(): Promise<BrowserFrame | null | undefined> {
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 300);
+      const timer = setTimeout(() => controller.abort(), 500);
       const res = await fetch('http://127.0.0.1:9222/json', { signal: controller.signal });
       clearTimeout(timer);
 
       if (!res.ok) return undefined;
-      const targets = (await res.json()) as Array<{ type?: string; id?: string }>;
-      const pageTarget = targets.find((t) => t.type === 'page');
-      if (!pageTarget?.id) return undefined;
+      const targets = (await res.json()) as Array<{
+        type?: string;
+        id?: string;
+        url?: string;
+        title?: string;
+        webSocketDebuggerUrl?: string;
+      }>;
+      const pages = targets.filter((t) => t.type === 'page' && t.webSocketDebuggerUrl);
+      if (pages.length === 0) return undefined;
 
-      return undefined;
+      let target = pages[0];
+      if (pages.length > 1 && process.platform === 'darwin') {
+        try {
+          const { stdout } = await execFileAsync(
+            'osascript',
+            ['-e', 'tell application "Google Chrome" to get URL of active tab of front window'],
+            { timeout: 350 },
+          );
+          const frontUrl = stdout.trim();
+          if (frontUrl) {
+            const matched = pages.find((p) => p.url === frontUrl);
+            if (matched) target = matched;
+          }
+        } catch {}
+      }
+
+      if (!target?.webSocketDebuggerUrl) return undefined;
+
+      const wsUrl = target.webSocketDebuggerUrl;
+      const WsClass = (globalThis as any).WebSocket;
+      if (!WsClass) return undefined;
+
+      const base64Data = await new Promise<string | null>((resolve) => {
+        let finished = false;
+        let ws: any;
+        const timeout = setTimeout(() => {
+          if (!finished) {
+            finished = true;
+            try {
+              ws?.close();
+            } catch {}
+            resolve(null);
+          }
+        }, 800);
+
+        try {
+          ws = new WsClass(wsUrl);
+          ws.onopen = () => {
+            try {
+              ws.send(
+                JSON.stringify({
+                  id: 1,
+                  method: 'Page.captureScreenshot',
+                  params: { format: 'jpeg', quality: 60 },
+                }),
+              );
+            } catch {
+              if (!finished) {
+                finished = true;
+                clearTimeout(timeout);
+                try {
+                  ws.close();
+                } catch {}
+                resolve(null);
+              }
+            }
+          };
+
+          ws.onmessage = (event: any) => {
+            if (finished) return;
+            try {
+              const raw =
+                typeof event.data === 'string'
+                  ? event.data
+                  : new TextDecoder().decode(event.data);
+              const msg = JSON.parse(raw);
+              if (msg.id === 1 && msg.result?.data) {
+                finished = true;
+                clearTimeout(timeout);
+                try {
+                  ws.close();
+                } catch {}
+                resolve(msg.result.data);
+              }
+            } catch {}
+          };
+
+          ws.onerror = () => {
+            if (!finished) {
+              finished = true;
+              clearTimeout(timeout);
+              try {
+                ws.close();
+              } catch {}
+              resolve(null);
+            }
+          };
+        } catch {
+          if (!finished) {
+            finished = true;
+            clearTimeout(timeout);
+            resolve(null);
+          }
+        }
+      });
+
+      if (!base64Data) return undefined;
+
+      const now = Date.now();
+      const mime = 'image/jpeg';
+      const base64 = `data:${mime};base64,${base64Data}`;
+
+      if (base64 === this.lastCapturedHash) {
+        if (now - this.lastEmitTime >= 2500 && this.lastCapturedFrame) {
+          this.lastEmitTime = now;
+          return {
+            ...this.lastCapturedFrame,
+            capturedAt: new Date().toISOString(),
+          };
+        }
+        return null;
+      }
+
+      this.lastCapturedHash = base64;
+      this.lastEmitTime = now;
+      const frame: BrowserFrame = {
+        jpegBase64: base64,
+        capturedAt: new Date().toISOString(),
+      };
+      this.lastCapturedFrame = frame;
+      return frame;
     } catch {
       return undefined;
     }
@@ -124,75 +246,5 @@ export class DefaultFrameSource implements FrameSource {
       } catch {}
     }
     return undefined;
-  }
-
-  private async captureFromChromeTab(): Promise<BrowserFrame | null | undefined> {
-    const now = Date.now();
-    if (now - this.lastCapturedTime < 2000) {
-      return null;
-    }
-
-    try {
-      const script = `
-        tell application "Google Chrome"
-          if (count of windows) is 0 then return ""
-          set t to active tab of front window
-          return (title of t) & "|||" & (URL of t)
-        end tell
-      `;
-      const { stdout } = await execFileAsync('osascript', ['-e', script], { timeout: 800 });
-      const trimmed = stdout.trim();
-      if (!trimmed || !trimmed.includes('|||')) return undefined;
-
-      const [title, url] = trimmed.split('|||');
-      if (!url || url === 'chrome://newtab/' || url === 'about:blank') return undefined;
-
-      this.lastCapturedTime = now;
-      const svg = `
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="800" height="450">
-          <rect width="800" height="450" fill="#09090b" rx="12"/>
-          <rect x="0" y="0" width="800" height="48" fill="#18181b" rx="12"/>
-          <circle cx="24" cy="24" r="6" fill="#ef4444"/>
-          <circle cx="44" cy="24" r="6" fill="#f59e0b"/>
-          <circle cx="64" cy="24" r="6" fill="#10b981"/>
-          <rect x="100" y="10" width="600" height="28" rx="6" fill="#27272a"/>
-          <text x="120" y="29" font-family="-apple-system, system-ui, sans-serif" font-size="12" fill="#a1a1aa" text-anchor="start">
-            ${this.escapeXml(url || '')}
-          </text>
-          <g transform="translate(40, 90)">
-            <rect x="0" y="0" width="720" height="320" rx="8" fill="#121215" stroke="#27272a" stroke-width="1"/>
-            <circle cx="360" cy="120" r="32" fill="#0284c7" opacity="0.2"/>
-            <circle cx="360" cy="120" r="16" fill="#38bdf8"/>
-            <text x="360" y="180" font-family="-apple-system, system-ui, sans-serif" font-size="18" font-weight="600" fill="#f4f4f5" text-anchor="middle">
-              ${this.escapeXml(title || 'Active Web Page')}
-            </text>
-            <text x="360" y="210" font-family="-apple-system, system-ui, sans-serif" font-size="13" fill="#71717a" text-anchor="middle">
-              Chrome Session Live • Streaming via Remote Hands
-            </text>
-          </g>
-        </svg>
-      `;
-
-      const base64 = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
-      if (base64 === this.lastCapturedHash) {
-        return null;
-      }
-      this.lastCapturedHash = base64;
-      return {
-        jpegBase64: base64,
-        capturedAt: new Date().toISOString(),
-      };
-    } catch {
-      return undefined;
-    }
-  }
-
-  private escapeXml(unsafe: string): string {
-    return unsafe
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&apos;');
   }
 }

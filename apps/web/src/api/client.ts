@@ -129,6 +129,11 @@ export class WebApiClient {
     return res.task;
   }
 
+  async cancelTask(taskId: string, reason?: string): Promise<TaskRow> {
+    const res = await this.request<{ task: TaskRow }>(`/tasks/${taskId}/cancel`, 'POST', { reason });
+    return res.task;
+  }
+
   async listEvents(taskId: string): Promise<TaskEventRow[]> {
     const res = await this.request<{ events: TaskEventRow[] }>(`/tasks/${taskId}/events`, 'GET');
     return res.events;

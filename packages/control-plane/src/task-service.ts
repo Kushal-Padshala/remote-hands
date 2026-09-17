@@ -93,3 +93,17 @@ export function failTask(
     finished_at: now.toISOString(),
   };
 }
+
+export function cancelTask(
+  task: Task,
+  input?: { reason?: string | undefined },
+  now: Date = new Date(),
+): Task {
+  const transitioned = transitionTask(task, 'cancelled');
+  return {
+    ...transitioned,
+    error: input?.reason ?? 'Task cancelled by user',
+    finished_at: now.toISOString(),
+  };
+}
+

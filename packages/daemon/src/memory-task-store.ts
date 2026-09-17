@@ -138,6 +138,22 @@ export class MemoryTaskStore implements TaskStore {
     return failed;
   }
 
+  async getTask(taskId: string): Promise<Task | null> {
+    return this.#tasks.get(taskId) ?? null;
+  }
+
+  async cancelTask(taskId: string, reason?: string): Promise<Task> {
+    const task = this.#requireTask(taskId);
+    const cancelled: Task = {
+      ...task,
+      status: 'cancelled',
+      error: reason ?? 'Task cancelled by user',
+      finished_at: this.#timestamp(),
+    };
+    this.#tasks.set(taskId, cancelled);
+    return cancelled;
+  }
+
   taskById(taskId: string): Task | null {
     return this.#tasks.get(taskId) ?? null;
   }

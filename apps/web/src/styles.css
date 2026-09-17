@@ -1286,6 +1286,17 @@ main {
   transform: scale(0.94);
 }
 
+.chat-send-button.stop {
+  background: var(--accent-red, #ef4444);
+  color: #ffffff;
+}
+
+.chat-send-button.stop:hover {
+  background: #dc2626;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+}
+
+
 .frame-viewer {
   position: relative;
   width: 100%;
