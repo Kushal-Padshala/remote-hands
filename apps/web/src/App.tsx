@@ -4,6 +4,7 @@ import { apiClient } from './api/client.js';
 import { MachinesScreen } from './screens/MachinesScreen.js';
 import { NewTaskScreen } from './screens/NewTaskScreen.js';
 import { LiveTaskScreen } from './screens/LiveTaskScreen.js';
+import { PairingTab } from './screens/PairingTab.js';
 import { PairingModal } from './components/PairingModal.js';
 import { InstallModal } from './components/InstallModal.js';
 
@@ -13,6 +14,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
 
   const [currentScreen, setCurrentScreen] = useState<'machines' | 'new-task' | 'live-task'>('machines');
+  const [activeTab, setActiveTab] = useState<'devices' | 'pairing'>('devices');
   const [selectedMachine, setSelectedMachine] = useState<MachineRow | null>(null);
   const [activeTask, setActiveTask] = useState<TaskRow | null>(null);
   const [submittingTask, setSubmittingTask] = useState(false);
@@ -37,24 +39,33 @@ export function App() {
     }
   };
 
-  const handleConnectUrl = (rawUrl: string) => {
+  const handleConnectUrl = (rawInput: string) => {
+    const trimmed = rawInput.trim();
+    if (!trimmed) return;
     try {
-      const parsed = new URL(rawUrl.trim());
-      const secret = parsed.searchParams.get('secret') || parsed.searchParams.get('token');
-      const api = parsed.searchParams.get('api');
-      const code = parsed.searchParams.get('code');
-      if (api) apiClient.setBaseUrl(api);
-      if (secret) apiClient.setToken(secret);
-      if (code) {
-        setPairingCode(code);
-        try {
-          localStorage.setItem('rh_pairing_code', code);
-        } catch {}
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.includes('?') || trimmed.includes('&')) {
+        const urlToParse = trimmed.startsWith('http') ? trimmed : `https://dummy/?${trimmed.replace(/^\?/, '')}`;
+        const parsed = new URL(urlToParse);
+        const secret = parsed.searchParams.get('secret') || parsed.searchParams.get('token');
+        const api = parsed.searchParams.get('api');
+        const code = parsed.searchParams.get('code');
+        if (api) apiClient.setBaseUrl(api);
+        if (secret) apiClient.setToken(secret);
+        if (code) {
+          setPairingCode(code);
+          try {
+            localStorage.setItem('rh_pairing_code', code);
+          } catch {}
+        }
+      } else {
+        apiClient.setToken(trimmed);
       }
       setPasteUrlInput('');
+      setError(null);
+      setActiveTab('devices');
       loadMachines();
     } catch {
-      alert('Invalid pairing URL');
+      alert('Invalid pairing token or URL');
     }
   };
 
@@ -217,82 +228,86 @@ export function App() {
         </header>
       )}
 
-      <main className="app-main">
-        {currentScreen === 'machines' && !isStandalone && (
-          <div
-            className="install-callout"
-            onClick={() => setShowInstallModal(true)}
-          >
-            <div className="install-callout-left">
-              <div className="install-callout-icon">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 5v14M5 12l7 7 7-7" />
-                </svg>
-              </div>
-              <div>
-                <div className="install-callout-title">Add to Home Screen</div>
-                <div className="install-callout-desc">Open Remote Hands fullscreen like an app on your phone</div>
-              </div>
-            </div>
+      {currentScreen !== 'live-task' && (
+        <div style={{ padding: '8px 16px 0 16px' }}>
+          <div className="segmented-control">
             <button
-              className="btn-install-trigger"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowInstallModal(true);
-              }}
+              type="button"
+              className={`segmented-button ${activeTab === 'devices' ? 'active' : ''}`}
+              onClick={() => setActiveTab('devices')}
             >
-              Add +
+              <span>💻 Devices</span>
+            </button>
+            <button
+              type="button"
+              className={`segmented-button ${activeTab === 'pairing' ? 'active' : ''}`}
+              onClick={() => setActiveTab('pairing')}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span>📱 Pairing</span>
+                {pairingCode && <span className="status-dot" style={{ background: 'var(--accent-emerald)' }} />}
+              </span>
             </button>
           </div>
-        )}
+        </div>
+      )}
 
-        {currentScreen !== 'live-task' && pairingCode && (
-          <div className="info-banner">
-            <div className="info-banner-content">
-              <span className="info-banner-dot" />
-              <span className="info-banner-text">Paired to <strong>{pairingCode}</strong></span>
-            </div>
-          </div>
-        )}
-
-        {currentScreen !== 'live-task' && error && (
-          <div className="error-banner">
-            <div className="error-banner-title">
-              {error.includes('session token') ? 'Phone Not Paired' : error}
-            </div>
-            {error.includes('session token') && (
-              <div className="error-banner-body">
-                <p>This phone does not have an active session with your Mac.</p>
-                <p>Run <code className="inline-code">rh pair</code> on your computer to view QR code or direct link.</p>
-                <div className="connect-input-group">
-                  <input
-                    type="text"
-                    className="app-input"
-                    placeholder="Paste pairing URL or token..."
-                    value={pasteUrlInput}
-                    onChange={(e) => setPasteUrlInput(e.target.value)}
-                  />
-                  <button
-                    className="btn-primary-compact"
-                    onClick={() => handleConnectUrl(pasteUrlInput)}
-                  >
-                    Connect
-                  </button>
+      <main className="app-main">
+        {currentScreen === 'machines' && activeTab === 'devices' && (
+          <>
+            {!isStandalone && (
+              <div
+                className="install-callout"
+                onClick={() => setShowInstallModal(true)}
+              >
+                <div className="install-callout-left">
+                  <div className="install-callout-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 5v14M5 12l7 7 7-7" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="install-callout-title">Add to Home Screen</div>
+                    <div className="install-callout-desc">Open Remote Hands fullscreen like an app on your phone</div>
+                  </div>
                 </div>
-                <button className="btn-text" onClick={handleClearCache}>
-                  Clear cached credentials
+                <button
+                  className="btn-install-trigger"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowInstallModal(true);
+                  }}
+                >
+                  Add +
                 </button>
               </div>
             )}
-          </div>
+
+            {error && !error.includes('session token') && !error.includes('401') && !error.includes('Unauthorized') && (
+              <div className="card" style={{ borderColor: 'var(--accent-rose)', marginBottom: 14 }}>
+                <div style={{ color: 'var(--accent-rose)', fontWeight: 600, fontSize: '0.875rem' }}>
+                  {error}
+                </div>
+              </div>
+            )}
+
+            <MachinesScreen
+              machines={machines}
+              onSelectMachine={handleSelectMachine}
+              onRefresh={loadMachines}
+              loading={loading}
+              onGoToPairing={() => setActiveTab('pairing')}
+            />
+          </>
         )}
 
-        {currentScreen === 'machines' && (
-          <MachinesScreen
-            machines={machines}
-            onSelectMachine={handleSelectMachine}
-            onRefresh={loadMachines}
-            loading={loading}
+        {currentScreen === 'machines' && activeTab === 'pairing' && (
+          <PairingTab
+            pairingCode={pairingCode}
+            onShowPairQr={() => setShowPairModal(true)}
+            onClearCache={handleClearCache}
+            onConnectUrl={handleConnectUrl}
+            error={error}
           />
         )}
 

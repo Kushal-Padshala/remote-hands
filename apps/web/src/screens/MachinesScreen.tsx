@@ -6,15 +6,22 @@ export interface MachinesScreenProps {
   onRefresh: () => void;
   loading: boolean;
   onShowPairQr?: (() => void) | undefined;
+  onGoToPairing?: (() => void) | undefined;
 }
 
-export function MachinesScreen({ machines, onSelectMachine, onRefresh, loading }: MachinesScreenProps) {
+export function MachinesScreen({
+  machines,
+  onSelectMachine,
+  onRefresh,
+  loading,
+  onGoToPairing,
+}: MachinesScreenProps) {
   return (
     <div className="screen-content">
       <div className="section-header">
         <div>
           <h2 className="section-title">Devices</h2>
-          <p className="section-subtitle">Select a machine to start or continue tasks</p>
+          <p className="section-subtitle">Select a computer to chat and run tasks</p>
         </div>
         <button
           className="btn-ghost"
@@ -44,8 +51,17 @@ export function MachinesScreen({ machines, onSelectMachine, onRefresh, loading }
           </div>
           <h3 className="empty-state-title">No machines connected</h3>
           <p className="empty-state-desc">
-            Run <code className="inline-code">rh start</code> on your Mac or terminal to connect this device.
+            Run <code className="inline-code">rh start</code> in terminal on your computer to connect.
           </p>
+          {onGoToPairing && (
+            <button
+              className="btn btn-primary"
+              style={{ width: 'auto', padding: '8px 16px', fontSize: '0.8125rem', marginTop: 14 }}
+              onClick={onGoToPairing}
+            >
+              Pair a Computer
+            </button>
+          )}
         </div>
       )}
 
