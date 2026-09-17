@@ -11,6 +11,8 @@ import { ApprovalSheet } from '../components/ApprovalSheet.js';
 import { StepsDropdown, type ChatStep } from '../components/StepsDropdown.js';
 import { MarkdownView } from '../components/MarkdownView.js';
 import { ThinkingOrb } from 'thinking-orbs';
+import { VoiceButton } from '../components/VoiceButton.js';
+import { useVoiceInput } from '../hooks/useVoiceInput.js';
 
 export interface LiveTaskScreenProps {
   task?: TaskRow | undefined;
@@ -422,9 +424,16 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
     };
   }, [currentTaskId, webSocketFactory, task?.owner_id]);
 
-  const handleSendMessage = async () => {
-    const text = chatInput.trim();
+  const [autoSendVoice, setAutoSendVoice] = useState(false);
+  const voiceBasePromptRef = useRef('');
+
+  const handleSendMessage = async (overridePrompt?: string) => {
+    const text = (typeof overridePrompt === 'string' ? overridePrompt : chatInput).trim();
     if (!text || sendingMessage || !targetMachineId) return;
+
+    if (isVoiceListening) {
+      stopVoiceListening();
+    }
 
     setSendingMessage(true);
     setChatInput('');
@@ -473,6 +482,47 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
     } finally {
       setSendingMessage(false);
     }
+  };
+
+  const handleSpeechEnd = (spokenText: string) => {
+    if (autoSendVoice && spokenText.trim().length > 0) {
+      const fullText = voiceBasePromptRef.current
+        ? `${voiceBasePromptRef.current} ${spokenText.trim()}`
+        : spokenText.trim();
+      handleSendMessage(fullText);
+    }
+  };
+
+  const handleTranscriptChange = (spokenText: string, isFinal: boolean) => {
+    const fullText = voiceBasePromptRef.current
+      ? `${voiceBasePromptRef.current} ${spokenText.trim()}`
+      : spokenText.trim();
+    setChatInput(fullText);
+  };
+
+  const {
+    isSupported: isVoiceSupported,
+    isListening: isVoiceListening,
+    startListening: startVoiceListening,
+    stopListening: stopVoiceListening,
+  } = useVoiceInput({
+    onTranscriptChange: handleTranscriptChange,
+    onSpeechEnd: handleSpeechEnd,
+    silenceTimeoutMs: autoSendVoice ? 1800 : 0,
+  });
+
+  const handleToggleVoice = () => {
+    if (isVoiceListening) {
+      stopVoiceListening();
+    } else {
+      voiceBasePromptRef.current = chatInput.trim();
+      startVoiceListening();
+    }
+  };
+
+  const handleCancelVoice = () => {
+    stopVoiceListening();
+    setChatInput(voiceBasePromptRef.current);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -668,41 +718,83 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
       </div>
 
       <div className="chat-input-container">
-        <input
-          type="text"
-          className="chat-input-field"
-          data-testid="task-prompt-input"
-          placeholder={`Message agy on ${resolvedMachineName}...`}
-          value={chatInput}
-          onChange={(e) => setChatInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={sendingMessage}
-        />
-        {isWorking ? (
-          <button
-            className="chat-send-button stop"
-            data-testid="stop-task-btn"
-            onClick={handleStopTask}
-            aria-label="Stop task"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="4" y="4" width="16" height="16" rx="2" />
-            </svg>
-          </button>
-        ) : (
-          <button
-            className="chat-send-button"
-            data-testid="submit-task-btn"
-            onClick={handleSendMessage}
-            disabled={!chatInput.trim() || sendingMessage}
-            aria-label="Send message"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="19" x2="12" y2="5" />
-              <polyline points="5 12 12 5 19 12" />
-            </svg>
-          </button>
+        {isVoiceListening && (
+          <div className="voice-listening-banner" data-testid="voice-listening-banner">
+            <div className="voice-listening-left">
+              <div className="voice-soundwave">
+                <span className="voice-soundwave-bar" />
+                <span className="voice-soundwave-bar" />
+                <span className="voice-soundwave-bar" />
+                <span className="voice-soundwave-bar" />
+                <span className="voice-soundwave-bar" />
+              </div>
+              <span className="voice-listening-text">
+                {chatInput ? 'Transcribing speech...' : 'Listening... speak your prompt'}
+              </span>
+            </div>
+            <div className="voice-listening-actions">
+              <button
+                type="button"
+                className={`voice-autosend-pill ${autoSendVoice ? 'active' : ''}`}
+                onClick={() => setAutoSendVoice(!autoSendVoice)}
+                title="Automatically dispatch when you stop speaking"
+              >
+                <span>⚡ Auto-send: {autoSendVoice ? 'ON' : 'OFF'}</span>
+              </button>
+              <button
+                type="button"
+                className="voice-cancel-btn"
+                onClick={handleCancelVoice}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         )}
+
+        <div className="chat-input-row">
+          <input
+            type="text"
+            className="chat-input-field"
+            data-testid="task-prompt-input"
+            placeholder={`Message agy on ${resolvedMachineName}...`}
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={sendingMessage}
+          />
+          <VoiceButton
+            isListening={isVoiceListening}
+            isSupported={isVoiceSupported}
+            onToggle={handleToggleVoice}
+            disabled={sendingMessage}
+          />
+          {isWorking ? (
+            <button
+              className="chat-send-button stop"
+              data-testid="stop-task-btn"
+              onClick={handleStopTask}
+              aria-label="Stop task"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="4" y="4" width="16" height="16" rx="2" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              className="chat-send-button"
+              data-testid="submit-task-btn"
+              onClick={() => handleSendMessage()}
+              disabled={!chatInput.trim() || sendingMessage}
+              aria-label="Send message"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="19" x2="12" y2="5" />
+                <polyline points="5 12 12 5 19 12" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       <ApprovalSheet

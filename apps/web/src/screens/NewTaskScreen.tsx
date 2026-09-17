@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import type { MachineRow, TaskKind, TaskMode } from '@remote-hands/shared';
 import { ThinkingOrb } from 'thinking-orbs';
+import { useVoiceInput } from '../hooks/useVoiceInput.js';
 
 export interface NewTaskScreenProps {
   machine: MachineRow;
@@ -25,9 +26,39 @@ export function NewTaskScreen({ machine, onCreateTask, onCancel, loading }: NewT
   const [prompt, setPrompt] = useState('');
   const [kind, setKind] = useState<TaskKind>('browser');
   const [mode, setMode] = useState<TaskMode>('default');
+  const voiceBasePromptRef = useRef('');
+
+  const handleTranscriptChange = (spokenText: string) => {
+    const fullText = voiceBasePromptRef.current
+      ? `${voiceBasePromptRef.current} ${spokenText.trim()}`
+      : spokenText.trim();
+    setPrompt(fullText);
+  };
+
+  const {
+    isSupported: isVoiceSupported,
+    isListening: isVoiceListening,
+    startListening: startVoiceListening,
+    stopListening: stopVoiceListening,
+  } = useVoiceInput({
+    onTranscriptChange: handleTranscriptChange,
+    silenceTimeoutMs: 2500,
+  });
+
+  const handleToggleVoice = () => {
+    if (isVoiceListening) {
+      stopVoiceListening();
+    } else {
+      voiceBasePromptRef.current = prompt.trim();
+      startVoiceListening();
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isVoiceListening) {
+      stopVoiceListening();
+    }
     if (!prompt.trim() || loading) return;
     onCreateTask(prompt.trim(), kind, mode);
   };
@@ -51,7 +82,38 @@ export function NewTaskScreen({ machine, onCreateTask, onCancel, loading }: NewT
 
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <label className="segmented-label">Instructions</label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <label className="segmented-label">Instructions</label>
+            <button
+              type="button"
+              className={`voice-section-btn ${isVoiceListening ? 'listening' : ''}`}
+              onClick={handleToggleVoice}
+              disabled={loading || !isVoiceSupported}
+              title={isVoiceListening ? 'Click to stop listening' : 'Speak prompt'}
+              data-testid="new-task-voice-btn"
+            >
+              {isVoiceListening ? (
+                <>
+                  <span className="voice-soundwave" style={{ height: 12 }}>
+                    <span className="voice-soundwave-bar" style={{ width: 2 }} />
+                    <span className="voice-soundwave-bar" style={{ width: 2 }} />
+                    <span className="voice-soundwave-bar" style={{ width: 2 }} />
+                  </span>
+                  <span>Listening...</span>
+                </>
+              ) : (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
+                  </svg>
+                  <span>Speak Prompt</span>
+                </>
+              )}
+            </button>
+          </div>
           <textarea
             className="textarea"
             data-testid="task-prompt-input"

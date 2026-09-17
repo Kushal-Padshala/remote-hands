@@ -239,5 +239,72 @@ describe('Web App Workflow', () => {
       expect(screen.queryByTestId('stop-task-btn')).toBeNull();
     });
   });
-});
 
+  it('supports voice prompt input and transcribes speech into input field', async () => {
+    let mockInstance: any = null;
+    class MockSpeechRecognition {
+      continuous = true;
+      interimResults = true;
+      lang = 'en-US';
+      onstart: (() => void) | null = null;
+      onresult: ((e: any) => void) | null = null;
+      onerror: ((e: any) => void) | null = null;
+      onend: (() => void) | null = null;
+
+      constructor() {
+        mockInstance = this;
+      }
+
+      start() {
+        if (this.onstart) this.onstart();
+      }
+      stop() {
+        if (this.onend) this.onend();
+      }
+      abort() {
+        if (this.onend) this.onend();
+      }
+    }
+
+    (window as any).SpeechRecognition = MockSpeechRecognition;
+
+    vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+    const socket = new MockSocket();
+
+    render(
+      <LiveTaskScreen
+        task={{ ...fakeTask, status: 'done' }}
+        onBack={() => {}}
+        webSocketFactory={() => socket as any}
+      />,
+    );
+
+    const voiceBtn = screen.getByTestId('voice-prompt-btn');
+    expect(voiceBtn).toBeDefined();
+
+    fireEvent.click(voiceBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('voice-listening-banner')).toBeDefined();
+    });
+
+    expect(mockInstance).not.toBeNull();
+    mockInstance.onresult({
+      resultIndex: 0,
+      results: [
+        {
+          0: { transcript: 'open github and review pull request' },
+          isFinal: true,
+          length: 1,
+        },
+      ],
+    });
+
+    await waitFor(() => {
+      const input = screen.getByTestId('task-prompt-input') as HTMLInputElement;
+      expect(input.value).toBe('open github and review pull request');
+    });
+
+    delete (window as any).SpeechRecognition;
+  });
+});
