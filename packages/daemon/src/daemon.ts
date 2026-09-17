@@ -53,7 +53,7 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
     },
   });
 
-  frameStream.start(1000);
+  frameStream.start(1000, { immediate: true });
 
   const abortController = new AbortController();
   let cancelled = false;

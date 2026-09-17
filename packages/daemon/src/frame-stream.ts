@@ -72,7 +72,7 @@ export class ThrottledFrameStream {
     } catch {}
   }
 
-  start(pollIntervalMs?: number): void {
+  start(pollIntervalMs?: number, options?: { immediate?: boolean }): void {
     if (this.running) return;
     this.running = true;
 
@@ -91,7 +91,11 @@ export class ThrottledFrameStream {
       }
     };
 
-    this.pollTimer = setTimeout(poll, interval);
+    if (options?.immediate) {
+      poll();
+    } else {
+      this.pollTimer = setTimeout(poll, interval);
+    }
   }
 
   stop(): void {
