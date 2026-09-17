@@ -117,6 +117,9 @@ export class RealtimeClient {
             resolved = true;
             reject(err);
           }
+          if (!this.closed && this.reconnect && this.currentUrl) {
+            this.scheduleReconnect();
+          }
         };
 
         if (typeof ws.addEventListener === 'function') {
@@ -140,17 +143,16 @@ export class RealtimeClient {
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-    }
+    if (this.reconnectTimer) return;
 
     const backoff = Math.min(
       this.maxBackoffMs,
-      this.baseBackoffMs * 2 ** this.reconnectAttempts + Math.random() * 500,
+      this.baseBackoffMs * 2 ** this.reconnectAttempts + Math.random() * Math.min(500, this.baseBackoffMs),
     );
     this.reconnectAttempts++;
 
     this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       if (!this.closed && this.currentUrl) {
         this.connectUrl(this.currentUrl).catch(() => {});
       }

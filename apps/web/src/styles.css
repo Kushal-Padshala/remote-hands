@@ -1394,9 +1394,9 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 500;
-  color: var(--claude-text-muted);
+  color: var(--claude-text-secondary);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
   padding: 2px 8px;
@@ -1941,9 +1941,9 @@ main {
 .voice-stop-btn {
   background: var(--accent-claude);
   border: none;
-  color: #ffffff;
-  font-size: 0.6875rem;
-  font-weight: 600;
+  color: #141413;
+  font-size: 0.75rem;
+  font-weight: 700;
   cursor: pointer;
   padding: 3px 10px;
   border-radius: 12px;

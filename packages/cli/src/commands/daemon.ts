@@ -68,11 +68,20 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
     daemonVersion: '0.1.3',
   });
 
-  try {
-    await client.heartbeat(machineId);
-    stdout(`${c.brightGreen('✔')} Machine connected: ${machineName} (${machineId})`);
-  } catch (err: any) {
-    stdout(`[daemon] Initial heartbeat notice: ${err?.message || err}`);
+  let connected = false;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await client.heartbeat(machineId);
+      connected = true;
+      stdout(`${c.brightGreen('✔')} Machine connected: ${machineName} (${machineId})`);
+      break;
+    } catch (err: any) {
+      if (attempt === 3) {
+        stdout(c.yellow(`[daemon] Initial heartbeat pending (${err?.message || err}). Retrying in background...`));
+      } else {
+        await new Promise((r) => setTimeout(r, 800));
+      }
+    }
   }
 
   let realtime: RealtimeClient | null = null;
@@ -83,7 +92,9 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
     });
     await realtime.connectMachine(machineId);
     stdout(`${c.brightGreen('✔')} Realtime relay connected to Cloudflare edge`);
-  } catch {}
+  } catch {
+    stdout(c.dim(`[daemon] Realtime relay pending. Connecting in background...`));
+  }
 
   let triggerClaim: (() => void) | null = null;
   const waitForNextPoll = (ms: number) =>
@@ -109,6 +120,10 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
   const heartbeatInterval = setInterval(async () => {
     try {
       await client.heartbeat(machineId);
+      if (!connected) {
+        connected = true;
+        stdout(`${c.brightGreen('✔')} Machine connected: ${machineName} (${machineId})`);
+      }
     } catch {}
   }, 15000);
 

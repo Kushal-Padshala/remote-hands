@@ -722,7 +722,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         </div>
         {taskKind !== 'coding' && frameBase64 ? (
           <button className="chat-nav-btn" onClick={() => setShowFrame(!showFrame)}>
-            <span>📺</span>
+            <span aria-hidden="true">📺</span>
             <span>{showFrame ? 'Hide' : 'Screen'}</span>
           </button>
         ) : (
@@ -742,7 +742,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             </p>
             {!isMachineOnline && (
               <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: '0.8125rem', color: '#fbbf24' }}>
-                <span>⚠️</span>
+                <span aria-hidden="true">⚠️</span>
                 <span>Computer offline. Run <code>rh start</code> in terminal to connect.</span>
               </div>
             )}
@@ -757,7 +757,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
                     textareaRef.current?.focus();
                   }}
                 >
-                  <span className="suggestion-spark">✦</span>
+                  <span className="suggestion-spark" aria-hidden="true">✦</span>
                   <span>{suggestion}</span>
                 </button>
               ))}
@@ -788,7 +788,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             return (
               <div key={item.message.id} className="chat-bubble-agent">
                 <div className="chat-agent-header">
-                  <span className="chat-agent-spark">✦</span>
+                  <span className="chat-agent-spark" aria-hidden="true">✦</span>
                   <span>agy</span>
                 </div>
                 <MarkdownView
@@ -876,6 +876,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             rows={1}
             className="chat-input-field"
             data-testid="task-prompt-input"
+            aria-label={`Message agy on ${resolvedMachineName}`}
             placeholder={`Message agy on ${resolvedMachineName}...`}
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}

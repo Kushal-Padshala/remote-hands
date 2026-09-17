@@ -66,24 +66,46 @@ export class CloudflareControlPlaneClient {
       init.body = JSON.stringify(body);
     }
 
-    const res = await this.fetchFn(url, init);
+    const maxRetries = 3;
+    let lastError: any = null;
 
-    let json: any = null;
-    try {
-      json = await res.json();
-    } catch {
-      json = null;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const res = await this.fetchFn(url, init);
+
+        let json: any = null;
+        try {
+          json = await res.json();
+        } catch {
+          json = null;
+        }
+
+        if (!res.ok) {
+          if (res.status >= 500 && attempt < maxRetries - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 100 * 2 ** attempt));
+            continue;
+          }
+          const message =
+            (json && typeof json === 'object' && 'error' in json && typeof json.error === 'string'
+              ? json.error
+              : res.statusText) || `Request failed with status ${res.status}`;
+          throw new ControlPlaneError(message, res.status, json);
+        }
+
+        return json as T;
+      } catch (err: any) {
+        if (err instanceof ControlPlaneError) {
+          throw err;
+        }
+        lastError = err;
+        if (attempt < maxRetries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 100 * 2 ** attempt));
+          continue;
+        }
+      }
     }
 
-    if (!res.ok) {
-      const message =
-        (json && typeof json === 'object' && 'error' in json && typeof json.error === 'string'
-          ? json.error
-          : res.statusText) || `Request failed with status ${res.status}`;
-      throw new ControlPlaneError(message, res.status, json);
-    }
-
-    return json as T;
+    throw lastError;
   }
 
   async claimNextTask(machineId: string): Promise<TaskRow | null> {

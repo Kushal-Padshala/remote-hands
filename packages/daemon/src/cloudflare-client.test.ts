@@ -262,4 +262,93 @@ describe('CloudflareControlPlaneClient', () => {
       captured_at: '2026-09-17T00:00:00.000Z',
     });
   });
+
+  it('retries on transient network error and succeeds on second attempt', async () => {
+    let attempts = 0;
+    const fakeFetch = vi.fn(async () => {
+      attempts++;
+      if (attempts === 1) {
+        throw new TypeError('fetch failed');
+      }
+      return new Response(
+        JSON.stringify({
+          machine: {
+            id: 'mach-1',
+            owner_id: 'user-1',
+            name: 'laptop',
+            hostname: 'laptop.local',
+            daemon_version: '0.1.0',
+            agy_version: '0.2.0',
+            status: 'online',
+            last_seen_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    const client = new CloudflareControlPlaneClient({
+      baseUrl: 'https://api.example.com',
+      sessionToken: 'test-token',
+      fetchFn: fakeFetch as unknown as typeof fetch,
+    });
+
+    const res = await client.heartbeat('mach-1');
+    expect(attempts).toBe(2);
+    expect(res.id).toBe('mach-1');
+  });
+
+  it('retries on 502 Bad Gateway and succeeds on subsequent attempt', async () => {
+    let attempts = 0;
+    const fakeFetch = vi.fn(async () => {
+      attempts++;
+      if (attempts === 1) {
+        return new Response('Bad Gateway', { status: 502, statusText: 'Bad Gateway' });
+      }
+      return new Response(
+        JSON.stringify({
+          machine: {
+            id: 'mach-1',
+            owner_id: 'user-1',
+            name: 'laptop',
+            hostname: 'laptop.local',
+            daemon_version: '0.1.0',
+            agy_version: '0.2.0',
+            status: 'online',
+            last_seen_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+          },
+        }),
+        { status: 200 },
+      );
+    });
+
+    const client = new CloudflareControlPlaneClient({
+      baseUrl: 'https://api.example.com',
+      sessionToken: 'test-token',
+      fetchFn: fakeFetch as unknown as typeof fetch,
+    });
+
+    const res = await client.heartbeat('mach-1');
+    expect(attempts).toBe(2);
+    expect(res.id).toBe('mach-1');
+  });
+
+  it('exhausts retries and throws if network error persists', async () => {
+    let attempts = 0;
+    const fakeFetch = vi.fn(async () => {
+      attempts++;
+      throw new TypeError('fetch failed');
+    });
+
+    const client = new CloudflareControlPlaneClient({
+      baseUrl: 'https://api.example.com',
+      sessionToken: 'test-token',
+      fetchFn: fakeFetch as unknown as typeof fetch,
+    });
+
+    await expect(client.heartbeat('mach-1')).rejects.toThrow('fetch failed');
+    expect(attempts).toBe(3);
+  });
 });

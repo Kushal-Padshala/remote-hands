@@ -9,13 +9,15 @@ class MockWebSocket {
   public sent: string[] = [];
   public listeners: Record<string, ((event: any) => void)[]> = {};
 
-  constructor(url: string) {
+  constructor(url: string, autoOpen = true) {
     this.url = url;
     MockWebSocket.instances.push(this);
-    setTimeout(() => {
-      this.readyState = 1;
-      this.trigger('open', {});
-    }, 5);
+    if (autoOpen) {
+      setTimeout(() => {
+        this.readyState = 1;
+        this.trigger('open', {});
+      }, 5);
+    }
   }
 
   addEventListener(event: string, fn: (event: any) => void): void {
@@ -141,6 +143,35 @@ describe('RealtimeClient', () => {
     });
 
     expect(received.length).toBe(1);
+    client.close();
+  });
+
+  it('schedules reconnect when socket error occurs', async () => {
+    MockWebSocket.instances = [];
+
+    class FailingWebSocket extends MockWebSocket {
+      constructor(url: string) {
+        super(url, false);
+        setTimeout(() => {
+          this.readyState = 3;
+          this.trigger('error', new Error('Connection failed'));
+        }, 5);
+      }
+    }
+
+    const client = new RealtimeClient({
+      baseUrl: 'https://api.example.com',
+      sessionToken: 'test-token',
+      reconnect: true,
+      baseBackoffMs: 10,
+      webSocketFactory: (url) => new FailingWebSocket(url) as any,
+    });
+
+    await expect(client.connectMachine('mach-err')).rejects.toThrow();
+    expect(MockWebSocket.instances.length).toBe(1);
+
+    await new Promise((r) => setTimeout(r, 40));
+    expect(MockWebSocket.instances.length).toBeGreaterThan(1);
     client.close();
   });
 });
