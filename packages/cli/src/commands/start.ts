@@ -54,12 +54,21 @@ export async function startCommand(args: string[], context: CommandContext = {})
 
   if (!noClamshell && !runner) {
     if (process.platform === 'darwin') {
+      let fdaGranted = false;
+      try {
+        fs.readdirSync(path.join(os.homedir(), 'Library', 'Safari'));
+        fdaGranted = true;
+      } catch {}
+
       stdout(
         '\n' +
           c.yellow(`╭─ ${c.bold('🔒 Administrator Password Required (macOS)')} ${'─'.repeat(Math.max(2, termWidth - 46))}\n`) +
           `${c.yellow('│')}  ${c.white('Please enter your Mac password to enable lid-closed sleep prevention.')}\n` +
           `${c.yellow('│')}  ${c.dim('Allows your MacBook to run agent tasks with the lid closed (pmset disablesleep=1).')}\n` +
           `${c.yellow('│')}  ${c.dim('Run "rh start --no-clamshell" or "rh daemon" to run without password.')}\n` +
+          (!fdaGranted
+            ? `${c.yellow('│')}  ${c.dim('Tip: Grant Full Disk Access to Antigravity IDE/Terminal to skip permission dialogs.')}\n`
+            : '') +
           c.yellow(`╰${hr}\n`),
       );
       try {

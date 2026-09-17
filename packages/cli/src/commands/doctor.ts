@@ -64,6 +64,22 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
     stdout('[!] Daemon configuration: not found (run: rh setup)');
   }
 
+  if (process.platform === 'darwin') {
+    let fdaGranted = false;
+    try {
+      const fsModule = await import('node:fs');
+      fsModule.readdirSync(path.join(os.homedir(), 'Library', 'Safari'));
+      fdaGranted = true;
+    } catch {}
+
+    if (fdaGranted) {
+      stdout('[✓] macOS Full Disk Access: granted');
+    } else {
+      stdout('[!] macOS Full Disk Access: not granted (System Settings -> Privacy & Security -> Full Disk Access)');
+      stdout('    Grant Full Disk Access to Antigravity IDE / Terminal to prevent permission prompts when away');
+    }
+  }
+
   stdout('');
   return 0;
 }
