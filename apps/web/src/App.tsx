@@ -143,7 +143,8 @@ export function App() {
 
   const handleSelectMachine = (machine: MachineRow) => {
     setSelectedMachine(machine);
-    setCurrentScreen('new-task');
+    setActiveTask(null);
+    setCurrentScreen('live-task');
   };
 
   const handleCreateTask = async (prompt: string, kind: TaskKind, mode: TaskMode) => {
@@ -304,12 +305,14 @@ export function App() {
           />
         )}
 
-        {currentScreen === 'live-task' && activeTask && (
+        {currentScreen === 'live-task' && (selectedMachine || activeTask) && (
           <LiveTaskScreen
-            task={activeTask}
+            task={activeTask ?? undefined}
+            machine={selectedMachine ?? undefined}
             machineName={selectedMachine?.name}
             onBack={() => {
               setActiveTask(null);
+              setSelectedMachine(null);
               setCurrentScreen('machines');
             }}
           />

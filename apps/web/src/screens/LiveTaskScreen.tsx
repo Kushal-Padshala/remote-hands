@@ -3,6 +3,7 @@ import {
   safeParseRealtimeMessage,
   type TaskRow,
   type ApprovalRow,
+  type MachineRow,
 } from '@remote-hands/shared';
 import { apiClient } from '../api/client.js';
 import { FrameViewer } from '../components/FrameViewer.js';
@@ -12,7 +13,8 @@ import { MarkdownView } from '../components/MarkdownView.js';
 import { ThinkingOrb } from 'thinking-orbs';
 
 export interface LiveTaskScreenProps {
-  task: TaskRow;
+  task?: TaskRow | undefined;
+  machine?: MachineRow | undefined;
   machineName?: string | undefined;
   onBack: () => void;
   webSocketFactory?: ((taskId: string) => any) | undefined;
@@ -71,33 +73,43 @@ function groupMessages(messages: ChatMessage[], isWorking: boolean): GroupedRend
   return items;
 }
 
-export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: LiveTaskScreenProps) {
-  const [currentTaskId, setCurrentTaskId] = useState<string>(task.id);
-  const [conversationId, setConversationId] = useState<string | undefined>(task.conversation_id ?? undefined);
+export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFactory }: LiveTaskScreenProps) {
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(task?.id ?? null);
+  const [conversationId, setConversationId] = useState<string | undefined>(task?.conversation_id ?? undefined);
   const [frameBase64, setFrameBase64] = useState<string | null>(null);
   const [showFrame, setShowFrame] = useState(true);
   const [activeApproval, setActiveApproval] = useState<ApprovalRow | null>(null);
   const [decidingApproval, setDecidingApproval] = useState(false);
-  const [isWorking, setIsWorking] = useState(true);
+  const [isWorking, setIsWorking] = useState<boolean>(Boolean(task));
   const [chatInput, setChatInput] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
 
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: `user-${task.id}`,
-      type: 'user',
-      text: task.prompt,
-      time: task.created_at,
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    if (task?.prompt) {
+      return [
+        {
+          id: `user-${task.id}`,
+          type: 'user',
+          text: task.prompt,
+          time: task.created_at,
+        },
+      ];
+    }
+    return [];
+  });
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  const resolvedMachineName = machineName || machine?.name || 'Remote Mac';
+  const targetMachineId = task?.machine_id || machine?.id;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({ behavior: 'smooth' });
   }, [messages, isWorking]);
 
   useEffect(() => {
+    if (!currentTaskId) return;
+
     let ws: any = null;
     let closed = false;
     let pollTimer: any = null;
@@ -230,7 +242,7 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
 
     async function fetchEventsPoll() {
       try {
-        const list = await apiClient.listEvents(currentTaskId);
+        const list = await apiClient.listEvents(currentTaskId!);
         if (closed) return;
         for (const e of list) {
           const key = `${e.id}`;
@@ -280,7 +292,7 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
           setActiveApproval({
             id: msg.approval_id,
             task_id: msg.task_id,
-            owner_id: task.owner_id,
+            owner_id: task?.owner_id || '',
             action_kind: 'publish',
             summary: 'Dangerous action requires confirmation',
             risk: 'high',
@@ -304,11 +316,11 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
         } catch {}
       }
     };
-  }, [currentTaskId, webSocketFactory, task.owner_id]);
+  }, [currentTaskId, webSocketFactory, task?.owner_id]);
 
   const handleSendMessage = async () => {
     const text = chatInput.trim();
-    if (!text || sendingMessage) return;
+    if (!text || sendingMessage || !targetMachineId) return;
 
     setSendingMessage(true);
     setChatInput('');
@@ -338,11 +350,12 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
       }
 
       const nextTask = await apiClient.createTask({
-        machine_id: task.machine_id,
+        machine_id: targetMachineId,
         prompt: text,
+        kind: task?.kind ?? 'browser',
+        mode: task?.mode ?? 'default',
         conversation_id: resolvedConversationId,
-        workspace_path: task.workspace_path ?? undefined,
-        mode: task.mode ?? undefined,
+        workspace_path: task?.workspace_path ?? undefined,
       });
       setCurrentTaskId(nextTask.id);
       if (nextTask.conversation_id) {
@@ -390,21 +403,34 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
   return (
     <div className="chat-screen">
       <header className="chat-nav-header">
-        <button className="chat-nav-back" onClick={onBack}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <button className="chat-nav-back-circle" onClick={onBack} aria-label="Back to machines">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="15 18 9 12 15 6" />
           </svg>
-          <span>Machines</span>
         </button>
         <div className="chat-nav-center">
-          <div className="chat-nav-title">{machineName || 'Remote Mac'}</div>
-          <div className={`chat-nav-status ${isWorking ? 'working' : 'ready'}`}>
-            {isWorking ? (
-              <ThinkingOrb state="working" size={20} theme="dark" role="presentation" />
-            ) : (
-              <span className="status-dot" />
-            )}
-            <span>{isWorking ? 'agy working...' : 'Ready'}</span>
+          <div className="chat-nav-device-avatar">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+              <line x1="8" y1="21" x2="16" y2="21" />
+              <line x1="12" y1="17" x2="12" y2="21" />
+            </svg>
+          </div>
+          <div className="chat-nav-info">
+            <div className="chat-nav-title">{resolvedMachineName}</div>
+            <div className={`chat-nav-status ${isWorking ? 'working' : 'ready'}`}>
+              {isWorking ? (
+                <>
+                  <ThinkingOrb state="working" size={20} theme="dark" role="presentation" />
+                  <span>agy working...</span>
+                </>
+              ) : (
+                <>
+                  <span className="status-dot" />
+                  <span>Online · Ready</span>
+                </>
+              )}
+            </div>
           </div>
         </div>
         {frameBase64 ? (
@@ -413,7 +439,7 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
             <span>{showFrame ? 'Hide' : 'Screen'}</span>
           </button>
         ) : (
-          <div style={{ width: 60 }} />
+          <div style={{ width: 36 }} />
         )}
       </header>
 
@@ -424,6 +450,18 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
       )}
 
       <div className="chat-scroll-area">
+        {messages.length === 0 && (
+          <div className="chat-welcome-state">
+            <div className="chat-welcome-icon">
+              <ThinkingOrb state="breathing" size={64} theme="dark" role="presentation" />
+            </div>
+            <h3 className="chat-welcome-title">New Task on {resolvedMachineName}</h3>
+            <p className="chat-welcome-desc">
+              Message agy below to perform browsing, coding, and system actions directly on this machine.
+            </p>
+          </div>
+        )}
+
         {groupMessages(messages, isWorking).map((item) => {
           if (item.kind === 'user') {
             return (
@@ -470,22 +508,15 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
           return null;
         })}
 
-        {isWorking && (() => {
-          const lastUserIdx = messages.findLastIndex((m) => m.type === 'user');
-          const afterUser = messages.slice(lastUserIdx + 1);
-          const hasThinking = afterUser.some((m) => m.type === 'thinking');
-          const hasAgent = afterUser.some((m) => m.type === 'agent');
-          const hasTools = afterUser.some((m) => m.type === 'tool');
-          if (!hasThinking && !hasAgent && !hasTools) {
-            return (
-              <div className="chat-orb-container">
-                <ThinkingOrb state="searching" size={64} theme="dark" role="presentation" />
-                <span className="chat-orb-label">agy is analyzing and executing...</span>
-              </div>
-            );
-          }
-          return null;
-        })()}
+        {isWorking && (
+          <div className="chat-working-orb-card" data-testid="thinking-orb-indicator">
+            <ThinkingOrb state="searching" size={64} theme="dark" role="presentation" />
+            <div className="chat-working-orb-details">
+              <span className="chat-working-orb-title">Thinking & Executing</span>
+              <span className="chat-working-orb-desc">agy is taking actions on your Mac...</span>
+            </div>
+          </div>
+        )}
 
         <div ref={messagesEndRef} />
       </div>
@@ -494,7 +525,8 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
         <input
           type="text"
           className="chat-input-field"
-          placeholder="Message agy on your Mac..."
+          data-testid="task-prompt-input"
+          placeholder={`Message agy on ${resolvedMachineName}...`}
           value={chatInput}
           onChange={(e) => setChatInput(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -502,6 +534,7 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
         />
         <button
           className="chat-send-button"
+          data-testid="submit-task-btn"
           onClick={handleSendMessage}
           disabled={!chatInput.trim() || sendingMessage}
           aria-label="Send message"
