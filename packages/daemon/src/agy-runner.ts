@@ -135,13 +135,16 @@ export function parseAgyStreamLine(line: string): AgentStreamRecord | null {
     }
 
     if (step.step_type === 'error_message' || step.error) {
-      return {
-        kind: 'error',
-        payload: {
-          message: String(step.error || 'Execution error'),
-          fatal: false,
-        },
-      };
+      if (step.error) {
+        return {
+          kind: 'error',
+          payload: {
+            message: String(step.error),
+            fatal: false,
+          },
+        };
+      }
+      return null;
     }
 
     if (step.thinking) {
