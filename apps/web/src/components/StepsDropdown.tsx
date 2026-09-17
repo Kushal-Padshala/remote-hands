@@ -183,7 +183,7 @@ export function StepsDropdown({ steps, isWorking }: StepsDropdownProps) {
                   </div>
 
                   <div className="step-row-right">
-                    {step.toolStatus === 'active' ? (
+                    {step.toolStatus === 'active' && isWorking ? (
                       <span className="step-status running">● running</span>
                     ) : (
                       <span className="step-status done">✓</span>

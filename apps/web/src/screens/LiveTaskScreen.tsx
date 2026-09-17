@@ -108,6 +108,9 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
           setIsWorking(true);
         } else if (s === 'done' || s === 'failed' || s === 'cancelled') {
           setIsWorking(false);
+          setMessages((prev) =>
+            prev.map((m) => (m.type === 'tool' && m.toolStatus === 'active' ? { ...m, toolStatus: 'done' } : m))
+          );
         }
       } else if (kind === 'agent_text') {
         const textChunk = typeof payload === 'object' && payload?.text !== undefined ? String(payload.text) : String(payload);
@@ -185,7 +188,10 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
           setConversationId(payload.conversation_id);
         }
         setMessages((prev) => {
-          const filtered = prev.filter((m) => m.type !== 'thinking');
+          const mapped = prev.map((m) =>
+            m.type === 'tool' && m.toolStatus === 'active' ? { ...m, toolStatus: 'done' as const } : m
+          );
+          const filtered = mapped.filter((m) => m.type !== 'thinking');
           const lastUserIdx = filtered.findLastIndex((m) => m.type === 'user');
           const hasAgentAfterLastUser = filtered
             .slice(lastUserIdx + 1)
@@ -207,7 +213,9 @@ export function LiveTaskScreen({ task, machineName, onBack, webSocketFactory }: 
         setIsWorking(false);
         const errorMsg = payload?.message || 'Task failed';
         setMessages((prev) => [
-          ...prev,
+          ...prev.map((m) =>
+            m.type === 'tool' && m.toolStatus === 'active' ? { ...m, toolStatus: 'done' as const } : m
+          ),
           {
             id: `error-${Date.now()}`,
             type: 'error',
