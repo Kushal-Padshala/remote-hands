@@ -27,19 +27,10 @@ export function MachinesScreen({ machines, onSelectMachine, onRefresh, loading, 
 
       {machines.length === 0 && !loading && (
         <div className="card" data-testid="machines-placeholder" style={{ textAlign: 'center', padding: '32px 16px' }}>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: 8 }}>No machines connected</p>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: onShowPairQr ? 16 : 0 }}>
-            Run <code>remote-hands daemon</code> on your computer to pair.
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 500 }}>No machines connected</p>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+            Run <code>rh start</code> on your computer to begin.
           </p>
-          {onShowPairQr && (
-            <button
-              className="btn btn-primary"
-              style={{ width: 'auto', margin: '0 auto', fontSize: '0.8125rem', padding: '8px 16px' }}
-              onClick={onShowPairQr}
-            >
-              📱 Show Phone Pairing QR Code
-            </button>
-          )}
         </div>
       )}
 

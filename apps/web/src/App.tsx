@@ -145,31 +145,33 @@ export function App() {
 
   return (
     <div className="app-container">
-      <header className="header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <h1>Remote Hands</h1>
-          <span className="badge badge-online">PWA</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            className="btn"
-            style={{ width: 'auto', padding: '6px 10px', fontSize: '0.75rem' }}
-            onClick={handleClearCache}
-          >
-            Reset
-          </button>
-          <button
-            className="btn"
-            style={{ width: 'auto', padding: '6px 12px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}
-            onClick={() => setShowPairModal(true)}
-          >
-            📱 QR Code
-          </button>
-        </div>
-      </header>
+      {currentScreen !== 'live-task' && (
+        <header className="header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <h1>Remote Hands</h1>
+            <span className="badge badge-online">PWA</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              className="btn"
+              style={{ width: 'auto', padding: '6px 10px', fontSize: '0.75rem' }}
+              onClick={handleClearCache}
+            >
+              Reset
+            </button>
+            <button
+              className="btn qr-button"
+              style={{ width: 'auto', padding: '6px 12px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}
+              onClick={() => setShowPairModal(true)}
+            >
+              📱 QR Code
+            </button>
+          </div>
+        </header>
+      )}
 
       <main>
-        {pairingCode && (
+        {currentScreen !== 'live-task' && pairingCode && (
           <div
             className="card"
             style={{
@@ -183,19 +185,12 @@ export function App() {
             }}
           >
             <span style={{ fontSize: '0.8125rem', color: 'var(--accent-teal)', fontWeight: 600 }}>
-              📱 Direct Pairing Active: {pairingCode}
+              Direct Pairing Active: {pairingCode}
             </span>
-            <button
-              className="btn"
-              style={{ width: 'auto', padding: '3px 10px', fontSize: '0.75rem' }}
-              onClick={() => setShowPairModal(true)}
-            >
-              QR Code
-            </button>
           </div>
         )}
 
-        {error && (
+        {currentScreen !== 'live-task' && error && (
           <div className="card" style={{ borderColor: 'var(--accent-rose)', marginBottom: 16 }}>
             <div style={{ color: 'var(--accent-rose)', fontWeight: 600, marginBottom: 8 }}>
               {error.includes('session token') ? 'Phone Not Paired' : error}
@@ -243,7 +238,6 @@ export function App() {
             onSelectMachine={handleSelectMachine}
             onRefresh={loadMachines}
             loading={loading}
-            onShowPairQr={() => setShowPairModal(true)}
           />
         )}
 
@@ -259,6 +253,7 @@ export function App() {
         {currentScreen === 'live-task' && activeTask && (
           <LiveTaskScreen
             task={activeTask}
+            machineName={selectedMachine?.name}
             onBack={() => {
               setActiveTask(null);
               setCurrentScreen('machines');
