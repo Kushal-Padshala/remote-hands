@@ -77,9 +77,11 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   const fetchFn = context.fetchFn ?? globalThis.fetch.bind(globalThis);
   const projectRoot = resolveProjectRoot(context.projectRoot);
 
+  const TOTAL_STEPS = 6;
+
   stdout(renderBanner());
 
-  stdout(renderStepStart(1, 5, 'Cloudflare Authentication'));
+  stdout(renderStepStart(1, TOTAL_STEPS, 'Cloudflare Authentication'));
   let loggedIn = await ensureWranglerLogin(runner);
   if (!loggedIn) {
     stdout(renderStepAction('Launching Cloudflare OAuth login in your default browser...'));
@@ -113,12 +115,78 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     stdout(renderStepSuccess('Authenticated with Cloudflare via Wrangler'));
   }
 
-  stdout(renderStepStart(2, 5, 'Browser Automation Engine (browser-use)'));
+  stdout(renderStepStart(2, TOTAL_STEPS, 'AI Coding Agent (agy)'));
+  const agyWhich = await runner('which', ['agy']);
+  const agyInstalled = agyWhich.exitCode === 0 && agyWhich.stdout.trim().length > 0;
+
+  if (!agyInstalled) {
+    stdout(renderStepAction('agy CLI not found — installing now...'));
+    if (process.platform === 'win32') {
+      stdout(renderStepInfo('Run this in PowerShell: irm https://antigravity.google/cli/install.ps1 | iex'));
+      const winRes = await runner('powershell', ['-Command', 'irm https://antigravity.google/cli/install.ps1 | iex'], { interactive: true });
+      if (winRes.exitCode !== 0) {
+        stderr(renderStepError('Failed to install agy. Please install manually:'));
+        stderr('  PowerShell: irm https://antigravity.google/cli/install.ps1 | iex');
+        stderr('Then re-run "rh setup".');
+        return 1;
+      }
+    } else {
+      stdout(renderStepInfo('Running: curl -fsSL https://antigravity.google/cli/install.sh | bash'));
+      const installRes = await runner('bash', ['-c', 'curl -fsSL https://antigravity.google/cli/install.sh | bash'], { interactive: true });
+      if (installRes.exitCode !== 0) {
+        stderr(renderStepError('Failed to install agy. Please install manually:'));
+        stderr('  curl -fsSL https://antigravity.google/cli/install.sh | bash');
+        stderr('Then re-run "rh setup".');
+        return 1;
+      }
+    }
+
+    const verifyInstall = await runner('which', ['agy']);
+    if (verifyInstall.exitCode !== 0) {
+      stdout(renderStepInfo('agy installed but not in PATH yet — running agy install...'));
+      await runner('agy', ['install'], { interactive: true });
+    }
+    stdout(renderStepSuccess('agy CLI installed successfully'));
+  } else {
+    stdout(renderStepInfo(`agy found at ${agyWhich.stdout.trim()}`));
+  }
+
+  stdout(renderStepInfo('Verifying agy authentication...'));
+  const agyAuth = await runner('agy', ['-p', 'echo hello', '--print-timeout', '10s']);
+  const agyAuthOutput = (agyAuth.stdout + '\n' + agyAuth.stderr).toLowerCase();
+  const agyNeedsLogin = agyAuth.exitCode !== 0 ||
+    agyAuthOutput.includes('not authenticated') ||
+    agyAuthOutput.includes('sign in') ||
+    agyAuthOutput.includes('login') ||
+    agyAuthOutput.includes('oauth') ||
+    agyAuthOutput.includes('authorize');
+
+  if (agyNeedsLogin) {
+    stdout(renderStepAction('agy requires sign-in — launching interactive session...'));
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+      stdout(renderStepInfo('Your browser will open for Google OAuth sign-in.'));
+    } else {
+      stdout(renderStepInfo('Follow the on-screen instructions to sign in with your Google account.'));
+    }
+    await runner('agy', [], { interactive: true });
+
+    const agyRecheck = await runner('agy', ['-p', 'echo hello', '--print-timeout', '10s']);
+    if (agyRecheck.exitCode !== 0) {
+      stderr(renderStepError('agy sign-in was not completed.'));
+      stderr('Please run "agy" in your terminal to sign in, then re-run "rh setup".');
+      return 1;
+    }
+    stdout(renderStepSuccess('agy authenticated and ready'));
+  } else {
+    stdout(renderStepSuccess('agy is installed and authenticated'));
+  }
+
+  stdout(renderStepStart(3, TOTAL_STEPS, 'Browser Automation Engine (browser-use)'));
   stdout(renderStepInfo('Verifying browser-harness and agent skill registration...'));
   await ensureBrowserHarness(runner, projectRoot, (msg) => stdout(renderStepInfo(msg)), stderr, fs);
   stdout(renderStepSuccess('browser-harness is installed and ready'));
 
-  stdout(renderStepStart(3, 5, 'Serverless Database (Cloudflare D1)'));
+  stdout(renderStepStart(4, TOTAL_STEPS, 'Serverless Database (Cloudflare D1)'));
   stdout(renderStepInfo('Provisioning D1 SQLite database (remote-hands-db)...'));
   const d1 = await createD1Database('remote-hands-db', runner);
 
@@ -129,7 +197,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   await applyD1Migrations(d1.databaseName, runner, path.join(projectRoot, 'apps/cloudflare'));
   stdout(renderStepSuccess('Database created & migrations applied'));
 
-  stdout(renderStepStart(4, 5, 'Edge Worker Backend (Durable Objects)'));
+  stdout(renderStepStart(5, TOTAL_STEPS, 'Edge Worker Backend (Durable Objects)'));
   stdout(renderStepInfo('Deploying worker with SQLite Durable Objects...'));
   const workerRes = await deployWorker(runner, path.join(projectRoot, 'apps/cloudflare'));
   const apiUrl = workerRes.deploymentUrl ?? 'https://remote-hands-api.workers.dev';
@@ -253,7 +321,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   } catch {}
   stdout(renderStepSuccess(`Backend worker live at ${apiUrl}`));
 
-  stdout(renderStepStart(5, 5, 'Phone Web Application'));
+  stdout(renderStepStart(6, TOTAL_STEPS, 'Phone Web Application'));
   stdout(renderStepInfo('Publishing static PWA assets to Cloudflare edge...'));
   const webRes = await deployWebApp(runner, path.join(projectRoot, 'apps/web'));
   const webUrl = webRes.pagesUrl ?? 'https://remote-hands-web.pages.dev';
