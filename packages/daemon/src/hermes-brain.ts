@@ -30,6 +30,40 @@ export class HermesBrain {
     return path.join(this.memoryDir, 'MEMORY.md');
   }
 
+  generateProjectAliases(name: string, projectPath?: string): string[] {
+    const aliases = new Set<string>();
+    const trimmed = name.trim().toLowerCase();
+    aliases.add(trimmed);
+
+    const spaceVersion = trimmed.replace(/[-_.]+/g, ' ');
+    aliases.add(spaceVersion);
+
+    const noSpaceVersion = trimmed.replace(/[-_.\s]+/g, '');
+    aliases.add(noSpaceVersion);
+
+    const parts = spaceVersion.split(/\s+/).filter(Boolean);
+    if (parts.length > 1) {
+      const acronym = parts.map((p) => p[0]).join('');
+      if (acronym.length >= 2) {
+        aliases.add(acronym);
+      }
+    }
+
+    if (projectPath && fs.existsSync(path.join(projectPath, 'package.json'))) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(projectPath, 'package.json'), 'utf-8'));
+        if (pkg.name) {
+          const rawPkgName = String(pkg.name).replace(/^@[^/]+\//, '');
+          aliases.add(rawPkgName.toLowerCase());
+          aliases.add(rawPkgName.replace(/[-_.]+/g, ' ').toLowerCase());
+          aliases.add(rawPkgName.replace(/[-_.\s]+/g, '').toLowerCase());
+        }
+      } catch {}
+    }
+
+    return Array.from(aliases).filter((a) => a.length >= 2);
+  }
+
   async ensureInitialized(defaultProject?: HermesProjectEntry): Promise<string> {
     const memoryFile = this.getMemoryPath();
     if (fs.existsSync(memoryFile)) {
@@ -49,7 +83,10 @@ export class HermesBrain {
 
     const initialProjects: HermesProjectEntry[] = [];
     if (defaultProject) {
-      initialProjects.push(defaultProject);
+      initialProjects.push({
+        ...defaultProject,
+        aliases: Array.from(new Set([...defaultProject.aliases, ...this.generateProjectAliases(defaultProject.name, defaultProject.path)])),
+      });
     } else {
       const currentCwd = process.cwd();
       if (fs.existsSync(path.join(currentCwd, 'package.json'))) {
@@ -57,7 +94,7 @@ export class HermesBrain {
         initialProjects.push({
           name: base,
           path: currentCwd,
-          aliases: [base.replace(/-/g, ' '), base],
+          aliases: this.generateProjectAliases(base, currentCwd),
         });
       }
     }
@@ -158,11 +195,17 @@ export class HermesBrain {
 
     const candidatesWithProjects: { candidate: string; path: string }[] = [];
     for (const project of projects) {
-      const candidates = [project.name, ...project.aliases, path.basename(project.path)];
-      for (const candidate of candidates) {
-        const normalized = candidate.toLowerCase().trim();
-        if (normalized.length >= 2) {
-          candidatesWithProjects.push({ candidate: normalized, path: project.path });
+      const baseCandidates = [project.name, ...project.aliases, path.basename(project.path)];
+      const candidateSet = new Set<string>();
+      for (const c of baseCandidates) {
+        const lower = c.toLowerCase().trim();
+        candidateSet.add(lower);
+        candidateSet.add(lower.replace(/[-_.]+/g, ' ').trim());
+        candidateSet.add(lower.replace(/[-_.\s]+/g, '').trim());
+      }
+      for (const candidate of candidateSet) {
+        if (candidate.length >= 2) {
+          candidatesWithProjects.push({ candidate, path: project.path });
         }
       }
     }
@@ -364,6 +407,11 @@ export class HermesBrain {
       snippets.push(`Learned Recipes:\n${matchingRecipes.map((r) => `- ${r}`).join('\n')}`);
     }
 
+    const recentActivity = await this.findRelevantRecentActivity(resolvedPath, task.prompt);
+    if (recentActivity.length > 0) {
+      snippets.push(`Recent Relevant Activity:\n${recentActivity.join('\n')}`);
+    }
+
     snippets.push(
       'Execution Speed Directives: Target relevant source files directly without full repo exploratory sweeps. Read generous line ranges. Run targeted test files (e.g. `npx vitest run <path>`) rather than full repo test suites.',
     );
@@ -375,6 +423,106 @@ export class HermesBrain {
       recommendedEffort,
       augmentedPrompt: `${task.prompt}${contextSnippet}`,
     };
+  }
+
+  async findRelevantRecentActivity(workspacePath?: string, prompt?: string): Promise<string[]> {
+    const content = await this.loadMemory();
+    const match = content.match(/^#{1,3}\s+Recent Activity([\s\S]*)$/m);
+    if (!match || !match[1]) return [];
+
+    const activityText = match[1];
+    const entries = activityText
+      .split(/\n(?=- \*\*\[)/)
+      .map((e) => e.trim())
+      .filter(Boolean);
+
+    const relevant: string[] = [];
+    const lowerPrompt = (prompt || '').toLowerCase();
+    const promptKeywords = lowerPrompt
+      .split(/\W+/)
+      .filter((w) => w.length > 3 && !['make', 'this', 'that', 'with', 'from', 'have', 'been', 'about'].includes(w));
+
+    for (const entry of entries) {
+      const isMatchingWorkspace = workspacePath && entry.includes(workspacePath);
+      const isMatchingPrompt = promptKeywords.some((w) => entry.toLowerCase().includes(w));
+
+      if (isMatchingWorkspace || isMatchingPrompt) {
+        const promptLine = entry.match(/Prompt:\s*"([^"]+)"/);
+        const summaryLine = entry.match(/Summary:\s*([^\n]+)/);
+        if (promptLine && summaryLine) {
+          const shortPrompt = promptLine[1]!.slice(0, 80);
+          const shortSummary = summaryLine[1]!.slice(0, 140);
+          relevant.push(`- "${shortPrompt}": ${shortSummary}`);
+          if (relevant.length >= 2) break;
+        }
+      }
+    }
+
+    return relevant;
+  }
+
+  extractActionableRecipes(prompt: string, summary: string): string[] {
+    const recipes: string[] = [];
+    const lines = summary.split('\n');
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      const bulletMatch = line.match(/^[-*]\s+\*\*([^*]+)\*\*:\s*(.+)$/);
+      if (bulletMatch) {
+        const title = bulletMatch[1]!.trim();
+        const body = bulletMatch[2]!.trim().replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+        if (body.length > 10 && !title.toLowerCase().includes('summary') && !title.toLowerCase().includes('verification')) {
+          recipes.push(`${title}: ${body}`);
+        }
+        continue;
+      }
+
+      const patternMatch = line.match(/^(?:Recipe|Solution|Fix|Skill):\s*(.+)$/i);
+      if (patternMatch) {
+        recipes.push(patternMatch[1]!.trim());
+      }
+    }
+
+    return recipes.slice(0, 3);
+  }
+
+  private appendRecipesToContent(content: string, newRecipes: string[]): string {
+    const recipeHeaderRegex = /^#{1,3}\s+Learned Skills & Recipes/m;
+    const match = content.match(recipeHeaderRegex);
+    if (!match || match.index === undefined) return content;
+
+    const headerPos = match.index;
+    const afterHeader = content.slice(headerPos + match[0].length);
+    const nextHeaderMatch = afterHeader.match(/\n#{1,3}\s+/);
+    const recipeBlock = nextHeaderMatch
+      ? afterHeader.slice(0, nextHeaderMatch.index)
+      : afterHeader;
+    const remainder = nextHeaderMatch
+      ? afterHeader.slice(nextHeaderMatch.index)
+      : '';
+
+    const existingRecipes = recipeBlock
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith('- '))
+      .map((l) => l.slice(2).trim());
+
+    const combined = [...existingRecipes];
+    for (const r of newRecipes) {
+      const normalized = r.toLowerCase();
+      const alreadyExists = combined.some((e) => e.toLowerCase() === normalized);
+      if (!alreadyExists) {
+        combined.push(r);
+      }
+    }
+
+    const capped = combined.slice(-20);
+    const newBlock = capped.map((r) => `- ${r}`).join('\n');
+    const beforeHeader = content.slice(0, headerPos + match[0].length);
+
+    return `${beforeHeader}\n${newBlock}\n${remainder.replace(/^\n*/, '\n')}`;
   }
 
   async recordTaskCompletion(params: {
@@ -400,10 +548,15 @@ export class HermesBrain {
         const newProject: HermesProjectEntry = {
           name: baseName,
           path: params.workspacePath,
-          aliases: [baseName.replace(/-/g, ' '), baseName],
+          aliases: this.generateProjectAliases(baseName, params.workspacePath),
         };
         content = this.appendProjectToContent(content, newProject);
       }
+    }
+
+    const learnedRecipes = this.extractActionableRecipes(params.prompt, params.summary);
+    if (learnedRecipes.length > 0) {
+      content = this.appendRecipesToContent(content, learnedRecipes);
     }
 
     const timestamp = new Date().toISOString();

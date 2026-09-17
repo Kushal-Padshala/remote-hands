@@ -84,6 +84,9 @@ describe('HermesBrain Memory Operations', () => {
     const resolved2 = await brain.resolveWorkspace('in remote-hands update styles');
     expect(resolved2).toBe(projectDir);
 
+    const resolved3 = await brain.resolveWorkspace('about this remotehands fix the button');
+    expect(resolved3).toBe(projectDir);
+
     const resolvedNone = await brain.resolveWorkspace('tell me a joke');
     expect(resolvedNone).toBeUndefined();
   });
@@ -171,5 +174,33 @@ describe('HermesBrain Memory Operations', () => {
 
     const discovered = brain.discoverWorkspaceArchitecture(projectDir, 'fix web header');
     expect(discovered).toContain('`apps/web`: @my-project/web (React, Vite)');
+  });
+
+  it('dynamically learns recipes from task summaries and recalls them in subsequent tasks', async () => {
+    const brain = new HermesBrain(tmpDir);
+    await brain.ensureInitialized({
+      name: 'my-app',
+      path: tmpDir,
+      aliases: ['my app'],
+    });
+
+    await brain.recordTaskCompletion({
+      prompt: 'fix modal overlay scroll',
+      summary: '- **Modal Scroll Lock**: Added document.body.style.overflow = hidden when dialog opens',
+      workspacePath: tmpDir,
+    });
+
+    const recipes = await brain.extractLearnedRecipes();
+    expect(recipes).toHaveLength(1);
+    expect(recipes[0]).toContain('Modal Scroll Lock');
+
+    const ctx = await brain.prepareTaskContext({
+      prompt: 'in my app fix modal behavior',
+      workspace_path: tmpDir,
+    });
+
+    expect(ctx.augmentedPrompt).toContain('Learned Recipes:');
+    expect(ctx.augmentedPrompt).toContain('Modal Scroll Lock');
+    expect(ctx.augmentedPrompt).toContain('Recent Relevant Activity:');
   });
 });
