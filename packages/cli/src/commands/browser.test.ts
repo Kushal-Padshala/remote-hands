@@ -16,6 +16,9 @@ vi.mock('@remote-hands/daemon', () => ({
     openUrl = mockOpenUrl;
     listTabs = mockListTabs;
   },
+  ChromeManager: class {
+    ensureRunning = vi.fn().mockResolvedValue({ available: true });
+  },
 }));
 
 const mockSpawn = vi.fn();

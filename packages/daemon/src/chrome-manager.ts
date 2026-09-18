@@ -53,8 +53,9 @@ export class ChromeManager {
         : 'google-chrome');
     this.targetProfile = options?.profile;
 
+    const baseDir = this.customProfileDir ?? (this.mode === 'active' ? ChromeManager.getDefaultUserDataDir() : undefined);
     if (this.targetProfile) {
-      let resolved = ChromeManager.resolveProfile(this.targetProfile, this.getProfileDirectory());
+      let resolved = ChromeManager.resolveProfile(this.targetProfile, baseDir);
       if (!resolved && !this.customProfileDir) {
         resolved = ChromeManager.resolveProfile(
           this.targetProfile,
@@ -67,6 +68,81 @@ export class ChromeManager {
           name: this.targetProfile,
           directory: this.targetProfile,
         };
+    } else if (this.mode === 'active') {
+      this.resolvedProfile = ChromeManager.resolveProfile(undefined, baseDir);
+    }
+  }
+
+  static isSystemChromeRunning(): boolean {
+    const defaultDir = ChromeManager.getDefaultUserDataDir();
+    const lockFile = path.join(defaultDir, 'SingletonLock');
+    try {
+      const stat = fs.lstatSync(lockFile);
+      if (stat.isSymbolicLink()) {
+        const target = fs.readlinkSync(lockFile);
+        const match = target.match(/-(\d+)$/);
+        if (match && match[1]) {
+          const pid = parseInt(match[1], 10);
+          try {
+            process.kill(pid, 0);
+            return true;
+          } catch {
+            return false;
+          }
+        }
+      }
+    } catch {}
+    return false;
+  }
+
+  static syncProfileAuthState(sourceDir: string, profileDirName: string, destDir: string): void {
+    fs.mkdirSync(destDir, { recursive: true });
+    const localStateSrc = path.join(sourceDir, 'Local State');
+    const localStateDst = path.join(destDir, 'Local State');
+    if (fs.existsSync(localStateSrc)) {
+      try {
+        fs.copyFileSync(localStateSrc, localStateDst);
+      } catch {}
+    }
+
+    const destProfile = path.join(destDir, profileDirName);
+    fs.mkdirSync(destProfile, { recursive: true });
+
+    const srcProfile = path.join(sourceDir, profileDirName);
+    if (!fs.existsSync(srcProfile)) return;
+
+    const files = [
+      'Cookies',
+      'Cookies-journal',
+      'Login Data',
+      'Login Data-journal',
+      'Web Data',
+      'Web Data-journal',
+      'Preferences',
+      'Secure Preferences',
+    ];
+    for (const f of files) {
+      const sf = path.join(srcProfile, f);
+      const df = path.join(destProfile, f);
+      if (fs.existsSync(sf)) {
+        try {
+          fs.copyFileSync(sf, df);
+        } catch {}
+      }
+    }
+
+    const netSrc = path.join(srcProfile, 'Network');
+    if (fs.existsSync(netSrc)) {
+      const netDst = path.join(destProfile, 'Network');
+      fs.mkdirSync(netDst, { recursive: true });
+      try {
+        const entries = fs.readdirSync(netSrc);
+        for (const entry of entries) {
+          if (!entry.endsWith('-lock')) {
+            fs.copyFileSync(path.join(netSrc, entry), path.join(netDst, entry));
+          }
+        }
+      } catch {}
     }
   }
 
@@ -101,6 +177,8 @@ export class ChromeManager {
         return [];
       }
 
+      const lastUsed = typeof data?.profile?.last_used === 'string' ? data.profile.last_used : undefined;
+
       const profiles: ChromeProfileInfo[] = [];
       for (const [key, raw] of Object.entries(infoCache)) {
         const entry = raw as any;
@@ -119,7 +197,7 @@ export class ChromeManager {
           name,
           email,
           directory: key,
-          isDefault: key === 'Default' || Boolean(entry.is_default),
+          isDefault: key === lastUsed || (lastUsed === undefined && (key === 'Default' || Boolean(entry.is_default))),
         });
       }
 
@@ -129,9 +207,38 @@ export class ChromeManager {
     }
   }
 
-  static resolveProfile(target: string, userDataDir?: string): ChromeProfileInfo | undefined {
+  static resolveProfile(target?: string, userDataDir?: string): ChromeProfileInfo | undefined {
     const profiles = ChromeManager.listProfiles(userDataDir);
+    if (!target || target === 'active' || target === 'default') {
+      const defaultProf = profiles.find((p) => p.isDefault);
+      if (defaultProf) return defaultProf;
+      const personalProf = profiles.find((p) => {
+        const n = p.name.toLowerCase();
+        const em = p.email?.toLowerCase() || '';
+        return (
+          p.directory === 'Profile 4' ||
+          n.includes('personal') ||
+          (em && !em.includes('business') && !em.includes('info') && !em.includes('edu'))
+        );
+      });
+      if (personalProf) return personalProf;
+      return profiles[0];
+    }
+
     const normalized = target.trim().toLowerCase();
+
+    if (normalized === 'personal') {
+      const personalProf = profiles.find((p) => {
+        const n = p.name.toLowerCase();
+        const em = p.email?.toLowerCase() || '';
+        return (
+          p.directory === 'Profile 4' ||
+          n.includes('personal') ||
+          (em && !em.includes('business') && !em.includes('info') && !em.includes('edu'))
+        );
+      });
+      if (personalProf) return personalProf;
+    }
 
     const byId = profiles.find(
       (p) => p.id.toLowerCase() === normalized || p.directory.toLowerCase() === normalized,
@@ -165,7 +272,6 @@ export class ChromeManager {
 
   resolveProfile(target?: string): ChromeProfileInfo | undefined {
     const t = target ?? this.targetProfile;
-    if (!t) return undefined;
     return ChromeManager.resolveProfile(t, this.getProfileDirectory());
   }
 
@@ -211,7 +317,11 @@ export class ChromeManager {
   }
 
   buildLaunchArgs(url?: string): string[] {
-    const profileDir = this.getProfileDirectory();
+    let profileDir = this.getProfileDirectory();
+    if (this.mode === 'active' && !this.customProfileDir && ChromeManager.isSystemChromeRunning()) {
+      profileDir = path.join(os.homedir(), '.remote-hands/chrome-profile');
+    }
+
     const args = [
       `--remote-debugging-port=${this.port}`,
       `--user-data-dir=${profileDir}`,
@@ -240,7 +350,16 @@ export class ChromeManager {
       return current;
     }
 
-    const profileDir = this.getProfileDirectory();
+    let profileDir = this.getProfileDirectory();
+    if (this.mode === 'active' && !this.customProfileDir && ChromeManager.isSystemChromeRunning()) {
+      profileDir = path.join(os.homedir(), '.remote-hands/chrome-profile');
+      ChromeManager.syncProfileAuthState(
+        ChromeManager.getDefaultUserDataDir(),
+        this.resolvedProfile?.directory || 'Default',
+        profileDir,
+      );
+    }
+
     fs.mkdirSync(profileDir, { recursive: true });
 
     const args = this.buildLaunchArgs(initialUrl);
@@ -250,7 +369,7 @@ export class ChromeManager {
     });
     this.process.unref();
 
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 20; i++) {
       await new Promise((r) => setTimeout(r, 200));
       const status = await this.checkDebuggerStatus();
       if (status.available) {

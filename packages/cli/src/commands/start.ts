@@ -32,7 +32,7 @@ export async function startCommand(args: string[], context: CommandContext = {})
       rawProfile = args[browserProfileIdx + 1];
     }
   }
-  let profileMode: ChromeProfileMode = 'dedicated';
+  let profileMode: ChromeProfileMode = 'active';
   let targetProfile: string | undefined;
 
   if (rawProfile) {

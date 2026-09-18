@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import { BrowserDriver } from '@remote-hands/daemon';
+import { BrowserDriver, ChromeManager } from '@remote-hands/daemon';
 import type { CommandContext } from './setup.js';
 
 export function findChromeBinary(): string {
@@ -23,44 +23,26 @@ export async function isCdpReady(url = 'http://127.0.0.1:9222/json/version'): Pr
   }
 }
 
-export async function ensureChromeAutomationReady(options?: { headless?: boolean; cdpUrl?: string }): Promise<boolean> {
+export async function ensureChromeAutomationReady(options?: { headless?: boolean; cdpUrl?: string; profile?: string }): Promise<boolean> {
   const cdpUrl = options?.cdpUrl || process.env.BU_CDP_URL || 'http://127.0.0.1:9222';
   if (await isCdpReady(`${cdpUrl}/json/version`)) {
     return true;
   }
 
-  let port = '9222';
+  let port = 9222;
   try {
     const parsed = new URL(cdpUrl);
-    if (parsed.port) port = parsed.port;
+    if (parsed.port) port = parseInt(parsed.port, 10);
   } catch {}
 
-  const chromeBin = findChromeBinary();
-  const chromeArgs = [
-    `--remote-debugging-port=${port}`,
-    '--user-data-dir=/tmp/rh_chrome_profile',
-    '--no-first-run',
-    '--no-default-browser-check',
-  ];
-  if (options?.headless) {
-    chromeArgs.push('--headless=new');
-  }
+  const manager = new ChromeManager({
+    mode: 'active',
+    profile: options?.profile,
+    port,
+  });
 
-  try {
-    const child = spawn(chromeBin, chromeArgs, {
-      detached: true,
-      stdio: 'ignore',
-    });
-    child.unref();
-
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 100));
-      if (await isCdpReady(`${cdpUrl}/json/version`)) {
-        return true;
-      }
-    }
-  } catch {}
-  return false;
+  const status = await manager.ensureRunning();
+  return status.available;
 }
 
 export async function browserCommand(args: string[], context: CommandContext = {}): Promise<number> {

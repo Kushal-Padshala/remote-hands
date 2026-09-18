@@ -141,7 +141,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
       realtime?.close();
     } catch {}
     try {
-      chromeManager.close();
+      chromeManager?.close();
     } catch {}
   };
 
@@ -158,7 +158,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
       rawProfile = args[browserProfileIdx + 1];
     }
   }
-  let profileMode: ChromeProfileMode = 'dedicated';
+  let profileMode: ChromeProfileMode = 'active';
   let targetProfile: string | undefined;
 
   if (rawProfile) {

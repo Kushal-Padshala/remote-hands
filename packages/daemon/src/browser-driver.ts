@@ -225,7 +225,15 @@ export class BrowserDriver {
         if (!node) throw new Error('Target node no longer connected');
         node.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
         node.focus();
-        if (typeof node.select === 'function') node.select();
+        if (typeof node.select === 'function') {
+          node.select();
+        } else if (window.getSelection && document.createRange) {
+          const sel = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+        }
         document.execCommand('selectAll', false, null);
         document.execCommand('insertText', false, ${escaped});
         node.dispatchEvent(new Event('input', { bubbles: true }));

@@ -172,9 +172,28 @@ describe('ChromeManager', () => {
     expect(ChromeManager.listProfiles(emptyDir)).toEqual([]);
   });
 
-  it('returns default user data directory for the current platform', () => {
-    const defaultDir = ChromeManager.getDefaultUserDataDir();
-    expect(typeof defaultDir).toBe('string');
-    expect(defaultDir.length).toBeGreaterThan(0);
+  it('syncs auth state files to destination directory', () => {
+    const srcProfileDir = path.join(tempDir, 'Profile 4');
+    fs.mkdirSync(srcProfileDir, { recursive: true });
+    fs.writeFileSync(path.join(srcProfileDir, 'Cookies'), 'dummy-cookie-data');
+    fs.writeFileSync(path.join(srcProfileDir, 'Login Data'), 'dummy-login-data');
+    const netDir = path.join(srcProfileDir, 'Network');
+    fs.mkdirSync(netDir, { recursive: true });
+    fs.writeFileSync(path.join(netDir, 'Cookies'), 'dummy-net-cookie-data');
+
+    const destDir = path.join(tempDir, 'dest-profile');
+    ChromeManager.syncProfileAuthState(tempDir, 'Profile 4', destDir);
+
+    expect(fs.existsSync(path.join(destDir, 'Local State'))).toBe(true);
+    expect(fs.existsSync(path.join(destDir, 'Profile 4', 'Cookies'))).toBe(true);
+    expect(fs.existsSync(path.join(destDir, 'Profile 4', 'Login Data'))).toBe(true);
+    expect(fs.existsSync(path.join(destDir, 'Profile 4', 'Network', 'Cookies'))).toBe(true);
+  });
+
+  it('resolves personal profile by keyword', () => {
+    const resolved = ChromeManager.resolveProfile('personal', tempDir);
+    expect(resolved).toBeDefined();
+    expect(resolved?.name).toBe('Personal');
   });
 });
+
