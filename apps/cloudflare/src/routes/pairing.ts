@@ -120,7 +120,7 @@ export async function handleClaimPairing(request: Request, env: Env): Promise<Re
 }
 
 export async function handleCreatePhoneSession(request: Request, env: Env): Promise<Response> {
-  const session = await requireOwnerSession(request, env.DB);
+  const session = await requireSession(request, env.DB);
   const now = new Date();
   const rawSessionToken = createSessionToken();
   const tokenHash = await hashSessionToken(rawSessionToken);
