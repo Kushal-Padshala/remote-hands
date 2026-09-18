@@ -71,6 +71,7 @@ export interface CommandContext {
   configDir?: string | undefined;
   once?: boolean | undefined;
   chromeManager?: ChromeManager | undefined;
+  client?: any;
 }
 
 export async function setupCommand(args: string[], context: CommandContext = {}): Promise<number> {

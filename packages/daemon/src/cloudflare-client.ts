@@ -158,6 +158,12 @@ export class CloudflareControlPlaneClient {
     return parsed.approval;
   }
 
+  async getApproval(approvalId: string): Promise<ApprovalRow> {
+    const data = await this.request<unknown>(`/approvals/${approvalId}`, 'GET');
+    const parsed = createApprovalResponseSchema.parse(data);
+    return parsed.approval;
+  }
+
   async decideApproval(approvalId: string, input: DecideApprovalRequest): Promise<ApprovalRow> {
     const data = await this.request<unknown>(`/approvals/${approvalId}/decision`, 'POST', input);
     const parsed = decideApprovalResponseSchema.parse(data);

@@ -20,7 +20,7 @@ import {
 } from './routes/tasks.js';
 import { handleListEvents, handleAppendEvent } from './routes/events.js';
 import { handlePushFrame } from './routes/frames.js';
-import { handleCreateApproval, handleDecideApproval } from './routes/approvals.js';
+import { handleCreateApproval, handleDecideApproval, handleGetApproval } from './routes/approvals.js';
 import { handleTaskWebSocket, handleMachineWebSocket } from './routes/websocket.js';
 
 export default {
@@ -131,6 +131,12 @@ export default {
 
       if (method === 'POST' && pathname === '/approvals') {
         return await handleCreateApproval(request, env);
+      }
+
+      const approvalGetMatch = pathname.match(/^\/approvals\/([a-zA-Z0-9_-]+)$/);
+      if (approvalGetMatch && method === 'GET') {
+        const approvalId = approvalGetMatch[1]!;
+        return await handleGetApproval(approvalId, request, env);
       }
 
       const approvalDecisionMatch = pathname.match(/^\/approvals\/([a-zA-Z0-9_-]+)\/decision$/);

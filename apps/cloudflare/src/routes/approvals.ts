@@ -61,3 +61,19 @@ export async function handleDecideApproval(
 
   return jsonOk({ approval: decided });
 }
+
+export async function handleGetApproval(
+  approvalId: string,
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  const session = await requireSession(request, env.DB);
+  const approvalsRepo = new ApprovalsRepository(env.DB);
+  const approval = await approvalsRepo.getById(approvalId);
+
+  if (!approval || approval.owner_id !== session.owner_id) {
+    throw new NotFoundError('Approval not found');
+  }
+
+  return jsonOk({ approval });
+}
