@@ -182,6 +182,81 @@ describe('Web App Workflow', () => {
     });
   });
 
+  it('opens rejection feedback question when rejecting and sends reason', async () => {
+    vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+    vi.spyOn(apiClient, 'getApproval').mockResolvedValue({
+      approval: {
+        id: '55555555-5555-5555-8555-555555555555',
+        task_id: fakeTask.id,
+        owner_id: fakeTask.owner_id,
+        action_kind: 'publish',
+        summary: 'Post tweet: Hello world',
+        risk: 'high',
+        tool_payload: {},
+        frame_path: null,
+        decision: 'pending',
+        decided_at: null,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        created_at: new Date().toISOString(),
+      },
+    });
+    vi.spyOn(apiClient, 'decideApproval').mockResolvedValue({
+      id: '55555555-5555-5555-8555-555555555555',
+      task_id: fakeTask.id,
+      owner_id: fakeTask.owner_id,
+      action_kind: 'publish',
+      summary: 'Post tweet: Hello world',
+      risk: 'high',
+      tool_payload: {},
+      frame_path: null,
+      decision: 'rejected',
+      decided_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 60000).toISOString(),
+      created_at: new Date().toISOString(),
+      rejection_reason: 'Tone is too casual, make it formal',
+    });
+
+    const socket = new MockSocket();
+    render(
+      <LiveTaskScreen
+        task={fakeTask}
+        onBack={() => {}}
+        webSocketFactory={() => socket as any}
+      />,
+    );
+
+    socket.triggerMessage({
+      type: 'approval.requested',
+      task_id: fakeTask.id,
+      approval_id: '55555555-5555-5555-8555-555555555555',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approval-sheet')).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId('reject-approval-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('rejection-form')).toBeDefined();
+      expect(screen.getByText('Why are you rejecting this?')).toBeDefined();
+    });
+
+    const input = screen.getByTestId('rejection-reason-input');
+    fireEvent.change(input, { target: { value: 'Tone is too casual, make it formal' } });
+
+    fireEvent.click(screen.getByTestId('confirm-reject-btn'));
+
+    await waitFor(() => {
+      expect(apiClient.decideApproval).toHaveBeenCalledWith(
+        '55555555-5555-5555-8555-555555555555',
+        'rejected',
+        'Tone is too casual, make it formal',
+      );
+      expect(screen.queryByTestId('approval-sheet')).toBeNull();
+    });
+  });
+
   it('renders inline thinking status and expires old frame in 5s', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);

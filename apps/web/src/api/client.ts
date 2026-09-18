@@ -156,11 +156,12 @@ export class WebApiClient {
   async decideApproval(
     approvalId: string,
     decision: 'approved' | 'rejected',
+    reason?: string | null | undefined,
   ): Promise<ApprovalRow> {
     const res = await this.request<{ approval: ApprovalRow }>(
       `/approvals/${approvalId}/decision`,
       'POST',
-      { decision },
+      { decision, ...(reason ? { reason } : {}) },
     );
     return res.approval;
   }

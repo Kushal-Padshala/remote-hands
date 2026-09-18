@@ -59,10 +59,21 @@ export class ApprovalsRepository {
     return (res.results ?? []).map((r) => this.mapRow(r));
   }
 
-  async updateDecision(id: string, decision: string, decidedAt: string): Promise<void> {
+  async updateDecision(id: string, decision: string, decidedAt: string, reason?: string | null): Promise<void> {
+    const existing = await this.getById(id);
+    let toolPayload = existing?.tool_payload ?? {};
+    if (typeof toolPayload === 'string') {
+      try {
+        toolPayload = JSON.parse(toolPayload);
+      } catch {}
+    }
+    if (reason && typeof toolPayload === 'object' && toolPayload !== null) {
+      (toolPayload as any).rejection_reason = reason;
+    }
+    const payloadStr = JSON.stringify(toolPayload);
     await this.db
-      .prepare(`UPDATE approvals SET decision = ?, decided_at = ? WHERE id = ?`)
-      .bind(decision, decidedAt, id)
+      .prepare(`UPDATE approvals SET decision = ?, decided_at = ?, tool_payload = ? WHERE id = ?`)
+      .bind(decision, decidedAt, payloadStr, id)
       .run();
   }
 
@@ -86,6 +97,7 @@ export class ApprovalsRepository {
       decided_at: row.decided_at,
       expires_at: row.expires_at,
       created_at: row.created_at,
+      rejection_reason: row.rejection_reason ?? (toolPayload as any)?.rejection_reason ?? null,
     };
   }
 }

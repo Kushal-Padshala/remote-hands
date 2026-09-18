@@ -167,6 +167,27 @@ describe('approveCommand', () => {
     expect(stderrLogs.join('\n')).toContain('Approval rejected by user.');
   });
 
+  it('prints user rejection reason to stderr when provided', async () => {
+    const configFile = path.join(tempDir, 'daemon.json');
+    fs.writeFileSync(configFile, JSON.stringify({
+      cloudflareApiUrl: 'https://example.workers.dev',
+      sessionToken: 'test-token',
+    }));
+
+    const mockClient = {
+      createApproval: vi.fn().mockResolvedValue({ id: 'app-3', decision: 'pending' }),
+      getApproval: vi.fn().mockResolvedValue({
+        id: 'app-3',
+        decision: 'rejected',
+        rejection_reason: 'Change the wording to be more friendly',
+      }),
+    };
+
+    const code = await approveCommand(['Post update', '--task=t3', '--timeout=5'], getCtx(mockClient));
+    expect(code).toBe(1);
+    expect(stderrLogs.join('\n')).toContain('Approval rejected by user: Change the wording to be more friendly');
+  });
+
   it('handles creation error gracefully', async () => {
     const configFile = path.join(tempDir, 'daemon.json');
     fs.writeFileSync(configFile, JSON.stringify({

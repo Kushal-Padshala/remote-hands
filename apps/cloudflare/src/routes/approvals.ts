@@ -5,10 +5,12 @@ import {
 import {
   createApproval,
   decideApproval,
+  appendEvent,
 } from '@remote-hands/control-plane';
 import { requireOwnerSession, requireSession } from '../auth/session.js';
 import { TasksRepository } from '../d1/tasks-repository.js';
 import { ApprovalsRepository } from '../d1/approvals-repository.js';
+import { EventsRepository } from '../d1/events-repository.js';
 import { NotFoundError } from '../http/errors.js';
 import { jsonOk } from '../http/json.js';
 import type { Env } from '../env.js';
@@ -74,8 +76,8 @@ export async function handleDecideApproval(
     throw new NotFoundError('Approval not found');
   }
 
-  const decided = decideApproval(approval, body.decision);
-  await approvalsRepo.updateDecision(approvalId, decided.decision, decided.decided_at!);
+  const decided = decideApproval(approval, body.decision, body.reason);
+  await approvalsRepo.updateDecision(approvalId, decided.decision, decided.decided_at!, body.reason);
 
   try {
     const room = getTaskRoomStub(approval.task_id, env);
@@ -85,8 +87,38 @@ export async function handleDecideApproval(
         type: 'approval.decided',
         approval_id: approvalId,
         decision: decided.decision,
+        reason: body.reason || undefined,
       }),
     }));
+
+    if (body.decision === 'rejected' && body.reason) {
+      const eventsRepo = new EventsRepository(env.DB);
+      const existingEvents = await eventsRepo.listForTask(approval.task_id);
+      const eventRow = appendEvent(
+        existingEvents,
+        {
+          kind: 'approval_rejected',
+          payload: {
+            approval_id: approvalId,
+            action_kind: approval.action_kind,
+            summary: approval.summary,
+            reason: body.reason,
+          },
+        },
+        {
+          ownerId: session.owner_id,
+          taskId: approval.task_id,
+        },
+      );
+      await eventsRepo.append(eventRow);
+      await room.fetch(new Request('https://internal/event', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'task.event',
+          event: eventRow,
+        }),
+      }));
+    }
   } catch {}
 
   return jsonOk({ approval: decided });

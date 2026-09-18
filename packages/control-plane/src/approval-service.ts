@@ -53,8 +53,11 @@ export function evaluateApprovalDecision(approval: ApprovalRow, now: Date = new 
 export function decideApproval(
   approval: ApprovalRow,
   decision: 'approved' | 'rejected',
-  now: Date = new Date(),
+  nowOrReason?: Date | string | null,
+  nowArg?: Date,
 ): ApprovalRow {
+  const reason = typeof nowOrReason === 'string' ? nowOrReason : null;
+  const now = nowOrReason instanceof Date ? nowOrReason : (nowArg ?? new Date());
   const current = evaluateApprovalDecision(approval, now);
   if (current === 'expired') {
     throw new Error('Cannot decide approval: request has expired');
@@ -63,10 +66,19 @@ export function decideApproval(
     throw new Error(`Cannot decide approval: already resolved as ${current}`);
   }
 
+  let toolPayload = approval.tool_payload;
+  if (reason) {
+    if (typeof toolPayload === 'object' && toolPayload !== null) {
+      toolPayload = { ...toolPayload, rejection_reason: reason };
+    }
+  }
+
   return {
     ...approval,
     decision,
     decided_at: now.toISOString(),
+    tool_payload: toolPayload,
+    rejection_reason: reason ?? approval.rejection_reason ?? null,
   };
 }
 

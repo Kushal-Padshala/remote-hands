@@ -4,7 +4,7 @@ import { TASK_STATUSES } from './task.js';
 export const EVENT_KINDS = [
   'agent_text', 'thinking', 'tool_call', 'tool_result',
   'file_diff', 'command_output', 'browser_action',
-  'status', 'approval_requested', 'error', 'result',
+  'status', 'approval_requested', 'approval_rejected', 'error', 'result',
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -39,6 +39,12 @@ const browserAction = z.object({
 });
 const status = z.object({ status: z.enum(TASK_STATUSES) });
 const approvalRequested = z.object({ approval_id: z.uuid() });
+const approvalRejected = z.object({
+  approval_id: z.string().optional(),
+  action_kind: z.string().optional(),
+  summary: z.string().optional(),
+  reason: z.string().optional(),
+});
 const errorPayload = z.object({ message: z.string(), fatal: z.boolean().default(false) });
 const result = z.object({
   summary: z.string(),
@@ -46,10 +52,6 @@ const result = z.object({
   duration_seconds: z.number().optional(),
 });
 
-/**
- * Fields are marked `.optional()` individually where genuinely optional, and
- * defaults are applied at parse time so consumers never branch on undefined.
- */
 export const eventPayloadSchemas = {
   agent_text: agentText,
   thinking,
@@ -60,6 +62,7 @@ export const eventPayloadSchemas = {
   browser_action: browserAction,
   status,
   approval_requested: approvalRequested,
+  approval_rejected: approvalRejected,
   error: errorPayload,
   result,
 } as const satisfies Record<EventKind, z.ZodType>;
@@ -98,6 +101,7 @@ export const eventInputSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('browser_action'), payload: browserAction }),
   z.object({ kind: z.literal('status'), payload: status }),
   z.object({ kind: z.literal('approval_requested'), payload: approvalRequested }),
+  z.object({ kind: z.literal('approval_rejected'), payload: approvalRejected }),
   z.object({ kind: z.literal('error'), payload: errorPayload }),
   z.object({ kind: z.literal('result'), payload: result }),
 ]);

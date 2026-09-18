@@ -42,7 +42,7 @@ rh approve "<summary of action>" [--risk=high|medium] [--action=publish|delete|p
 ```
 
 - If the user approves on their mobile app, `rh approve` exits with status `0`.
-- If the user rejects or the request times out, `rh approve` exits with status `1`. Abort the action immediately.
+- If the user rejects, `rh approve` exits with status `1` and prints the user's rejection reason to stderr (`Approval rejected by user: <reason>`). Read this rejection feedback carefully: modify the proposed content or action according to the user's instructions and re-run `rh approve`, or cancel if the user asked to abort. If timed out without decision, abort.
 
 ### Browser Profile & Authentication
 

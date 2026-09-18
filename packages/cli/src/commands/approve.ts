@@ -135,7 +135,16 @@ export async function approveCommand(args: string[], context: CommandContext = {
         return 0;
       }
       if (current.decision === 'rejected') {
-        stderr('Approval rejected by user.');
+        const reason =
+          current.rejection_reason ||
+          (typeof current.tool_payload === 'object' && current.tool_payload !== null
+            ? (current.tool_payload as any).rejection_reason
+            : null);
+        if (reason) {
+          stderr(`Approval rejected by user: ${reason}`);
+        } else {
+          stderr('Approval rejected by user.');
+        }
         return 1;
       }
     } catch {}

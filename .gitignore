@@ -12,3 +12,4 @@ coverage/
 .claude/
 .wrangler/
 packages/cli/apps/
+packages/cli/bin/

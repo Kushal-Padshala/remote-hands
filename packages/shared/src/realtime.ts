@@ -37,6 +37,7 @@ export const approvalDecidedMessageSchema = z.object({
   type: z.literal('approval.decided'),
   approval_id: z.string().uuid(),
   decision: z.enum(APPROVAL_DECISIONS),
+  reason: z.string().optional(),
 });
 
 export const heartbeatMessageSchema = z.object({

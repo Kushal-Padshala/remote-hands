@@ -445,6 +445,25 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             prev.map((m) => (m.type === 'tool' && m.toolStatus === 'active' ? { ...m, toolStatus: 'done' } : m))
           );
         }
+      } else if (kind === 'approval_rejected') {
+        const reason = payload?.reason;
+        if (reason) {
+          setMessages((prev) => {
+            const alreadyPresent = prev.some(
+              (m) => m.type === 'user' && m.text?.includes(reason)
+            );
+            if (alreadyPresent) return prev;
+            return [
+              ...prev,
+              {
+                id: `rejection-${Date.now()}-${Math.random()}`,
+                type: 'user',
+                text: `Rejected with feedback: ${reason}`,
+                time: new Date().toISOString(),
+              },
+            ];
+          });
+        }
       } else if (kind === 'agent_text') {
         const textChunk = typeof payload === 'object' && payload?.text !== undefined ? String(payload.text) : String(payload);
         if (!textChunk) return;
@@ -833,11 +852,22 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
     }
   };
 
-  const handleReject = async (approvalId: string) => {
+  const handleReject = async (approvalId: string, reason?: string) => {
     setDecidingApproval(true);
     try {
-      await apiClient.decideApproval(approvalId, 'rejected');
+      await apiClient.decideApproval(approvalId, 'rejected', reason);
       setActiveApproval(null);
+      if (reason) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `rejection-${Date.now()}-${Math.random()}`,
+            type: 'user',
+            text: `Rejected with feedback: ${reason}`,
+            time: new Date().toISOString(),
+          },
+        ]);
+      }
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
     } finally {

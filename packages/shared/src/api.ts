@@ -184,6 +184,7 @@ export const approvalRowSchema = z.object({
   decided_at: z.string().nullable(),
   expires_at: z.string(),
   created_at: z.string(),
+  rejection_reason: z.string().nullable().optional(),
 });
 export type ApprovalRow = z.infer<typeof approvalRowSchema>;
 
@@ -205,6 +206,7 @@ export type CreateApprovalResponse = z.infer<typeof createApprovalResponseSchema
 
 export const decideApprovalRequestSchema = z.object({
   decision: z.enum(['approved', 'rejected']),
+  reason: z.string().optional(),
 });
 export type DecideApprovalRequest = z.infer<typeof decideApprovalRequestSchema>;
 

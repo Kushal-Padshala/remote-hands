@@ -43,6 +43,25 @@ describe('approval service lifecycle and timeout rules', () => {
     expect(decided.decided_at).toBe(decideTime.toISOString());
   });
 
+  it('records rejection decision with user feedback reason', () => {
+    const approval = createApproval({
+      ownerId: 'owner-1',
+      taskId: 'task-1',
+      actionKind: 'publish',
+      summary: 'Post to X',
+      risk: 'high',
+      toolPayload: {},
+    }, now);
+
+    const decideTime = new Date('2026-09-16T12:02:00.000Z');
+    const decided = decideApproval(approval, 'rejected', 'Needs more details', decideTime);
+
+    expect(decided.decision).toBe('rejected');
+    expect(decided.decided_at).toBe(decideTime.toISOString());
+    expect(decided.rejection_reason).toBe('Needs more details');
+    expect((decided.tool_payload as any).rejection_reason).toBe('Needs more details');
+  });
+
   it('evaluates and expires an approval after deadline', () => {
     const approval = createApproval({
       ownerId: 'owner-1',

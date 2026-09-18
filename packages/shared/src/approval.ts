@@ -25,6 +25,7 @@ export interface Approval {
   decided_at: string | null;
   expires_at: string;
   created_at: string;
+  rejection_reason?: string | null | undefined;
 }
 
 function past(deadline: string, now: Date): boolean {

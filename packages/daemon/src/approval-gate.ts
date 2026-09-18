@@ -26,6 +26,7 @@ export interface RequestApprovalInput {
 export interface ApprovalDecisionResult {
   status: ApprovalDecision;
   approvalId: string;
+  reason?: string | undefined;
 }
 
 export class ApprovalGate {
@@ -92,6 +93,7 @@ export class ApprovalGate {
             finish({
               status: msg.decision,
               approvalId,
+              reason: (msg as any).reason,
             });
           }
         });
