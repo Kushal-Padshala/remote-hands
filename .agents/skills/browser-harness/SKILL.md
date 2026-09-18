@@ -27,6 +27,24 @@ rh browser type <index> "<text>"
 rh browser tabs
 ```
 
+### Human Approval for Sensitive Actions
+
+Before executing sensitive or irreversible actions (e.g., posting to Twitter/X or LinkedIn, deleting files or repositories, sending emails, purchasing, deploying to production), you MUST request user approval on their phone:
+
+```bash
+rh approve "<summary of action>" [--risk=high|medium] [--action=publish|delete|push|pay|send]
+```
+
+- If the user approves on their mobile app, `rh approve` exits with status `0`.
+- If the user rejects or the request times out, `rh approve` exits with status `1`. Abort the action immediately.
+
+### Browser Profile & Authentication
+
+Chrome is launched automatically on the desktop with the user's active logged-in profile (e.g. personal profile with Google, GitHub, X/Twitter credentials).
+- NEVER query or scrape macOS SQLite cookie databases (`~/Library/Application Support/Google/Chrome/.../Cookies`).
+- NEVER attempt to decrypt Keychain passwords or run security extraction scripts.
+- Simply navigate to the target site via `rh browser open "<url>"`; the user's session is already active.
+
 For advanced scripting, multi-step sequences, or custom CDP interactions:
 
 ```bash

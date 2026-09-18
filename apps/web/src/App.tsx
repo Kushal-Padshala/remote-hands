@@ -93,8 +93,8 @@ export function App() {
       const list = await apiClient.listMachines();
       setMachines(list);
       setSelectedMachine((prev) => {
-        if (!prev) return null;
-        return list.find((m) => m.id === prev.id) || prev;
+        if (!prev) return list[0] || null;
+        return list.find((m) => m.id === prev.id) || list[0] || null;
       });
       if (typeof localStorage !== 'undefined' && list.length > 0) {
         try {
@@ -337,35 +337,56 @@ export function App() {
           />
         )}
 
-        {currentScreen === 'new-task' && selectedMachine && (
-          <NewTaskScreen
-            machine={selectedMachine}
-            onCreateTask={handleCreateTask}
-            onCancel={() => setCurrentScreen('machines')}
-            loading={submittingTask}
-          />
+        {currentScreen === 'new-task' && (
+          (selectedMachine || machines[0]) ? (
+            <NewTaskScreen
+              machine={selectedMachine || machines[0]!}
+              onCreateTask={handleCreateTask}
+              onCancel={() => setCurrentScreen('machines')}
+              loading={submittingTask}
+            />
+          ) : (
+            <div className="empty-state-card" style={{ margin: 16 }}>
+              <h3 className="empty-state-title">No computers connected</h3>
+              <p className="empty-state-desc">Pair a machine to create tasks.</p>
+              <button className="btn btn-primary" onClick={() => setCurrentScreen('machines')}>
+                Go to Devices
+              </button>
+            </div>
+          )
         )}
 
-        {currentScreen === 'live-task' && (selectedMachine || activeTask) && (
-          <ErrorBoundary
-            fallbackTitle="Unable to load task session"
-            onReset={() => {
-              setActiveTask(null);
-              setSelectedMachine(null);
-              setCurrentScreen('machines');
-            }}
-          >
-            <LiveTaskScreen
-              task={activeTask ?? undefined}
-              machine={selectedMachine ?? undefined}
-              machineName={selectedMachine?.name}
-              onBack={() => {
+        {currentScreen === 'live-task' && (
+          (selectedMachine || activeTask || machines[0]) ? (
+            <ErrorBoundary
+              fallbackTitle="Unable to load task session"
+              onReset={() => {
                 setActiveTask(null);
                 setSelectedMachine(null);
                 setCurrentScreen('machines');
               }}
-            />
-          </ErrorBoundary>
+            >
+              <LiveTaskScreen
+                task={activeTask ?? undefined}
+                machine={(selectedMachine || (activeTask ? machines.find((m) => m.id === activeTask.machine_id) : machines[0])) ?? undefined}
+                machineName={selectedMachine?.name || (activeTask ? 'Remote Mac' : machines[0]?.name)}
+                onBack={() => {
+                  setActiveTask(null);
+                  setSelectedMachine(null);
+                  setCurrentScreen('machines');
+                  loadMachines();
+                }}
+              />
+            </ErrorBoundary>
+          ) : (
+            <div className="empty-state-card" style={{ margin: 16 }}>
+              <h3 className="empty-state-title">No computer connected</h3>
+              <p className="empty-state-desc">Please connect or select a paired computer first.</p>
+              <button className="btn btn-primary" onClick={() => setCurrentScreen('machines')}>
+                View Devices
+              </button>
+            </div>
+          )
         )}
       </main>
 

@@ -39,12 +39,14 @@ export const DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT =
   '   - For custom scripts, use `browser-harness <<\'PY\' ... PY`.\n' +
   '   - Available pre-imported helpers for custom scripts: `new_tab(url)`, `goto_url(url)`, `click_at_xy(x, y)`, `fill_input(selector, text)`, `type_text(text)`, `press_key(key)`, `scroll(x, y, dy)`, `js("expression")`, `wait_for_load()`, `wait_for_element(selector)`, `page_info()`, `list_tabs()`, `switch_tab(id)`.\n' +
   '   - To open any URL in the user\'s desktop browser, use `open "<url>"`.\n' +
-  '3. Live Screen Streaming: Every action and page state is captured and streamed live to the user\'s phone in real time.\n' +
-  '4. Decisive Completion: Once the task is completed or verified, provide a clean, concise markdown summary of what was accomplished.\n' +
-  '5. Direct Execution & Zero-Scan Speed: Go directly to the relevant code files. Never execute broad filesystem sweeps or repetitive file slice reads. Read substantial chunks at once. Run targeted test files (e.g. `npx vitest run <path>`) rather than whole-repo test suites. Avoid redundant web searches for known standards.]';
+  '   - The browser runs visibly on the desktop with the user\'s active personal profile and logins. Never query macOS SQLite cookie files or decrypt keychain credentials.\n' +
+  '3. Mandatory Human Approval: Before executing sensitive or irreversible actions (e.g. posting to social media, deleting files or repositories, sending messages, deploying to production, or spending money), you MUST run `rh approve "<summary>" [--risk=high] [--action=publish|delete|push|pay|send]`. Only proceed if it exits with code 0. If rejected or timed out, abort the operation.\n' +
+  '4. Live Screen Streaming: Every action and page state is captured and streamed live to the user\'s phone in real time.\n' +
+  '5. Decisive Completion: Once the task is completed or verified, provide a clean, concise markdown summary of what was accomplished.\n' +
+  '6. Direct Execution & Zero-Scan Speed: Go directly to the relevant code files. Never execute broad filesystem sweeps or repetitive file slice reads. Read substantial chunks at once. Run targeted test files (e.g. `npx vitest run <path>`) rather than whole-repo test suites. Avoid redundant web searches for known standards.]';
 
 export const DEFAULT_REMOTE_HANDS_REMINDER =
-  '[Context Reminder: Remote Hands autonomous control plane. Take immediate action on the user\'s request. For browser actions, use `rh browser snapshot` / `rh browser click <index>` or `browser-harness <<\'PY\' ... PY`. For codebase tasks, edit target files directly without exploratory scans and run targeted tests. All actions stream live to the phone. Provide a clean, direct final summary.]';
+  '[Context Reminder: Remote Hands autonomous control plane. Take immediate action on the user\'s request. For browser actions, use `rh browser snapshot` / `rh browser click <index>` or `browser-harness <<\'PY\' ... PY`. The browser is already authenticated with the user\'s profile. For sensitive actions (posting, deleting, deploying), run `rh approve "<summary>"`. For codebase tasks, edit target files directly without exploratory scans and run targeted tests. All actions stream live to the phone. Provide a clean, direct final summary.]';
 
 export function extractSummaryFromTranscript(conversationId: string): string | null {
   const candidateDirs = [
