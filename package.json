@@ -3,6 +3,21 @@
   "private": true,
   "version": "0.0.0",
   "license": "MIT",
+  "description": "Autonomous AI agent control plane for mobile-to-desktop computer use and browser automation with live screen streaming and human-in-the-loop approvals",
+  "keywords": [
+    "ai-agent",
+    "autonomous-agent",
+    "browser-automation",
+    "computer-use",
+    "claude-computer-use",
+    "chrome-cdp",
+    "remote-control-plane",
+    "human-in-the-loop",
+    "cloudflare-workers",
+    "durable-objects",
+    "mobile-ai",
+    "self-hosted"
+  ],
   "engines": { "node": ">=22.0.0" },
   "workspaces": ["packages/*", "apps/*", "supabase", "tests"],
   "scripts": {

@@ -18,13 +18,13 @@ describe('ChromeManager', () => {
             is_consented_primary_account: true,
           },
           'Profile 4': {
-            name: 'kushal',
-            user_name: 'kushalp5454@gmail.com',
+            name: 'Work',
+            user_name: 'work@example.com',
             is_consented_primary_account: true,
           },
           'Profile 11': {
             name: 'FLCC',
-            user_name: 'kushal.padshala@stonybrook.edu',
+            user_name: 'student@university.edu',
             is_consented_primary_account: false,
           },
         },
@@ -106,36 +106,36 @@ describe('ChromeManager', () => {
     });
     expect(profiles[1]).toEqual({
       id: 'Profile 4',
-      name: 'kushal',
-      email: 'kushalp5454@gmail.com',
+      name: 'Work',
+      email: 'work@example.com',
       directory: 'Profile 4',
       isDefault: false,
     });
     expect(profiles[2]).toEqual({
       id: 'Profile 11',
       name: 'FLCC',
-      email: 'kushal.padshala@stonybrook.edu',
+      email: 'student@university.edu',
       directory: 'Profile 11',
       isDefault: false,
     });
   });
 
   it('resolves profile by human-readable name', () => {
-    const resolved = ChromeManager.resolveProfile('kushal', tempDir);
+    const resolved = ChromeManager.resolveProfile('Work', tempDir);
     expect(resolved).toBeDefined();
     expect(resolved?.id).toBe('Profile 4');
     expect(resolved?.directory).toBe('Profile 4');
-    expect(resolved?.name).toBe('kushal');
-    const manager = new ChromeManager({ profile: 'kushal', customProfileDir: tempDir });
+    expect(resolved?.name).toBe('Work');
+    const manager = new ChromeManager({ profile: 'Work', customProfileDir: tempDir });
     expect(manager.getResolvedProfile()?.directory).toBe('Profile 4');
   });
 
   it('resolves profile by email', () => {
-    const resolved = ChromeManager.resolveProfile('kushalp5454@gmail.com', tempDir);
+    const resolved = ChromeManager.resolveProfile('work@example.com', tempDir);
     expect(resolved).toBeDefined();
     expect(resolved?.id).toBe('Profile 4');
     expect(resolved?.directory).toBe('Profile 4');
-    const manager = new ChromeManager({ profile: 'kushalp5454@gmail.com', customProfileDir: tempDir });
+    const manager = new ChromeManager({ profile: 'work@example.com', customProfileDir: tempDir });
     expect(manager.getResolvedProfile()?.directory).toBe('Profile 4');
   });
 
@@ -150,7 +150,7 @@ describe('ChromeManager', () => {
   });
 
   it('appends --profile-directory to launch args when profile is specified', () => {
-    const manager = new ChromeManager({ profile: 'kushal', customProfileDir: tempDir });
+    const manager = new ChromeManager({ profile: 'Work', customProfileDir: tempDir });
     const args = manager.buildLaunchArgs('https://github.com');
     expect(args).toContain('--profile-directory=Profile 4');
     expect(args).toContain(`--user-data-dir=${tempDir}`);
@@ -158,9 +158,9 @@ describe('ChromeManager', () => {
   });
 
   it('populates profileName and profileDirectory in checkDebuggerStatus', async () => {
-    const manager = new ChromeManager({ profile: 'kushal', customProfileDir: tempDir });
+    const manager = new ChromeManager({ profile: 'Work', customProfileDir: tempDir });
     const status = await manager.checkDebuggerStatus();
-    expect(status.profileName).toBe('kushal');
+    expect(status.profileName).toBe('Work');
     expect(status.profileDirectory).toBe('Profile 4');
   });
 

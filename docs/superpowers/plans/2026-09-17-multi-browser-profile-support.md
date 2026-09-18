@@ -43,8 +43,8 @@
 
 In `packages/daemon/src/chrome-manager.test.ts`, add test cases for:
 1. `listProfiles()` reading simulated Chrome `Local State` JSON file and returning structured `ChromeProfileInfo` list.
-2. Resolving profile by human-readable name (e.g. `"kushal"` -> folder `"Profile 4"`).
-3. Resolving profile by email (e.g. `"kushalp5454@gmail.com"` -> folder `"Profile 4"`).
+2. Resolving profile by human-readable name (e.g. `"Work"` -> folder `"Profile 4"`).
+3. Resolving profile by email (e.g. `"work@example.com"` -> folder `"Profile 4"`).
 4. Resolving profile by folder name (e.g. `"Profile 11"` -> folder `"Profile 11"`).
 5. `buildLaunchArgs()` appending `--profile-directory=Profile 4`.
 
