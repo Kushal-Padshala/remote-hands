@@ -74,6 +74,14 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
     stdout(`[✓] Chrome remote debugging: ready on demand (port 9222, profile: ${chromeStatus.profileDir})`);
   }
 
+  const profiles = ChromeManager.listProfiles();
+  if (profiles.length > 0) {
+    const profileNames = profiles.map((p) => p.name).join(', ');
+    stdout(`[✓] Chrome profiles: ${profiles.length} detected (${profileNames})`);
+  } else {
+    stdout('[!] Chrome profiles: 0 detected');
+  }
+
   if (process.platform === 'darwin') {
     const fdaGranted = checkMacFullDiskAccess();
     const hostApp = detectHostAppName();

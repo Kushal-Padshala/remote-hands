@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { ChromeManager, type ChromeProfileMode } from '@remote-hands/daemon';
 import { setupCommand, type CommandContext } from './setup.js';
 import { daemonCommand } from './daemon.js';
 import { c } from '../output/ui.js';
@@ -20,6 +21,29 @@ export async function startCommand(args: string[], context: CommandContext = {})
   const noClamshell = args.includes('--no-clamshell') || args.includes('--no-sleep-prevent');
   const once = args.includes('--once');
   const noAutoSetup = args.includes('--no-auto-setup') || once;
+
+  const browserProfileArg = args.find((a) => a.startsWith('--browser-profile='));
+  const rawProfile = browserProfileArg ? browserProfileArg.split('=')[1] : undefined;
+  let profileMode: ChromeProfileMode = 'dedicated';
+  let targetProfile: string | undefined;
+
+  if (rawProfile) {
+    if (rawProfile === 'dedicated' || rawProfile === 'none' || rawProfile === 'active') {
+      profileMode = rawProfile;
+    } else {
+      profileMode = 'active';
+      targetProfile = rawProfile;
+    }
+  }
+
+  const chromeManager =
+    context.chromeManager ??
+    new ChromeManager({
+      mode: profileMode,
+      profile: targetProfile,
+      port: 9222,
+    });
+  context.chromeManager = chromeManager;
 
   let clamshellActive = false;
   let caffeinateProc: ChildProcess | null = null;
@@ -156,6 +180,11 @@ export async function startCommand(args: string[], context: CommandContext = {})
           : c.dim('Lid-closed sleep prevention: OFF')
       }\n` +
       `${c.brightCyan('│')}  ${
+        targetProfile
+          ? c.white(`Browser profile: ${targetProfile} (mode: ${profileMode})`)
+          : c.dim(`Browser profile mode: ${profileMode}`)
+      }\n` +
+      `${c.brightCyan('│')}  ${
         hasConfig
           ? c.white('Listening for coding agent tasks from your phone...')
           : c.yellow('Notice: Setup config not found yet. Run "rh setup" to pair.')
@@ -167,6 +196,7 @@ export async function startCommand(args: string[], context: CommandContext = {})
   try {
     return await daemonCommand(args, {
       ...context,
+      chromeManager,
       configDir,
       stdout,
       stderr,

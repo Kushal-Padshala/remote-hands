@@ -6,6 +6,7 @@ import { startCommand } from './commands/start.js';
 import { doctorCommand } from './commands/doctor.js';
 import { pairCommand } from './commands/pair.js';
 import { browserCommand } from './commands/browser.js';
+import { profilesCommand } from './commands/profiles.js';
 
 export {
   setupCommand,
@@ -15,6 +16,7 @@ export {
   doctorCommand,
   pairCommand,
   browserCommand,
+  profilesCommand,
   type CommandContext,
 };
 
@@ -32,6 +34,7 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
     stdout('  pair     Display phone pairing QR code and direct link');
     stdout('  daemon   Run the local execution daemon');
     stdout('  browser  Run headless browser automation bridge with live screen streaming');
+    stdout('  profiles List detected Chrome browser profiles and launch commands');
     stdout('  setup    Set up Cloudflare resources and pair this computer');
     stdout('  deploy   Deploy backend Worker and phone PWA to Cloudflare');
     stdout('  doctor   Check system prerequisites and connectivity');
@@ -49,6 +52,10 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
 
   if (command === 'browser') {
     return await browserCommand(args, context);
+  }
+
+  if (command === 'profiles') {
+    return await profilesCommand(args, context);
   }
 
   if (command === 'setup') {

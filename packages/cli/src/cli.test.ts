@@ -47,6 +47,7 @@ describe('CLI command dispatcher', () => {
     const code = await main(['doctor'], { stdout: (msg) => logs.push(msg) });
     expect(code).toBe(0);
     expect(logs.some((l) => l.includes('health checks'))).toBe(true);
+    expect(logs.some((l) => l.includes('Chrome profiles:'))).toBe(true);
   }, 10000);
 
   it('prints help on --help or no command', async () => {
@@ -73,5 +74,40 @@ describe('CLI command dispatcher', () => {
     const code = await main(['foobar'], { stderr: (msg) => errors.push(msg) });
     expect(code).toBe(1);
     expect(errors.some((e) => e.includes('Unknown command: foobar'))).toBe(true);
+  });
+
+  it('dispatches profiles command', async () => {
+    const logs: string[] = [];
+    const code = await main(['profiles'], { stdout: (msg) => logs.push(msg) });
+    expect(code).toBe(0);
+    expect(logs.some((l) => l.includes('Chrome Browser Profiles'))).toBe(true);
+    expect(logs.some((l) => l.includes('Debugger Status:'))).toBe(true);
+  });
+
+  it('lists profiles command in help output', async () => {
+    const logs: string[] = [];
+    const code = await main(['--help'], { stdout: (msg) => logs.push(msg) });
+    expect(code).toBe(0);
+    expect(logs.some((l) => l.includes('profiles'))).toBe(true);
+  });
+
+  it('passes custom profile name to ChromeManager on start', async () => {
+    const logs: string[] = [];
+    const context: any = { stdout: (msg: string) => logs.push(msg) };
+    const code = await main(['start', '--no-clamshell', '--once', '--browser-profile=FLCC'], context);
+    expect(code).toBe(0);
+    expect(context.chromeManager).toBeDefined();
+    expect(context.chromeManager.getProfile()).toBe('FLCC');
+    expect(context.chromeManager.getMode()).toBe('active');
+  });
+
+  it('passes custom profile name to ChromeManager on daemon', async () => {
+    const logs: string[] = [];
+    const context: any = { stdout: (msg: string) => logs.push(msg) };
+    const code = await main(['daemon', '--once', '--browser-profile=FLCC'], context);
+    expect(code).toBe(0);
+    expect(context.chromeManager).toBeDefined();
+    expect(context.chromeManager.getProfile()).toBe('FLCC');
+    expect(context.chromeManager.getMode()).toBe('active');
   });
 });
