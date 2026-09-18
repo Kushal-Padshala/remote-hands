@@ -72,7 +72,7 @@ export class TaskRoom {
           } catch {}
         }
       } else if (message.type === 'approval.decided') {
-        if (!meta.role || meta.role === 'daemon') {
+        if (!meta.role || meta.role === 'daemon' || meta.role === 'phone') {
           try {
             clientWs.send(payload);
           } catch {}
@@ -87,7 +87,14 @@ export class TaskRoom {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    if (request.method === 'POST' && (url.pathname === '/event' || url.pathname.endsWith('/events') || url.pathname.endsWith('/frame') || url.pathname.endsWith('/frames'))) {
+    if (
+      request.method === 'POST' &&
+      (url.pathname === '/event' ||
+        url.pathname === '/broadcast' ||
+        url.pathname.endsWith('/events') ||
+        url.pathname.endsWith('/frame') ||
+        url.pathname.endsWith('/frames'))
+    ) {
       try {
         const body = (await request.json()) as RealtimeMessage;
         this.relayMessage(null, body);

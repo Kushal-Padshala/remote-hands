@@ -62,7 +62,7 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
       await input.chromeManager.ensureRunning().catch(() => {});
     }
   }
-  const canCaptureFrames = running.kind !== 'coding';
+  const canCaptureFrames = true;
 
   let frameStream: ThrottledFrameStream | null = null;
   const frameSource = input.frameSource ?? new DefaultFrameSource({
@@ -87,6 +87,9 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
     });
 
     if (isBrowserKind) {
+      if (frameSource instanceof DefaultFrameSource) {
+        frameSource.setBrowserActive(true);
+      }
       frameStream.start(1000);
     }
   }
@@ -121,8 +124,11 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
             );
             if (
               tool.includes('browser') ||
-              cmd.includes('browser-harness') ||
-              cmd.includes('open http')
+              tool.includes('screen') ||
+              cmd.includes('browser') ||
+              cmd.includes('rh') ||
+              cmd.includes('open http') ||
+              cmd.includes('chrome')
             ) {
               if (frameSource instanceof DefaultFrameSource) {
                 frameSource.setBrowserActive(true);

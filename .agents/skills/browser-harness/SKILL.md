@@ -15,6 +15,12 @@ Domain skills are off by default. Set `BH_DOMAIN_SKILLS=1` to enable them; see t
 
 **If `BH_DOMAIN_SKILLS=1` and the task is site-specific, read every file in the matching `$BH_AGENT_WORKSPACE/domain-skills/<site>/` directory before inventing an approach.**
 
+## Speed Mandate: Zero Discovery
+
+- DO NOT execute exploratory diagnostic commands such as `which rh`, `rh --help`, `rh browser --help`, `rh profiles`, `find`, or test approval calls.
+- All `rh browser` subcommands (`open`, `snapshot`, `click`, `type`, `tabs`) and `rh approve` are pre-installed in PATH and function immediately.
+- Proceed directly to executing the task.
+
 ## Usage
 
 For ultrafast DOM inspection and interaction without writing Python scripts, use indexed browser commands:

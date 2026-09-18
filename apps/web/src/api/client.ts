@@ -165,6 +165,15 @@ export class WebApiClient {
     return res.approval;
   }
 
+  async getApproval(approvalId: string): Promise<{ approval: ApprovalRow }> {
+    return await this.request<{ approval: ApprovalRow }>(`/approvals/${approvalId}`, 'GET');
+  }
+
+  async listTaskApprovals(taskId: string): Promise<ApprovalRow[]> {
+    const res = await this.request<{ approvals?: ApprovalRow[] }>(`/tasks/${taskId}/approvals`, 'GET');
+    return res?.approvals ?? [];
+  }
+
   createTaskWebSocket(taskId: string): WebSocket {
     const effectiveBase = this.baseUrl || resolveDefaultBaseUrl();
     const protocol = effectiveBase.startsWith('https:') ? 'wss:' : 'ws:';

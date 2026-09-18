@@ -32,6 +32,7 @@ export function cleanupStaleFrameFiles(cutoffTimeMs?: number): void {
 export interface DefaultFrameSourceOptions {
   taskStartTime?: number | undefined;
   browserActive?: boolean | undefined;
+  candidatePaths?: string[] | undefined;
 }
 
 export class DefaultFrameSource implements FrameSource {
@@ -43,6 +44,7 @@ export class DefaultFrameSource implements FrameSource {
   private messageSeq = 0;
   private taskStartTime: number;
   private browserActive: boolean;
+  private candidatePaths: string[];
   private initialTargetIds = new Set<string>();
   private initialUrls = new Map<string, string>();
   private initialRecorded = false;
@@ -50,7 +52,10 @@ export class DefaultFrameSource implements FrameSource {
   constructor(options?: DefaultFrameSourceOptions) {
     this.taskStartTime = options?.taskStartTime ?? Date.now();
     this.browserActive = options?.browserActive ?? false;
-    cleanupStaleFrameFiles(this.taskStartTime);
+    this.candidatePaths = options?.candidatePaths ?? CANDIDATE_FRAME_PATHS;
+    if (!options?.candidatePaths) {
+      cleanupStaleFrameFiles(this.taskStartTime);
+    }
   }
 
   setBrowserActive(active: boolean): void {
@@ -107,7 +112,7 @@ export class DefaultFrameSource implements FrameSource {
 
   private async captureFromFiles(): Promise<BrowserFrame | null | undefined> {
     const now = Date.now();
-    for (const candidate of CANDIDATE_FRAME_PATHS) {
+    for (const candidate of this.candidatePaths) {
       try {
         if (!fs.existsSync(candidate)) continue;
         const stat = await fs.promises.stat(candidate);
@@ -203,6 +208,17 @@ export class DefaultFrameSource implements FrameSource {
             break;
           }
         }
+      }
+
+      if (!target && this.browserActive) {
+        const eligiblePages = pages.filter(
+          (p) =>
+            p.url &&
+            !p.url.startsWith('chrome://') &&
+            !p.url.startsWith('devtools://') &&
+            !p.url.startsWith('chrome-extension://')
+        );
+        target = eligiblePages[eligiblePages.length - 1] ?? pages[pages.length - 1];
       }
 
       if (!target?.webSocketDebuggerUrl) return undefined;

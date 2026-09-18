@@ -22,7 +22,8 @@ export function inferTaskKind(prompt: string): TaskKind {
     'https://', 'http://', 'www.',
     '.com', '.org', '.io', '.net', '.dev', '.app', '.ai',
     'browse ', 'browser', 'navigate to', 'visit ', 'open url',
-    'website', 'webpage', 'web page',
+    'website', 'webpage', 'web page', 'x.com', 'twitter.com',
+    'twitter', 'tweet', 'retweet', 'x post', 'on x', 'personal profile',
   ];
   for (const p of explicitBrowserPatterns) {
     if (lower.includes(p)) return 'browser';
@@ -30,14 +31,15 @@ export function inferTaskKind(prompt: string): TaskKind {
 
   const codingWords = [
     'fix', 'bug', 'code', 'file', 'refactor', 'test', 'build', 'compile',
-    'git', 'commit', 'branch', 'merge', 'pr ', 'pull request', 'repo',
+    'git', 'commit', 'branch', 'merge', 'pr', 'pull request', 'repo',
     'npm', 'pnpm', 'yarn', 'pip', 'python', 'typescript', 'javascript',
     'css', 'html', 'component', 'function', 'method', 'variable', 'import',
     'export', 'error', 'exception', 'stack trace', 'terminal', 'shell',
     'script', 'bash', 'zsh', 'lint', 'prettier', 'vitest', 'jest',
   ];
   for (const w of codingWords) {
-    if (lower.includes(w)) return 'coding';
+    const regex = new RegExp(`\\b${w}\\b`, 'i');
+    if (regex.test(prompt)) return 'coding';
   }
 
   const genericBrowserWords = [
@@ -582,6 +584,17 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           }
         }
       } catch {}
+
+      try {
+        const approvals = await apiClient.listTaskApprovals(currentTaskId!);
+        if (closed) return;
+        const pending = approvals.find((a) => a.decision === 'pending');
+        if (pending) {
+          setActiveApproval(pending);
+        } else {
+          setActiveApproval((prev) => (prev && prev.decision === 'pending' ? null : prev));
+        }
+      } catch {}
     }
 
     fetchEventsPoll();
@@ -626,9 +639,9 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             id: msg.approval_id,
             task_id: msg.task_id,
             owner_id: task?.owner_id || '',
-            action_kind: 'publish',
-            summary: 'Dangerous action requires confirmation',
-            risk: 'high',
+            action_kind: ((msg as any).action_kind || 'publish') as any,
+            summary: (msg as any).summary || 'Action requires confirmation',
+            risk: ((msg as any).risk || 'high') as any,
             tool_payload: {},
             frame_path: null,
             decision: 'pending',
@@ -636,6 +649,13 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             expires_at: new Date(Date.now() + 60000).toISOString(),
             created_at: new Date().toISOString(),
           });
+          apiClient.getApproval(msg.approval_id).then((res) => {
+            if (res.approval) {
+              setActiveApproval(res.approval);
+            }
+          }).catch(() => {});
+        } else if (msg.type === 'approval.decided') {
+          setActiveApproval((prev) => (prev?.id === msg.approval_id ? null : prev));
         }
       };
     } catch {}
@@ -896,7 +916,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             </div>
           </div>
         </div>
-        {taskKind !== 'coding' && frameBase64 ? (
+        {frameBase64 ? (
           <button className="chat-nav-btn" onClick={() => setShowFrame(!showFrame)}>
             <span aria-hidden="true">📺</span>
             <span>{showFrame ? 'Hide' : 'Screen'}</span>
@@ -994,7 +1014,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           </div>
         )}
 
-        {taskKind !== 'coding' && showFrame && frameBase64 && (
+        {showFrame && frameBase64 && (
           <div className="chat-inline-frame" style={{ margin: '8px 0 12px 0' }}>
             <div className="frame-meta-bar">
               <span className="frame-profile-badge">🌐 Logged-in Chrome Profile</span>

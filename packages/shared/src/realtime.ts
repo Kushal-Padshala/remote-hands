@@ -27,6 +27,9 @@ export const approvalRequestedMessageSchema = z.object({
   type: z.literal('approval.requested'),
   task_id: z.string().uuid(),
   approval_id: z.string().uuid(),
+  summary: z.string().optional(),
+  action_kind: z.string().optional(),
+  risk: z.string().optional(),
 });
 
 export const approvalDecidedMessageSchema = z.object({

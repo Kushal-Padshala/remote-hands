@@ -4,8 +4,8 @@ import { DefaultFrameSource, cleanupStaleFrameFiles } from './screen-capture.js'
 
 describe('DefaultFrameSource', () => {
   it('reads recent screenshot file when present', async () => {
-    const source = new DefaultFrameSource({ taskStartTime: Date.now() - 1000 });
-    const testPath = '/tmp/rh_screen_frame.jpg';
+    const testPath = `/tmp/rh_test_frame_${Date.now()}_1.jpg`;
+    const source = new DefaultFrameSource({ taskStartTime: Date.now() - 1000, candidatePaths: [testPath] });
     const fakeData = Buffer.from('fake-jpeg-image-bytes');
     await fs.promises.writeFile(testPath, fakeData);
 
@@ -22,15 +22,15 @@ describe('DefaultFrameSource', () => {
   });
 
   it('ignores candidate files modified before task start time', async () => {
-    const testPath = '/tmp/rh_screen_frame.jpg';
+    const testPath = `/tmp/rh_test_frame_${Date.now()}_2.jpg`;
     const fakeData = Buffer.from('old-stale-image');
     await fs.promises.writeFile(testPath, fakeData);
 
     try {
       const pastTime = Date.now() - 5000;
-      await fs.promises.utimes(testPath, pastTime / 1000, pastTime / 1000);
+      await fs.promises.utimes(testPath, pastTime / 1000, pastTime / 1000).catch(() => {});
 
-      const source = new DefaultFrameSource({ taskStartTime: Date.now() });
+      const source = new DefaultFrameSource({ taskStartTime: Date.now(), candidatePaths: [testPath] });
       const frame = await source.captureFrame();
       expect(frame).toBeNull();
     } finally {
