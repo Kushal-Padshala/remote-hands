@@ -4,7 +4,7 @@ import { DefaultFrameSource, cleanupStaleFrameFiles } from './screen-capture.js'
 
 describe('DefaultFrameSource', () => {
   it('reads recent screenshot file when present', async () => {
-    const source = new DefaultFrameSource();
+    const source = new DefaultFrameSource({ taskStartTime: Date.now() - 1000 });
     const testPath = '/tmp/rh_screen_frame.jpg';
     const fakeData = Buffer.from('fake-jpeg-image-bytes');
     await fs.promises.writeFile(testPath, fakeData);
