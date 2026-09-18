@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import type { MachineRow, TaskKind, TaskMode } from '@remote-hands/shared';
-import { ThinkingOrb } from 'thinking-orbs';
+import { SafeThinkingOrb as ThinkingOrb } from '../components/SafeThinkingOrb.js';
 import { useVoiceInput } from '../hooks/useVoiceInput.js';
 
 export interface NewTaskScreenProps {

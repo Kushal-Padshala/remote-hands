@@ -11,7 +11,7 @@ import { FrameViewer } from '../components/FrameViewer.js';
 import { ApprovalSheet } from '../components/ApprovalSheet.js';
 import { StepsDropdown, type ChatStep } from '../components/StepsDropdown.js';
 import { MarkdownView } from '../components/MarkdownView.js';
-import { ThinkingOrb } from 'thinking-orbs';
+import { SafeThinkingOrb as ThinkingOrb } from '../components/SafeThinkingOrb.js';
 import { VoiceButton } from '../components/VoiceButton.js';
 import { useVoiceInput } from '../hooks/useVoiceInput.js';
 
@@ -910,7 +910,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         {messages.length === 0 && (
           <div className="chat-welcome-state">
             <div className="chat-welcome-icon">
-              <ThinkingOrb state="breathing" size={56} theme="dark" role="presentation" />
+              <ThinkingOrb state="breathing" size={64} theme="dark" role="presentation" />
             </div>
             <h3 className="chat-welcome-title">New Task on {resolvedMachineName}</h3>
             <p className="chat-welcome-desc">

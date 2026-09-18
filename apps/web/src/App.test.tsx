@@ -4,6 +4,8 @@ import type { MachineRow, TaskRow } from '@remote-hands/shared';
 import { App } from './App.js';
 import { LiveTaskScreen, inferTaskKind } from './screens/LiveTaskScreen.js';
 import { apiClient } from './api/client.js';
+import { ErrorBoundary } from './components/ErrorBoundary.js';
+import { SafeThinkingOrb } from './components/SafeThinkingOrb.js';
 
 class MockSocket {
   onopen: (() => void) | null = null;
@@ -503,5 +505,30 @@ describe('Web App Workflow', () => {
         }),
       );
     });
+  });
+
+  it('renders fallback UI gracefully when child component throws', () => {
+    const BadComponent = () => {
+      throw new Error('Test component crashed');
+    };
+
+    render(
+      <ErrorBoundary fallbackTitle="Custom error title">
+        <BadComponent />
+      </ErrorBoundary>,
+    );
+
+    expect(screen.getByText('Custom error title')).toBeDefined();
+    expect(screen.getByText('Test component crashed')).toBeDefined();
+    expect(screen.getByText('Try Again')).toBeDefined();
+    expect(screen.getByText('Reload')).toBeDefined();
+  });
+
+  it('renders SafeThinkingOrb fallback on canvas error without crashing', () => {
+    const { container } = render(
+      <SafeThinkingOrb state="breathing" size={64} role="presentation" />,
+    );
+
+    expect(container).toBeDefined();
   });
 });

@@ -9,6 +9,7 @@ import { PairingTab } from './screens/PairingTab.js';
 import { HistoryTab } from './screens/HistoryTab.js';
 import { PairingModal } from './components/PairingModal.js';
 import { InstallModal } from './components/InstallModal.js';
+import { ErrorBoundary } from './components/ErrorBoundary.js';
 
 export function App() {
   const [machines, setMachines] = useState<MachineRow[]>(() => {
@@ -346,16 +347,25 @@ export function App() {
         )}
 
         {currentScreen === 'live-task' && (selectedMachine || activeTask) && (
-          <LiveTaskScreen
-            task={activeTask ?? undefined}
-            machine={selectedMachine ?? undefined}
-            machineName={selectedMachine?.name}
-            onBack={() => {
+          <ErrorBoundary
+            fallbackTitle="Unable to load task session"
+            onReset={() => {
               setActiveTask(null);
               setSelectedMachine(null);
               setCurrentScreen('machines');
             }}
-          />
+          >
+            <LiveTaskScreen
+              task={activeTask ?? undefined}
+              machine={selectedMachine ?? undefined}
+              machineName={selectedMachine?.name}
+              onBack={() => {
+                setActiveTask(null);
+                setSelectedMachine(null);
+                setCurrentScreen('machines');
+              }}
+            />
+          </ErrorBoundary>
         )}
       </main>
 

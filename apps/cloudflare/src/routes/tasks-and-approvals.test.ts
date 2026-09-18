@@ -398,7 +398,15 @@ describe('tasks and approvals route lifecycle', () => {
       }),
       env,
     );
-    expect(daemonPhoneSessionRes.status).toBe(403);
+    expect(daemonPhoneSessionRes.status).toBe(201);
+
+    const unauthPhoneSessionRes = await worker.fetch(
+      new Request('https://example.com/pairing/phone-session', {
+        method: 'POST',
+      }),
+      env,
+    );
+    expect(unauthPhoneSessionRes.status).toBe(401);
 
     const reSetupRes = await worker.fetch(
       new Request('https://example.com/setup/owner', {
