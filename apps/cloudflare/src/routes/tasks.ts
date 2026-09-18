@@ -17,6 +17,7 @@ import {
 
 import { requireOwnerSession, requireSession } from '../auth/session.js';
 import { TasksRepository } from '../d1/tasks-repository.js';
+import { MachinesRepository } from '../d1/machines-repository.js';
 import { getTaskRoomStub, getMachineRoomStub } from '../realtime/room-router.js';
 import { ForbiddenError, NotFoundError } from '../http/errors.js';
 import { jsonOk } from '../http/json.js';
@@ -46,6 +47,12 @@ export async function handleListTasks(request: Request, env: Env): Promise<Respo
 export async function handleCreateTask(request: Request, env: Env): Promise<Response> {
   const session = await requireOwnerSession(request, env.DB);
   const body = createTaskRequestSchema.parse(await request.json());
+
+  const machinesRepo = new MachinesRepository(env.DB);
+  const machine = await machinesRepo.getById(body.machine_id);
+  if (!machine || machine.owner_id !== session.owner_id) {
+    throw new NotFoundError('Machine not found');
+  }
 
   const task = createTask({
     ownerId: session.owner_id,
@@ -106,7 +113,7 @@ export async function handleClaimNextTask(request: Request, env: Env): Promise<R
   }
 
   const repo = new TasksRepository(env.DB);
-  const queued = await repo.listQueuedForMachine(body.machine_id);
+  const queued = await repo.listQueuedForMachine(body.machine_id, session.owner_id);
   if (queued.length === 0) {
     return jsonOk({ task: null });
   }
@@ -127,7 +134,7 @@ export async function handleClaimTask(taskId: string, request: Request, env: Env
   const repo = new TasksRepository(env.DB);
   const task = await repo.getById(taskId);
 
-  if (!task || task.owner_id !== session.owner_id) {
+  if (!task || task.owner_id !== session.owner_id || task.machine_id !== session.machine_id) {
     throw new NotFoundError('Task not found');
   }
 

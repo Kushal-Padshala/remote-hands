@@ -2,6 +2,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { isSafeBrowserUrl } from '@remote-hands/shared';
 
 export type ChromeProfileMode = 'active' | 'dedicated' | 'none';
 
@@ -223,7 +224,7 @@ export class ChromeManager {
     if (this.resolvedProfile?.directory) {
       args.push(`--profile-directory=${this.resolvedProfile.directory}`);
     }
-    if (url) {
+    if (url && isSafeBrowserUrl(url)) {
       args.push(url);
     }
     return args;

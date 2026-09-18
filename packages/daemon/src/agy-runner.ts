@@ -1,4 +1,4 @@
-import type { Task } from '@remote-hands/shared';
+import { isSafeWorkspacePath, type Task } from '@remote-hands/shared';
 import { spawn } from 'node:child_process';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -418,7 +418,7 @@ export class ProcessAgentRunner implements AgentRunner {
       task.effort = hermesContext.recommendedEffort;
     }
 
-    if (task.workspace_path) {
+    if (task.workspace_path && isSafeWorkspacePath(task.workspace_path).allowed) {
       try {
         const settingsPath = path.join(os.homedir(), '.gemini/antigravity-cli/settings.json');
         if (fs.existsSync(settingsPath)) {

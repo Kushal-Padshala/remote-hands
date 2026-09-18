@@ -75,7 +75,14 @@ export class TasksRepository {
     return res.results ?? [];
   }
 
-  async listQueuedForMachine(machineId: string): Promise<TaskRow[]> {
+  async listQueuedForMachine(machineId: string, ownerId?: string): Promise<TaskRow[]> {
+    if (ownerId) {
+      const res = await this.db
+        .prepare(`SELECT * FROM tasks WHERE machine_id = ? AND owner_id = ? AND status = 'queued' ORDER BY created_at ASC`)
+        .bind(machineId, ownerId)
+        .all<TaskRow>();
+      return res.results ?? [];
+    }
     const res = await this.db
       .prepare(`SELECT * FROM tasks WHERE machine_id = ? AND status = 'queued' ORDER BY created_at ASC`)
       .bind(machineId)

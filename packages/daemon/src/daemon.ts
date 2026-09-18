@@ -1,4 +1,4 @@
-import type { TaskStatus } from '@remote-hands/shared';
+import { isSafeWorkspacePath, type TaskStatus } from '@remote-hands/shared';
 import type { AgentRunner } from './agy-runner.js';
 import type { DaemonConfig } from './config.js';
 import type { RuntimeMetadata } from './runtime.js';
@@ -39,6 +39,19 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
 
   const running = await input.store.markTaskRunning(claimed.id);
   await input.store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
+
+  if (running.workspace_path) {
+    const check = isSafeWorkspacePath(running.workspace_path, input.config.workspaceAllowlist);
+    if (!check.allowed) {
+      const error = check.reason || 'Workspace path rejected by security policy';
+      await input.store.appendEvent(running.id, {
+        kind: 'error',
+        payload: { message: error, fatal: true },
+      });
+      await input.store.failTask(running.id, { error });
+      return { claimed: true, taskId: running.id, status: 'failed' };
+    }
+  }
 
   const taskStartTime = Date.now();
   cleanupStaleFrameFiles(taskStartTime);

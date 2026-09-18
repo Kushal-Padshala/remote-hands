@@ -61,6 +61,13 @@ describe('ChromeManager', () => {
     expect(args).toContain('https://github.com');
   });
 
+  it('rejects command flag injection in launch url', () => {
+    const manager = new ChromeManager({ mode: 'dedicated', port: 9222 });
+    const args = manager.buildLaunchArgs('--disable-web-security');
+    expect(args).not.toContain('--disable-web-security');
+    expect(args.some((a) => a === '--disable-web-security')).toBe(false);
+  });
+
   it('detects debugger availability when endpoint responds', async () => {
     const manager = new ChromeManager({ port: 9222 });
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({

@@ -60,8 +60,14 @@ function createMockD1(): D1Database {
           });
           return { success: true, results: [] as T[] };
         }
+        if (q.startsWith('SELECT * FROM machines WHERE id = ?')) {
+          return { success: true, results: tables.machines.filter((m) => m.id === bound[0]) as T[] };
+        }
         if (q.startsWith('SELECT * FROM machines WHERE owner_id = ?')) {
           return { success: true, results: tables.machines.filter((m) => m.owner_id === bound[0]) as T[] };
+        }
+        if (q.startsWith("SELECT id FROM sessions WHERE kind = 'phone'")) {
+          return { success: true, results: tables.sessions.filter((s) => s.kind === 'phone') as T[] };
         }
         if (q.startsWith('INSERT INTO tasks')) {
           tables.tasks.push({
@@ -93,6 +99,12 @@ function createMockD1(): D1Database {
         }
         if (q.startsWith('SELECT * FROM tasks WHERE conversation_id = ?')) {
           return { success: true, results: tables.tasks.filter((t) => t.conversation_id === bound[0]) as T[] };
+        }
+        if (q.startsWith("SELECT * FROM tasks WHERE machine_id = ? AND owner_id = ? AND status = 'queued'")) {
+          return { success: true, results: tables.tasks.filter((t) => t.machine_id === bound[0] && t.owner_id === bound[1] && t.status === 'queued') as T[] };
+        }
+        if (q.startsWith("SELECT * FROM tasks WHERE machine_id = ? AND status = 'queued'")) {
+          return { success: true, results: tables.tasks.filter((t) => t.machine_id === bound[0] && t.status === 'queued') as T[] };
         }
         if (q.startsWith('SELECT * FROM tasks WHERE owner_id = ?')) {
           return { success: true, results: tables.tasks.filter((t) => t.owner_id === bound[0]) as T[] };
@@ -361,5 +373,41 @@ describe('tasks and approvals route lifecycle', () => {
     expect(listOtherMachineRes.status).toBe(200);
     const listOtherData = (await listOtherMachineRes.json()) as any;
     expect(listOtherData.tasks).toHaveLength(0);
+
+    const unauthorizedCreateRes = await worker.fetch(
+      new Request('https://example.com/tasks', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${phoneToken}`,
+        },
+        body: JSON.stringify({
+          machine_id: '99999999-9999-4999-8999-999999999999',
+          prompt: 'Do bad things',
+          kind: 'coding',
+        }),
+      }),
+      env,
+    );
+    expect(unauthorizedCreateRes.status).toBe(404);
+
+    const daemonPhoneSessionRes = await worker.fetch(
+      new Request('https://example.com/pairing/phone-session', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${daemonToken}` },
+      }),
+      env,
+    );
+    expect(daemonPhoneSessionRes.status).toBe(403);
+
+    const reSetupRes = await worker.fetch(
+      new Request('https://example.com/setup/owner', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ owner_secret: 'new-secret' }),
+      }),
+      env,
+    );
+    expect(reSetupRes.status).toBe(409);
   });
 });

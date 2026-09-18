@@ -210,6 +210,34 @@ describe('runDaemonOnce', () => {
 
     expect(ensureRunningCalled).toBe(true);
   });
+
+  it('rejects unsafe workspace path and marks task failed without executing', async () => {
+    const store = new MemoryTaskStore({
+      machines: [machine()],
+      tasks: [task({ id: 'unsafe-task-1', workspace_path: '/etc/shadow' })],
+    });
+
+    let runnerExecuted = false;
+    const runner: AgentRunner = {
+      async run() {
+        runnerExecuted = true;
+        return { events: [], summary: 'Done', conversationId: null };
+      },
+    };
+
+    const result = await runDaemonOnce({
+      userId,
+      config,
+      runtime,
+      store,
+      runner,
+    });
+
+    expect(result).toEqual({ claimed: true, taskId: 'unsafe-task-1', status: 'failed' });
+    expect(runnerExecuted).toBe(false);
+    expect(store.taskById('unsafe-task-1')?.status).toBe('failed');
+    expect(store.taskById('unsafe-task-1')?.error).toContain('forbidden');
+  });
 });
 
 

@@ -99,6 +99,11 @@ export function createInMemoryD1(): D1Database {
           return { success: true, results: list as T[] };
         }
 
+        if (q.startsWith("SELECT * FROM tasks WHERE machine_id = ? AND owner_id = ? AND status = 'queued'")) {
+          const list = tables.tasks.filter((t) => t.machine_id === bound[0] && t.owner_id === bound[1] && t.status === 'queued');
+          return { success: true, results: list as T[] };
+        }
+
         if (q.startsWith("SELECT * FROM tasks WHERE machine_id = ? AND status = 'queued'")) {
           const list = tables.tasks.filter((t) => t.machine_id === bound[0] && t.status === 'queued');
           return { success: true, results: list as T[] };
@@ -220,6 +225,11 @@ export function createInMemoryD1(): D1Database {
             created_at: bound[6],
           });
           return { success: true, results: [] as T[] };
+        }
+
+        if (q.startsWith("SELECT id FROM sessions WHERE kind = 'phone'")) {
+          const list = tables.sessions.filter((s) => s.kind === 'phone');
+          return { success: true, results: list as T[] };
         }
 
         if (q.startsWith('SELECT * FROM sessions WHERE token_hash = ?')) {

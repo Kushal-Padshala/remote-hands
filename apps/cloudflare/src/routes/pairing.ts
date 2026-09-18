@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import {
   startPairingRequestSchema,
   claimPairingRequestSchema,
+  timingSafeEqualStr,
 } from '@remote-hands/shared';
 import {
   generatePairingCode,
@@ -64,7 +65,7 @@ export async function handleClaimPairing(request: Request, env: Env): Promise<Re
     if (parts.length === 2) {
       const [salt, expectedHash] = parts;
       const computedHash = await hashPairingCode(body.pairing_code, salt);
-      if (computedHash === expectedHash && canClaimPairingToken(token, now)) {
+      if (timingSafeEqualStr(computedHash, expectedHash) && canClaimPairingToken(token, now)) {
         matchedToken = token;
         break;
       }
@@ -119,7 +120,7 @@ export async function handleClaimPairing(request: Request, env: Env): Promise<Re
 }
 
 export async function handleCreatePhoneSession(request: Request, env: Env): Promise<Response> {
-  const session = await requireSession(request, env.DB);
+  const session = await requireOwnerSession(request, env.DB);
   const now = new Date();
   const rawSessionToken = createSessionToken();
   const tokenHash = await hashSessionToken(rawSessionToken);
