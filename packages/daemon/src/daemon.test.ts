@@ -238,6 +238,181 @@ describe('runDaemonOnce', () => {
     expect(store.taskById('unsafe-task-1')?.status).toBe('failed');
     expect(store.taskById('unsafe-task-1')?.error).toContain('forbidden');
   });
+
+  it('handles multi-turn approval flow when user approves on mobile', async () => {
+    const store = new MemoryTaskStore({
+      machines: [machine()],
+      tasks: [task({ id: 'approval-task-1', prompt: 'Post to X: Hello world' })],
+    });
+
+    const approvalId = 'appr-1111-2222';
+    store.addApproval({
+      id: approvalId,
+      task_id: 'approval-task-1',
+      owner_id: userId,
+      action_kind: 'publish',
+      summary: 'Post to X: Hello world',
+      risk: 'high',
+      tool_payload: {},
+      frame_path: null,
+      decision: 'pending',
+      decided_at: null,
+      expires_at: new Date(Date.now() + 60000).toISOString(),
+      created_at: new Date().toISOString(),
+    });
+
+    const receivedPrompts: string[] = [];
+    let turnCount = 0;
+    const runner: AgentRunner = {
+      async run(t) {
+        turnCount++;
+        receivedPrompts.push(t.prompt);
+        if (turnCount === 1) {
+          setTimeout(() => {
+            store.decideApproval(approvalId, 'approved').catch(() => {});
+          }, 50);
+          return {
+            events: [{ kind: 'agent_text', payload: { text: 'Drafted post, waiting for approval' } }],
+            summary: 'Drafted post',
+            conversationId: 'conv-xyz',
+          };
+        }
+        return {
+          events: [{ kind: 'agent_text', payload: { text: 'Clicked post button and verified' } }],
+          summary: 'Published post to X',
+          conversationId: 'conv-xyz',
+        };
+      },
+    };
+
+    const result = await runDaemonOnce({
+      userId,
+      config,
+      runtime,
+      store,
+      runner,
+    });
+
+    expect(result).toEqual({ claimed: true, taskId: 'approval-task-1', status: 'done' });
+    expect(turnCount).toBe(2);
+    expect(receivedPrompts[0]).toBe('Post to X: Hello world');
+    expect(receivedPrompts[1]).toContain('[HUMAN APPROVAL GRANTED]');
+    expect(receivedPrompts[1]).toContain('Post to X: Hello world');
+    expect(store.taskById('approval-task-1')?.status).toBe('done');
+    expect(store.taskById('approval-task-1')?.conversation_id).toBe('conv-xyz');
+
+    const events = store.eventsForTask('approval-task-1');
+    const statuses = events.filter((e) => e.kind === 'status').map((e) => (e.payload as any).status);
+    expect(statuses).toContain('awaiting_approval');
+    expect(statuses).toContain('running');
+    expect(statuses).toContain('done');
+  });
+
+  it('handles multi-turn rejection flow when user rejects on mobile', async () => {
+    const store = new MemoryTaskStore({
+      machines: [machine()],
+      tasks: [task({ id: 'rejection-task-1', prompt: 'Post to X: Buy crypto' })],
+    });
+
+    const approvalId = 'appr-reject-1';
+    store.addApproval({
+      id: approvalId,
+      task_id: 'rejection-task-1',
+      owner_id: userId,
+      action_kind: 'publish',
+      summary: 'Post to X: Buy crypto',
+      risk: 'high',
+      tool_payload: {},
+      frame_path: null,
+      decision: 'pending',
+      decided_at: null,
+      expires_at: new Date(Date.now() + 60000).toISOString(),
+      created_at: new Date().toISOString(),
+    });
+
+    const receivedPrompts: string[] = [];
+    let turnCount = 0;
+    const runner: AgentRunner = {
+      async run(t) {
+        turnCount++;
+        receivedPrompts.push(t.prompt);
+        if (turnCount === 1) {
+          setTimeout(() => {
+            store.decideApproval(approvalId, 'rejected', 'Never post about crypto').catch(() => {});
+          }, 50);
+          return {
+            events: [],
+            summary: 'Awaiting approval',
+            conversationId: 'conv-crypto',
+          };
+        }
+        return {
+          events: [],
+          summary: 'Task adjusted per rejection feedback',
+          conversationId: 'conv-crypto',
+        };
+      },
+    };
+
+    const result = await runDaemonOnce({
+      userId,
+      config,
+      runtime,
+      store,
+      runner,
+    });
+
+    expect(result).toEqual({ claimed: true, taskId: 'rejection-task-1', status: 'done' });
+    expect(turnCount).toBe(2);
+    expect(receivedPrompts[1]).toContain('[HUMAN APPROVAL REJECTED]');
+    expect(receivedPrompts[1]).toContain('Never post about crypto');
+  });
+
+  it('fails task when pending approval times out without decision', async () => {
+    const store = new MemoryTaskStore({
+      machines: [machine()],
+      tasks: [task({ id: 'timeout-task-1', prompt: 'Post to X' })],
+    });
+
+    const approvalId = 'appr-timeout-1';
+    store.addApproval({
+      id: approvalId,
+      task_id: 'timeout-task-1',
+      owner_id: userId,
+      action_kind: 'publish',
+      summary: 'Post to X',
+      risk: 'high',
+      tool_payload: {},
+      frame_path: null,
+      decision: 'pending',
+      decided_at: null,
+      expires_at: new Date(Date.now() + 100).toISOString(),
+      created_at: new Date().toISOString(),
+      timeout_ms: 50,
+    } as any);
+
+    const runner: AgentRunner = {
+      async run() {
+        return {
+          events: [],
+          summary: 'Drafted',
+          conversationId: 'conv-to',
+        };
+      },
+    };
+
+    const result = await runDaemonOnce({
+      userId,
+      config,
+      runtime,
+      store,
+      runner,
+    });
+
+    expect(result).toEqual({ claimed: true, taskId: 'timeout-task-1', status: 'failed' });
+    expect(store.taskById('timeout-task-1')?.status).toBe('failed');
+    expect(store.taskById('timeout-task-1')?.error).toContain('timed out');
+  });
 });
 
 

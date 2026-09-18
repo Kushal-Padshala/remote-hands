@@ -6,6 +6,7 @@ import {
   cancelTaskResponseSchema,
   createApprovalResponseSchema,
   decideApprovalResponseSchema,
+  listApprovalsResponseSchema,
   taskResponseSchema,
   type TaskRow,
   type TaskEventRow,
@@ -168,6 +169,18 @@ export class CloudflareControlPlaneClient {
     const data = await this.request<unknown>(`/approvals/${approvalId}/decision`, 'POST', input);
     const parsed = decideApprovalResponseSchema.parse(data);
     return parsed.approval;
+  }
+
+  async listTaskApprovals(taskId: string): Promise<ApprovalRow[]> {
+    const data = await this.request<unknown>(`/tasks/${taskId}/approvals`, 'GET');
+    const parsed = listApprovalsResponseSchema.parse(data);
+    return parsed.approvals;
+  }
+
+  async markTaskAwaitingApproval(taskId: string): Promise<TaskRow> {
+    const data = await this.request<unknown>(`/tasks/${taskId}/awaiting_approval`, 'POST');
+    const parsed = taskResponseSchema.parse(data);
+    return parsed.task;
   }
 
   async heartbeat(machineId: string): Promise<MachineRow> {

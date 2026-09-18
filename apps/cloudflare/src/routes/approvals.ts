@@ -41,6 +41,7 @@ export async function handleCreateApproval(request: Request, env: Env): Promise<
 
   const approvalsRepo = new ApprovalsRepository(env.DB);
   await approvalsRepo.create(approval);
+  await tasksRepo.updateStatus(body.task_id, 'awaiting_approval');
 
   try {
     const room = getTaskRoomStub(body.task_id, env);
@@ -54,6 +55,21 @@ export async function handleCreateApproval(request: Request, env: Env): Promise<
         action_kind: approval.action_kind,
         risk: approval.risk,
         frame_base64: approval.frame_path || undefined,
+      }),
+    }));
+    await room.fetch(new Request('https://internal/event', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'task.event',
+        event: {
+          id: Date.now(),
+          task_id: body.task_id,
+          owner_id: task.owner_id,
+          seq: 999990,
+          kind: 'status',
+          payload: { status: 'awaiting_approval' },
+          created_at: new Date().toISOString(),
+        },
       }),
     }));
   } catch {}
@@ -79,6 +95,9 @@ export async function handleDecideApproval(
   const decided = decideApproval(approval, body.decision, body.reason);
   await approvalsRepo.updateDecision(approvalId, decided.decision, decided.decided_at!, body.reason);
 
+  const tasksRepo = new TasksRepository(env.DB);
+  await tasksRepo.updateStatus(approval.task_id, 'running');
+
   try {
     const room = getTaskRoomStub(approval.task_id, env);
     await room.fetch(new Request('https://internal/event', {
@@ -88,6 +107,21 @@ export async function handleDecideApproval(
         approval_id: approvalId,
         decision: decided.decision,
         reason: body.reason || undefined,
+      }),
+    }));
+    await room.fetch(new Request('https://internal/event', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'task.event',
+        event: {
+          id: Date.now(),
+          task_id: approval.task_id,
+          owner_id: session.owner_id,
+          seq: 999991,
+          kind: 'status',
+          payload: { status: 'running' },
+          created_at: new Date().toISOString(),
+        },
       }),
     }));
 

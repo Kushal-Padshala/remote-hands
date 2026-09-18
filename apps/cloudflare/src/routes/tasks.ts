@@ -153,10 +153,52 @@ export async function handleMarkTaskRunning(taskId: string, request: Request, en
     throw new NotFoundError('Task not found');
   }
 
+  if (task.status === 'running') {
+    return jsonOk({ task });
+  }
+
   const running = transitionTask(task as any, 'running');
   await repo.updateStatus(taskId, 'running');
 
   return jsonOk({ task: running });
+}
+
+export async function handleMarkTaskAwaitingApproval(taskId: string, request: Request, env: Env): Promise<Response> {
+  const session = await requireSession(request, env.DB);
+  const repo = new TasksRepository(env.DB);
+  const task = await repo.getById(taskId);
+
+  if (!task || task.owner_id !== session.owner_id) {
+    throw new NotFoundError('Task not found');
+  }
+
+  if (task.status === 'awaiting_approval') {
+    return jsonOk({ task });
+  }
+
+  const awaiting = transitionTask(task as any, 'awaiting_approval');
+  await repo.updateStatus(taskId, 'awaiting_approval');
+
+  try {
+    const room = getTaskRoomStub(taskId, env);
+    await room.fetch(new Request('https://internal/event', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'task.event',
+        event: {
+          id: Date.now(),
+          task_id: taskId,
+          owner_id: task.owner_id,
+          seq: 999990,
+          kind: 'status',
+          payload: { status: 'awaiting_approval' },
+          created_at: new Date().toISOString(),
+        },
+      }),
+    }));
+  } catch {}
+
+  return jsonOk({ task: awaiting });
 }
 
 

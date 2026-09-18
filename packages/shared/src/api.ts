@@ -215,6 +215,11 @@ export const decideApprovalResponseSchema = z.object({
 });
 export type DecideApprovalResponse = z.infer<typeof decideApprovalResponseSchema>;
 
+export const listApprovalsResponseSchema = z.object({
+  approvals: z.array(approvalRowSchema),
+});
+export type ListApprovalsResponse = z.infer<typeof listApprovalsResponseSchema>;
+
 export const createPhoneSessionRequestSchema = z.object({
   owner_secret: z.string().min(1),
 });

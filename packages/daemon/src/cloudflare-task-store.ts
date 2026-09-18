@@ -1,4 +1,5 @@
 import type {
+  ApprovalRow,
   EventKind,
   EventPayload,
   Machine,
@@ -138,5 +139,42 @@ export class CloudflareTaskStore implements TaskStore {
 
   async pushFrame(taskId: string, frame: { jpegBase64: string; capturedAt: string }): Promise<void> {
     await this.client.pushFrame(taskId, frame.jpegBase64, frame.capturedAt);
+  }
+
+  async listApprovals(taskId: string): Promise<ApprovalRow[]> {
+    return this.client.listTaskApprovals(taskId);
+  }
+
+  async getPendingApproval(taskId: string): Promise<ApprovalRow | null> {
+    const list = await this.client.listTaskApprovals(taskId);
+    return list.find((a) => a.decision === 'pending') ?? null;
+  }
+
+  async waitForApprovalDecision(
+    approvalId: string,
+    timeoutMs = 600000,
+    signal?: AbortSignal,
+  ): Promise<ApprovalRow> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (signal?.aborted) {
+        throw new Error('Aborted while waiting for approval decision');
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        const approval = await this.client.getApproval(approvalId);
+        if (approval.decision !== 'pending') {
+          return approval;
+        }
+      } catch {}
+    }
+    const final = await this.client.getApproval(approvalId).catch(() => null);
+    if (final && final.decision !== 'pending') return final;
+    throw new Error('Approval request timed out');
+  }
+
+  async markTaskAwaitingApproval(taskId: string): Promise<Task> {
+    const row = await this.client.markTaskAwaitingApproval(taskId);
+    return toTask(row);
   }
 }

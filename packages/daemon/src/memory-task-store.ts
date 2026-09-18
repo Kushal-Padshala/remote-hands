@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { EventKind, Machine, Task, TaskEvent } from '@remote-hands/shared';
+import type { ApprovalRow, EventKind, Machine, Task, TaskEvent } from '@remote-hands/shared';
 import type {
   CompleteTaskInput,
   EventInput,
@@ -12,6 +12,7 @@ export interface MemoryTaskStoreInput {
   machines?: readonly Machine[];
   tasks?: readonly Task[];
   events?: readonly TaskEvent[];
+  approvals?: readonly ApprovalRow[];
   now?: () => Date;
 }
 
@@ -19,6 +20,8 @@ export class MemoryTaskStore implements TaskStore {
   readonly #machines = new Map<string, Machine>();
   readonly #tasks = new Map<string, Task>();
   readonly #events: TaskEvent[] = [];
+  readonly #approvals = new Map<string, ApprovalRow>();
+  readonly #decisionResolvers = new Map<string, Array<(approval: ApprovalRow) => void>>();
   readonly #now: () => Date;
   #nextEventId: number;
 
@@ -29,6 +32,9 @@ export class MemoryTaskStore implements TaskStore {
     }
     for (const task of input.tasks ?? []) {
       this.#tasks.set(task.id, task);
+    }
+    for (const approval of input.approvals ?? []) {
+      this.#approvals.set(approval.id, approval);
     }
     this.#events.push(...(input.events ?? []));
     this.#nextEventId = this.#events.reduce((max, event) => Math.max(max, event.id), 0) + 1;
@@ -176,5 +182,91 @@ export class MemoryTaskStore implements TaskStore {
     const task = this.#tasks.get(taskId);
     if (task === undefined) throw new Error(`Unknown task: ${taskId}`);
     return task;
+  }
+
+  addApproval(approval: ApprovalRow): void {
+    this.#approvals.set(approval.id, approval);
+  }
+
+  async listApprovals(taskId: string): Promise<ApprovalRow[]> {
+    return [...this.#approvals.values()].filter((a) => a.task_id === taskId);
+  }
+
+  async getPendingApproval(taskId: string): Promise<ApprovalRow | null> {
+    return [...this.#approvals.values()].find((a) => a.task_id === taskId && a.decision === 'pending') ?? null;
+  }
+
+  async decideApproval(
+    approvalId: string,
+    decision: 'approved' | 'rejected',
+    reason?: string,
+  ): Promise<ApprovalRow> {
+    const existing = this.#approvals.get(approvalId);
+    if (!existing) throw new Error(`Unknown approval: ${approvalId}`);
+    const updated: ApprovalRow = {
+      ...existing,
+      decision,
+      decided_at: this.#timestamp(),
+      rejection_reason: reason ?? null,
+    };
+    this.#approvals.set(approvalId, updated);
+    const resolvers = this.#decisionResolvers.get(approvalId);
+    if (resolvers) {
+      for (const res of resolvers) res(updated);
+      this.#decisionResolvers.delete(approvalId);
+    }
+    return updated;
+  }
+
+  async waitForApprovalDecision(
+    approvalId: string,
+    timeoutMs = 600000,
+    signal?: AbortSignal,
+  ): Promise<ApprovalRow> {
+    const current = this.#approvals.get(approvalId);
+    if (current && current.decision !== 'pending') return current;
+
+    return new Promise<ApprovalRow>((resolve, reject) => {
+      let timer: any = null;
+      const onAbort = () => {
+        if (timer) clearTimeout(timer);
+        reject(new Error('Aborted while waiting for approval decision'));
+      };
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener('abort', onAbort, { once: true });
+
+      const onDecision = (approval: ApprovalRow) => {
+        if (timer) clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        resolve(approval);
+      };
+
+      const list = this.#decisionResolvers.get(approvalId) ?? [];
+      list.push(onDecision);
+      this.#decisionResolvers.set(approvalId, list);
+
+      timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        const cur = this.#approvals.get(approvalId);
+        if (cur && cur.decision !== 'pending') {
+          resolve(cur);
+        } else {
+          reject(new Error('Approval request timed out'));
+        }
+      }, timeoutMs);
+    });
+  }
+
+  async markTaskAwaitingApproval(taskId: string): Promise<Task> {
+    const task = this.#requireTask(taskId);
+    const updated: Task = {
+      ...task,
+      status: 'awaiting_approval',
+    };
+    this.#tasks.set(taskId, updated);
+    return updated;
   }
 }

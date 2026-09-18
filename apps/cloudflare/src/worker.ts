@@ -14,6 +14,7 @@ import {
   handleGetTask,
   handleClaimTask,
   handleMarkTaskRunning,
+  handleMarkTaskAwaitingApproval,
   handleCompleteTask,
   handleFailTask,
   handleCancelTask,
@@ -108,6 +109,9 @@ export default {
         }
         if (subaction === 'running' && method === 'POST') {
           return await handleMarkTaskRunning(taskId, request, env);
+        }
+        if (subaction === 'awaiting_approval' && method === 'POST') {
+          return await handleMarkTaskAwaitingApproval(taskId, request, env);
         }
         if (subaction === 'complete' && method === 'POST') {
           return await handleCompleteTask(taskId, request, env);

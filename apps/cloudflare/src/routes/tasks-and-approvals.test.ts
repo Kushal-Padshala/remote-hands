@@ -156,6 +156,9 @@ function createMockD1(): D1Database {
         if (q.startsWith('SELECT * FROM approvals WHERE id = ?')) {
           return { success: true, results: tables.approvals.filter((a) => a.id === bound[0]) as T[] };
         }
+        if (q.startsWith('SELECT * FROM approvals WHERE task_id = ?')) {
+          return { success: true, results: tables.approvals.filter((a) => a.task_id === bound[0]) as T[] };
+        }
         if (q.startsWith('UPDATE approvals SET decision = ?')) {
           const item = tables.approvals.find((a) => a.id === bound[2]);
           if (item) {
@@ -303,6 +306,23 @@ describe('tasks and approvals route lifecycle', () => {
     );
     expect(approvalRes.status).toBe(201);
     const createdApproval = ((await approvalRes.json()) as any).approval;
+
+    const awaitingTaskRes = await worker.fetch(
+      new Request(`https://example.com/tasks/${taskId}`, {
+        headers: { Authorization: `Bearer ${daemonToken}` },
+      }),
+      env,
+    );
+    expect(((await awaitingTaskRes.json()) as any).task.status).toBe('awaiting_approval');
+
+    const listApprovalsRes = await worker.fetch(
+      new Request(`https://example.com/tasks/${taskId}/approvals`, {
+        headers: { Authorization: `Bearer ${daemonToken}` },
+      }),
+      env,
+    );
+    expect(listApprovalsRes.status).toBe(200);
+    expect(((await listApprovalsRes.json()) as any).approvals.length).toBe(1);
 
     const decideRes = await worker.fetch(
       new Request(`https://example.com/approvals/${createdApproval.id}/decision`, {
