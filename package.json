@@ -16,7 +16,7 @@
     "db:types": "npx --yes supabase@latest gen types typescript --local > packages/shared/src/database.generated.ts"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
+    "typescript": "^7.0.2",
     "vitest": "^5.0.1",
     "@types/node": "^22.0.0"
   }
