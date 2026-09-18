@@ -17,12 +17,24 @@ Domain skills are off by default. Set `BH_DOMAIN_SKILLS=1` to enable them; see t
 
 ## Usage
 
+For ultrafast DOM inspection and interaction without writing Python scripts, use indexed browser commands:
+
+```bash
+rh browser open "<url>"
+rh browser snapshot
+rh browser click <index>
+rh browser type <index> "<text>"
+```
+
+For advanced scripting, multi-step sequences, or custom CDP interactions:
+
 ```bash
 browser-harness <<'PY'
 print(page_info())
 PY
 ```
 
+- For indexed browser operations, use `rh browser snapshot`, `rh browser click <index>`, and `rh browser type <index> <text>`.
 - Invoke as `browser-harness`. Use heredocs for multi-line commands.
 - Helpers are pre-imported. `run.py` calls `ensure_daemon()` before `exec`.
 - First navigation for a task is `new_tab(url)`, not `goto_url(url)`. The daemon

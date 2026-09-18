@@ -3,7 +3,14 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Task } from '@remote-hands/shared';
-import { buildAgyArgs, parseAgyStreamLine, StaticAgentRunner, ProcessAgentRunner } from './agy-runner.js';
+import {
+  buildAgyArgs,
+  parseAgyStreamLine,
+  StaticAgentRunner,
+  ProcessAgentRunner,
+  DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT,
+  DEFAULT_REMOTE_HANDS_REMINDER,
+} from './agy-runner.js';
 import { HermesBrain } from './hermes-brain.js';
 
 function task(overrides: Partial<Task> = {}): Task {
@@ -256,6 +263,17 @@ describe('ProcessAgentRunner with HermesBrain', () => {
   });
 });
 
+describe('remote hands system prompt and reminder', () => {
+  it('includes indexed browser commands and browser-harness in DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT', () => {
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh browser open "<url>"');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh browser snapshot');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh browser click <index>');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh browser type <index> "<text>"');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain("browser-harness <<'PY' ... PY");
+  });
 
-
-
+  it('includes indexed browser shortcuts in DEFAULT_REMOTE_HANDS_REMINDER', () => {
+    expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh browser snapshot');
+    expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh browser click <index>');
+  });
+});
