@@ -59,4 +59,38 @@ describe('DOM Snapshot Engine', () => {
     expect(table).toContain('[disabled]');
     expect(table).toContain('· value="test@example.com"');
   });
+
+  it('evaluates DOM_SNAPSHOT_SCRIPT against HTML elements and masks password values', async () => {
+    const { JSDOM } = await import('jsdom');
+    const dom = new JSDOM(`
+      <!DOCTYPE html>
+      <html>
+        <head><title>Test App</title></head>
+        <body>
+          <button aria-label="Submit Order">Submit</button>
+          <input type="password" aria-label="Secret Password" value="super-secret-123" />
+          <input type="text" placeholder="Your Name" value="Alice" />
+          <a href="/docs">API Docs</a>
+        </body>
+      </html>
+    `, { runScripts: 'dangerously', url: 'https://example.com/app' });
+
+    const result = dom.window.eval(DOM_SNAPSHOT_SCRIPT);
+    expect(result.url).toBe('https://example.com/app');
+    expect(result.title).toBe('Test App');
+    expect(result.elements.length).toBeGreaterThanOrEqual(4);
+
+    const passwordElement = result.elements.find((e: any) => e.type === 'password');
+    expect(passwordElement).toBeDefined();
+    expect(passwordElement.label).toBe('Secret Password');
+    expect(passwordElement.value).toBe('••••••••');
+
+    const buttonElement = result.elements.find((e: any) => e.role === 'button');
+    expect(buttonElement).toBeDefined();
+    expect(buttonElement.label).toBe('Submit Order');
+
+    const nameElement = result.elements.find((e: any) => e.label === 'Your Name');
+    expect(nameElement).toBeDefined();
+    expect(nameElement.value).toBe('Alice');
+  });
 });

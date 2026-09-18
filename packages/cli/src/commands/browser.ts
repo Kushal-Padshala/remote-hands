@@ -23,15 +23,21 @@ export async function isCdpReady(url = 'http://127.0.0.1:9222/json/version'): Pr
   }
 }
 
-export async function ensureChromeAutomationReady(options?: { headless?: boolean }): Promise<boolean> {
-  const cdpUrl = 'http://127.0.0.1:9222';
+export async function ensureChromeAutomationReady(options?: { headless?: boolean; cdpUrl?: string }): Promise<boolean> {
+  const cdpUrl = options?.cdpUrl || process.env.BU_CDP_URL || 'http://127.0.0.1:9222';
   if (await isCdpReady(`${cdpUrl}/json/version`)) {
     return true;
   }
 
+  let port = '9222';
+  try {
+    const parsed = new URL(cdpUrl);
+    if (parsed.port) port = parsed.port;
+  } catch {}
+
   const chromeBin = findChromeBinary();
   const chromeArgs = [
-    '--remote-debugging-port=9222',
+    `--remote-debugging-port=${port}`,
     '--user-data-dir=/tmp/rh_chrome_profile',
     '--no-first-run',
     '--no-default-browser-check',
@@ -62,13 +68,12 @@ export async function browserCommand(args: string[], context: CommandContext = {
   const stderr = context.stderr ?? console.error;
   const isHeadless = args.includes('--headless') || process.env.REMOTE_HANDS_HEADLESS === '1';
   const cleanArgs = args.filter((a) => a !== '--headless');
-
-  const ready = await ensureChromeAutomationReady({ headless: isHeadless });
-  if (!ready) {
-    stderr('Warning: Chrome CDP port 9222 is not responding');
-  }
-
   const cdpUrl = process.env.BU_CDP_URL || 'http://127.0.0.1:9222';
+
+  const ready = await ensureChromeAutomationReady({ headless: isHeadless, cdpUrl });
+  if (!ready) {
+    stderr(`Warning: Chrome CDP at ${cdpUrl} is not responding`);
+  }
   const subcommand = cleanArgs[0];
   const subArgs = cleanArgs.slice(1);
 

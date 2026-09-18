@@ -24,6 +24,7 @@ rh browser open "<url>"
 rh browser snapshot
 rh browser click <index>
 rh browser type <index> "<text>"
+rh browser tabs
 ```
 
 For advanced scripting, multi-step sequences, or custom CDP interactions:

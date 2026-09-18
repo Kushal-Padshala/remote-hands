@@ -69,22 +69,27 @@ export class BrowserDriver {
     onOpen: () => void,
     onMessage: (data: any) => void,
     onError: (err: any) => void,
+    onClose?: () => void,
   ): void {
     if (typeof ws.on === 'function') {
       ws.on('open', onOpen);
       ws.on('message', onMessage);
       ws.on('error', onError);
-      return;
-    }
-    if (typeof ws.addEventListener === 'function') {
+      if (onClose) ws.on('close', onClose);
+    } else if (typeof ws.addEventListener === 'function') {
       ws.addEventListener('open', onOpen);
       ws.addEventListener('message', (event: any) => onMessage(event.data));
       ws.addEventListener('error', onError);
-      return;
+      if (onClose) ws.addEventListener('close', onClose);
+    } else {
+      ws.onopen = onOpen;
+      ws.onmessage = (event: any) => onMessage(event.data);
+      ws.onerror = onError;
+      if (onClose) ws.onclose = onClose;
     }
-    ws.onopen = onOpen;
-    ws.onmessage = (event: any) => onMessage(event.data);
-    ws.onerror = onError;
+    if (ws.readyState === 1) {
+      queueMicrotask(() => onOpen());
+    }
   }
 
   private async executeScript<T>(script: string): Promise<T> {
@@ -167,7 +172,12 @@ export class BrowserDriver {
         reject(err);
       };
 
-      this.attachWebSocketEvents(ws, handleOpen, handleMessage, handleError);
+      const handleClose = () => {
+        cleanup();
+        reject(new Error('WebSocket connection closed before CDP response was received'));
+      };
+
+      this.attachWebSocketEvents(ws, handleOpen, handleMessage, handleError, handleClose);
     });
   }
 
@@ -189,7 +199,9 @@ export class BrowserDriver {
         if (!node) throw new Error('Target node no longer connected');
         node.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
         node.focus();
+        node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window }));
         node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+        node.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window }));
         node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
         node.click();
         return true;
@@ -274,6 +286,8 @@ export class BrowserDriver {
             cleanup();
             if (res.error) {
               reject(new Error(res.error.message || 'Navigation failed'));
+            } else if (res.result?.errorText) {
+              reject(new Error(`Navigation failed: ${res.result.errorText}`));
             } else {
               resolve({ success: true, url });
             }
@@ -289,7 +303,12 @@ export class BrowserDriver {
         reject(err);
       };
 
-      this.attachWebSocketEvents(ws, handleOpen, handleMessage, handleError);
+      const handleClose = () => {
+        cleanup();
+        reject(new Error('WebSocket connection closed before navigation response'));
+      };
+
+      this.attachWebSocketEvents(ws, handleOpen, handleMessage, handleError, handleClose);
     });
   }
 }

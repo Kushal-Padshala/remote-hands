@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { browserCommand } from './browser.js';
+import { browserCommand, ensureChromeAutomationReady } from './browser.js';
 
 const mockSnapshot = vi.fn();
 const mockClickIndex = vi.fn();
@@ -263,6 +263,19 @@ describe('browserCommand', () => {
       const code = await browserCommand(['test.py'], getCtx());
       expect(code).toBe(1);
       expect(stderrMessages.join('\n')).toContain('Error running browser-harness: Command not found');
+    });
+  });
+
+  describe('ensureChromeAutomationReady', () => {
+    it('uses custom cdpUrl when provided', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+        if (url === 'http://127.0.0.1:9225/json/version') {
+          return Promise.resolve({ ok: true });
+        }
+        return Promise.reject(new Error('connection refused'));
+      }));
+      const ready = await ensureChromeAutomationReady({ cdpUrl: 'http://127.0.0.1:9225' });
+      expect(ready).toBe(true);
     });
   });
 });

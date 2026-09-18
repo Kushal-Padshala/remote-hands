@@ -35,6 +35,7 @@ export const DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT =
   '     rh browser snapshot\n' +
   '     rh browser click <index>\n' +
   '     rh browser type <index> "<text>"\n' +
+  '     rh browser tabs\n' +
   '   - For custom scripts, use `browser-harness <<\'PY\' ... PY`.\n' +
   '   - Available pre-imported helpers for custom scripts: `new_tab(url)`, `goto_url(url)`, `click_at_xy(x, y)`, `fill_input(selector, text)`, `type_text(text)`, `press_key(key)`, `scroll(x, y, dy)`, `js("expression")`, `wait_for_load()`, `wait_for_element(selector)`, `page_info()`, `list_tabs()`, `switch_tab(id)`.\n' +
   '   - To open any URL in the user\'s desktop browser, use `open "<url>"`.\n' +

@@ -36,8 +36,13 @@ export const DOM_SNAPSHOT_SCRIPT = `
     if (typeof el.checkVisibility === 'function') {
       return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
     }
+    const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+    if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) {
+      return false;
+    }
     const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+    if (rect.width > 0 || rect.height > 0) return true;
+    return !style || style.display !== 'none';
   };
 
   const getAccessibleName = (el, seen = new Set()) => {
@@ -104,7 +109,11 @@ export const DOM_SNAPSHOT_SCRIPT = `
     const id = identify(node);
     const role = determineRole(node);
     const label = getAccessibleName(node);
-    const value = node.value !== undefined ? String(node.value) : undefined;
+    const isPassword = node.type === 'password';
+    let safeValue = isPassword ? (node.value ? '••••••••' : undefined) : (node.value !== undefined ? String(node.value) : undefined);
+    if (safeValue && safeValue.length > 50 && !isPassword) {
+      safeValue = safeValue.slice(0, 47) + '...';
+    }
     const item = {
       index: indexCounter++,
       id,
@@ -112,7 +121,7 @@ export const DOM_SNAPSHOT_SCRIPT = `
       label,
       tag: node.tagName,
       type: node.type || undefined,
-      value: value && value.length > 50 ? value.slice(0, 47) + '...' : value,
+      value: safeValue,
       checked: node.checked !== undefined ? Boolean(node.checked) : undefined,
       disabled: Boolean(node.disabled),
     };

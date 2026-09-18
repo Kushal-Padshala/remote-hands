@@ -352,4 +352,65 @@ describe('BrowserDriver', () => {
     vi.spyOn(driver as any, 'createWebSocket').mockReturnValue(new MockWs());
     await expect(driver.openUrl('https://example.com')).rejects.toThrow('Navigation connection error');
   });
+
+  it('rejects openUrl when navigation returns errorText', async () => {
+    driver = new BrowserDriver();
+    vi.spyOn(driver, 'getActiveTab').mockResolvedValue({
+      id: 'tab-1',
+      title: 'Home',
+      url: 'https://example.com',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/tab-1',
+    });
+
+    class MockWs {
+      on(event: string, cb: any) {
+        if (event === 'open') {
+          setTimeout(() => cb(), 0);
+        }
+      }
+      send(payload: string) {
+        const parsed = JSON.parse(payload);
+        setTimeout(() => {
+          this.messageCb(JSON.stringify({
+            id: parsed.id,
+            result: { errorText: 'net::ERR_NAME_NOT_RESOLVED' },
+          }));
+        }, 0);
+      }
+      messageCb: any;
+      close() {}
+    }
+
+    const mockWs = new MockWs();
+    mockWs.on = (event: string, cb: any) => {
+      if (event === 'open') setTimeout(() => cb(), 0);
+      if (event === 'message') mockWs.messageCb = cb;
+    };
+
+    vi.spyOn(driver as any, 'createWebSocket').mockReturnValue(mockWs);
+    await expect(driver.openUrl('https://nonexistent.domain')).rejects.toThrow('Navigation failed: net::ERR_NAME_NOT_RESOLVED');
+  });
+
+  it('rejects executeScript when websocket closes before response', async () => {
+    driver = new BrowserDriver();
+    vi.spyOn(driver, 'getActiveTab').mockResolvedValue({
+      id: 'tab-1',
+      title: 'Home',
+      url: 'https://example.com',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/tab-1',
+    });
+
+    class MockWs {
+      on(event: string, cb: any) {
+        if (event === 'close') {
+          setTimeout(() => cb(), 0);
+        }
+      }
+      send() {}
+      close() {}
+    }
+
+    vi.spyOn(driver as any, 'createWebSocket').mockReturnValue(new MockWs());
+    await expect((driver as any).executeScript('1 + 1')).rejects.toThrow('WebSocket connection closed before CDP response was received');
+  });
 });
