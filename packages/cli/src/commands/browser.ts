@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import { BrowserDriver } from '@remote-hands/daemon';
 import type { CommandContext } from './setup.js';
 
 export function findChromeBinary(): string {
@@ -57,6 +58,7 @@ export async function ensureChromeAutomationReady(options?: { headless?: boolean
 }
 
 export async function browserCommand(args: string[], context: CommandContext = {}): Promise<number> {
+  const stdout = context.stdout ?? console.log;
   const stderr = context.stderr ?? console.error;
   const isHeadless = args.includes('--headless') || process.env.REMOTE_HANDS_HEADLESS === '1';
   const cleanArgs = args.filter((a) => a !== '--headless');
@@ -66,7 +68,106 @@ export async function browserCommand(args: string[], context: CommandContext = {
     stderr('Warning: Chrome CDP port 9222 is not responding');
   }
 
-  const cdpUrl = 'http://127.0.0.1:9222';
+  const cdpUrl = process.env.BU_CDP_URL || 'http://127.0.0.1:9222';
+  const subcommand = cleanArgs[0];
+  const subArgs = cleanArgs.slice(1);
+
+  if (subcommand === 'snapshot') {
+    try {
+      const driver = new BrowserDriver({ cdpUrl });
+      const res = await driver.snapshot();
+      if (subArgs.includes('--json')) {
+        stdout(JSON.stringify(res, null, 2));
+      } else {
+        stdout(res.formattedTable);
+      }
+      return 0;
+    } catch (err: any) {
+      stderr(err?.message || String(err));
+      return 1;
+    }
+  }
+
+  if (subcommand === 'click') {
+    const indexArg = subArgs[0];
+    if (!indexArg || !/^\d+$/.test(indexArg)) {
+      stderr('Usage: rh browser click <index>');
+      return 1;
+    }
+    const index = parseInt(indexArg, 10);
+    try {
+      const driver = new BrowserDriver({ cdpUrl });
+      const res = await driver.clickIndex(index);
+      stdout(`Clicked [${index}] ${res.label}`);
+      return 0;
+    } catch (err: any) {
+      stderr(err?.message || String(err));
+      return 1;
+    }
+  }
+
+  if (subcommand === 'type') {
+    const indexArg = subArgs[0];
+    if (!indexArg || !/^\d+$/.test(indexArg) || subArgs.length < 2) {
+      stderr('Usage: rh browser type <index> <text>');
+      return 1;
+    }
+    const index = parseInt(indexArg, 10);
+    const textArg = subArgs.slice(1).join(' ');
+    try {
+      const driver = new BrowserDriver({ cdpUrl });
+      const res = await driver.typeIndex(index, textArg);
+      stdout(`Typed "${textArg}" into [${index}] ${res.label}`);
+      return 0;
+    } catch (err: any) {
+      stderr(err?.message || String(err));
+      return 1;
+    }
+  }
+
+  if (subcommand === 'open') {
+    const urlArg = subArgs[0];
+    if (!urlArg) {
+      stderr('Usage: rh browser open <url>');
+      return 1;
+    }
+    try {
+      new URL(urlArg);
+    } catch {
+      stderr(`Invalid URL: ${urlArg}`);
+      return 1;
+    }
+    try {
+      const driver = new BrowserDriver({ cdpUrl });
+      const res = await driver.openUrl(urlArg);
+      stdout(`Opened ${res.url}`);
+      return 0;
+    } catch (err: any) {
+      stderr(err?.message || String(err));
+      return 1;
+    }
+  }
+
+  if (subcommand === 'tabs') {
+    try {
+      const driver = new BrowserDriver({ cdpUrl });
+      const tabs = await driver.listTabs();
+      if (subArgs.includes('--json')) {
+        stdout(JSON.stringify(tabs, null, 2));
+      } else if (tabs.length === 0) {
+        stdout('No open tabs found.');
+      } else {
+        for (const tab of tabs) {
+          stdout(`[${tab.id}] ${tab.title || '(untitled)'} - ${tab.url}`);
+        }
+      }
+      return 0;
+    } catch (err: any) {
+      stderr(err?.message || String(err));
+      return 1;
+    }
+  }
+
   return new Promise((resolve) => {
     const proc = spawn('browser-harness', cleanArgs, {
       env: {
