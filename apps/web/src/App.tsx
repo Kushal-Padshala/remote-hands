@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { MachineRow, TaskRow, TaskKind, TaskMode } from '@remote-hands/shared';
+import clsx from 'clsx';
 import { apiClient } from './api/client.js';
 import { MachinesScreen } from './screens/MachinesScreen.js';
 import { NewTaskScreen } from './screens/NewTaskScreen.js';
@@ -236,29 +237,25 @@ export function App() {
           <div className="header-actions">
             {!isStandalone && (
               <button
+                type="button"
                 className="btn-header-pill"
                 onClick={() => setShowInstallModal(true)}
                 title="Add to Home Screen"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
                   <line x1="12" y1="18" x2="12.01" y2="18" />
                 </svg>
-                <span>Add to Home</span>
+                <span>Install</span>
               </button>
             )}
             <button
-              className="btn-header-ghost"
-              onClick={handleClearCache}
-              title="Reset paired session"
-            >
-              Reset
-            </button>
-            <button
+              type="button"
               className="btn-header-pill qr-button"
               onClick={() => setShowPairModal(true)}
+              title="Pair with QR code"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="7" height="7" />
                 <rect x="14" y="3" width="7" height="7" />
                 <rect x="14" y="14" width="7" height="7" />
@@ -275,21 +272,21 @@ export function App() {
           <div className="segmented-control">
             <button
               type="button"
-              className={`segmented-button ${activeTab === 'devices' ? 'active' : ''}`}
+              className={clsx('segmented-button', activeTab === 'devices' && 'active')}
               onClick={() => setActiveTab('devices')}
             >
               <span>💻 Devices</span>
             </button>
             <button
               type="button"
-              className={`segmented-button ${activeTab === 'history' ? 'active' : ''}`}
+              className={clsx('segmented-button', activeTab === 'history' && 'active')}
               onClick={() => setActiveTab('history')}
             >
               <span>💬 History</span>
             </button>
             <button
               type="button"
-              className={`segmented-button ${activeTab === 'pairing' ? 'active' : ''}`}
+              className={clsx('segmented-button', activeTab === 'pairing' && 'active')}
               onClick={() => setActiveTab('pairing')}
             >
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -304,34 +301,6 @@ export function App() {
       <main className={`app-main ${currentScreen === 'live-task' ? 'chat-mode' : ''}`}>
         {currentScreen === 'machines' && activeTab === 'devices' && (
           <>
-            {!isStandalone && (
-              <div
-                className="install-callout"
-                onClick={() => setShowInstallModal(true)}
-              >
-                <div className="install-callout-left">
-                  <div className="install-callout-icon">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 5v14M5 12l7 7 7-7" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="install-callout-title">Add to Home Screen</div>
-                    <div className="install-callout-desc">Open Remote Hands fullscreen like an app on your phone</div>
-                  </div>
-                </div>
-                <button
-                  className="btn-install-trigger"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowInstallModal(true);
-                  }}
-                >
-                  Add +
-                </button>
-              </div>
-            )}
-
             {error && !error.includes('session token') && !error.includes('401') && !error.includes('Unauthorized') && (
               <div className="card" style={{ borderColor: 'var(--accent-rose)', marginBottom: 14 }}>
                 <div style={{ color: 'var(--accent-rose)', fontWeight: 600, fontSize: '0.875rem' }}>
