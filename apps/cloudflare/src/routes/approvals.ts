@@ -51,6 +51,7 @@ export async function handleCreateApproval(request: Request, env: Env): Promise<
         summary: approval.summary,
         action_kind: approval.action_kind,
         risk: approval.risk,
+        frame_base64: approval.frame_path || undefined,
       }),
     }));
   } catch {}

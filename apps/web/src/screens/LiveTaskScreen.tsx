@@ -590,7 +590,13 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         if (closed) return;
         const pending = approvals.find((a) => a.decision === 'pending');
         if (pending) {
-          setActiveApproval(pending);
+          setActiveApproval((prev) => {
+            if (!prev) return pending;
+            return {
+              ...pending,
+              frame_path: pending.frame_path || prev.frame_path || frameBase64 || null,
+            };
+          });
         } else {
           setActiveApproval((prev) => (prev && prev.decision === 'pending' ? null : prev));
         }
@@ -643,7 +649,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             summary: (msg as any).summary || 'Action requires confirmation',
             risk: ((msg as any).risk || 'high') as any,
             tool_payload: {},
-            frame_path: null,
+            frame_path: (msg as any).frame_base64 || frameBase64 || null,
             decision: 'pending',
             decided_at: null,
             expires_at: new Date(Date.now() + 60000).toISOString(),
@@ -651,7 +657,13 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           });
           apiClient.getApproval(msg.approval_id).then((res) => {
             if (res.approval) {
-              setActiveApproval(res.approval);
+              setActiveApproval((prev) => {
+                if (!prev || prev.id !== res.approval.id) return res.approval;
+                return {
+                  ...res.approval,
+                  frame_path: res.approval.frame_path || prev.frame_path || frameBase64 || null,
+                };
+              });
             }
           }).catch(() => {});
         } else if (msg.type === 'approval.decided') {
@@ -1127,6 +1139,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
 
       <ApprovalSheet
         approval={activeApproval}
+        frameBase64={frameBase64}
         onApprove={handleApprove}
         onReject={handleReject}
         loading={decidingApproval}

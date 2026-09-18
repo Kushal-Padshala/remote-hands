@@ -2099,6 +2099,8 @@ main {
 .sheet-content {
   width: 100%;
   max-width: 520px;
+  max-height: 85vh;
+  overflow-y: auto;
   margin: 0 auto;
   background: var(--bg-surface);
   border-top-left-radius: 20px;

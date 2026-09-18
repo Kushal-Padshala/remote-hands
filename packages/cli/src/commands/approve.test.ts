@@ -67,11 +67,12 @@ describe('approveCommand', () => {
     vi.restoreAllMocks();
   });
 
-  const getCtx = (client?: any) => ({
+  const getCtx = (client?: any, frameSource?: any) => ({
     stdout: (m: string) => stdoutLogs.push(m),
     stderr: (m: string) => stderrLogs.push(m),
     configDir: tempDir,
     client,
+    frameSource: frameSource ?? { captureFrame: vi.fn().mockResolvedValue(null) },
   });
 
   it('errors when summary argument is missing', async () => {
@@ -112,9 +113,41 @@ describe('approveCommand', () => {
       action_kind: 'other',
       summary: 'Publish post',
       risk: 'medium',
+      frame_path: null,
       timeout_ms: 5000,
     });
     expect(stdoutLogs.join('\n')).toContain('Approval granted.');
+  });
+
+  it('captures live frame and sends frame_path to createApproval', async () => {
+    const configFile = path.join(tempDir, 'daemon.json');
+    fs.writeFileSync(configFile, JSON.stringify({
+      cloudflareApiUrl: 'https://example.workers.dev',
+      sessionToken: 'test-token',
+    }));
+
+    const mockClient = {
+      createApproval: vi.fn().mockResolvedValue({ id: 'app-frame', decision: 'pending' }),
+      getApproval: vi.fn().mockResolvedValue({ id: 'app-frame', decision: 'approved' }),
+    };
+
+    const mockFrameSource = {
+      captureFrame: vi.fn().mockResolvedValue({ jpegBase64: 'data:image/jpeg;base64,captured-screen' }),
+    };
+
+    const code = await approveCommand(
+      ['Click publish', '--task=t1', '--timeout=5'],
+      getCtx(mockClient, mockFrameSource),
+    );
+    expect(code).toBe(0);
+    expect(mockClient.createApproval).toHaveBeenCalledWith({
+      task_id: 't1',
+      action_kind: 'other',
+      summary: 'Click publish',
+      risk: 'medium',
+      frame_path: 'data:image/jpeg;base64,captured-screen',
+      timeout_ms: 5000,
+    });
   });
 
   it('returns code 1 when user rejects approval', async () => {

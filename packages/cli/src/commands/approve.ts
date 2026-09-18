@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { CloudflareControlPlaneClient } from '@remote-hands/daemon';
+import { CloudflareControlPlaneClient, DefaultFrameSource } from '@remote-hands/daemon';
 import type { ActionKind, RiskLevel } from '@remote-hands/shared';
 import type { CommandContext } from './setup.js';
 
@@ -95,6 +95,17 @@ export async function approveCommand(args: string[], context: CommandContext = {
       sessionToken: rawConfig.sessionToken,
     });
 
+  let framePath: string | null = null;
+  try {
+    const frameSource =
+      context.frameSource ??
+      new DefaultFrameSource({ taskStartTime: Date.now() - 10000, browserActive: true });
+    const frame = await frameSource.captureFrame();
+    if (frame?.jpegBase64) {
+      framePath = frame.jpegBase64;
+    }
+  } catch {}
+
   let approval: any;
   try {
     approval = await client.createApproval({
@@ -102,6 +113,7 @@ export async function approveCommand(args: string[], context: CommandContext = {
       action_kind: parsed.action,
       summary: parsed.summary,
       risk: parsed.risk,
+      frame_path: framePath,
       timeout_ms: parsed.timeoutSeconds * 1000,
     });
   } catch (err: any) {

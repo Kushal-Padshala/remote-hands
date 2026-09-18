@@ -30,6 +30,7 @@ export const approvalRequestedMessageSchema = z.object({
   summary: z.string().optional(),
   action_kind: z.string().optional(),
   risk: z.string().optional(),
+  frame_base64: z.string().optional(),
 });
 
 export const approvalDecidedMessageSchema = z.object({
