@@ -6,6 +6,7 @@ import type { TaskStore } from './task-store.js';
 import type { BrowserFrame, FrameSource } from './frame-stream.js';
 import { ThrottledFrameStream } from './frame-stream.js';
 import { DefaultFrameSource, cleanupStaleFrameFiles } from './screen-capture.js';
+import type { ChromeManager } from './chrome-manager.js';
 
 export interface RunDaemonOnceInput {
   userId: string;
@@ -15,6 +16,7 @@ export interface RunDaemonOnceInput {
   runner: AgentRunner;
   onFrame?: ((frame: BrowserFrame) => Promise<void> | void) | undefined;
   frameSource?: FrameSource | undefined;
+  chromeManager?: ChromeManager | undefined;
 }
 
 export type RunDaemonOnceResult =
@@ -42,6 +44,11 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
   cleanupStaleFrameFiles(taskStartTime);
 
   const isBrowserKind = running.kind === 'browser';
+  if (isBrowserKind || running.prompt.includes('http://') || running.prompt.includes('https://')) {
+    if (input.chromeManager) {
+      await input.chromeManager.ensureRunning().catch(() => {});
+    }
+  }
   const canCaptureFrames = running.kind !== 'coding';
 
   let frameStream: ThrottledFrameStream | null = null;

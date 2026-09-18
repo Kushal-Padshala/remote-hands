@@ -183,6 +183,33 @@ describe('runDaemonOnce', () => {
 
     expect(pushedFrames.length).toBe(0);
   });
+
+  it('ensures Chrome is running for browser tasks when chromeManager is provided', async () => {
+    const store = new MemoryTaskStore({
+      machines: [machine()],
+      tasks: [task({ id: 'browser-task-1', prompt: 'Check https://github.com/pulls', kind: 'browser' })],
+    });
+
+    let ensureRunningCalled = false;
+    const mockChrome = {
+      ensureRunning: async () => {
+        ensureRunningCalled = true;
+        return { available: true, port: 9222, mode: 'dedicated' as const };
+      },
+      checkDebuggerStatus: async () => ({ available: true, port: 9222, mode: 'dedicated' as const }),
+    };
+
+    await runDaemonOnce({
+      userId,
+      config,
+      runtime,
+      store,
+      runner: new StaticAgentRunner({ events: [], summary: 'Done', conversationId: null }),
+      chromeManager: mockChrome as any,
+    });
+
+    expect(ensureRunningCalled).toBe(true);
+  });
 });
 
 
