@@ -110,4 +110,14 @@ describe('CLI command dispatcher', () => {
     expect(context.chromeManager.getProfile()).toBe('FLCC');
     expect(context.chromeManager.getMode()).toBe('active');
   });
+
+  it('supports space-separated --browser-profile argument', async () => {
+    const logs: string[] = [];
+    const context: any = { stdout: (msg: string) => logs.push(msg) };
+    const code = await main(['daemon', '--once', '--browser-profile', 'kushal'], context);
+    expect(code).toBe(0);
+    expect(context.chromeManager).toBeDefined();
+    expect(context.chromeManager.getProfile()).toBe('kushal');
+    expect(context.chromeManager.getMode()).toBe('active');
+  });
 });

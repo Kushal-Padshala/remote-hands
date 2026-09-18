@@ -148,8 +148,16 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
 
-  const browserProfileArg = args.find((a) => a.startsWith('--browser-profile='));
-  const rawProfile = browserProfileArg ? browserProfileArg.split('=')[1] : undefined;
+  const browserProfileIdx = args.findIndex((a) => a === '--browser-profile' || a.startsWith('--browser-profile='));
+  let rawProfile: string | undefined;
+  if (browserProfileIdx !== -1) {
+    const arg = args[browserProfileIdx];
+    if (arg && arg.startsWith('--browser-profile=')) {
+      rawProfile = arg.slice('--browser-profile='.length);
+    } else if (browserProfileIdx + 1 < args.length) {
+      rawProfile = args[browserProfileIdx + 1];
+    }
+  }
   let profileMode: ChromeProfileMode = 'dedicated';
   let targetProfile: string | undefined;
 

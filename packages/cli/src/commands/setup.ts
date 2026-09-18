@@ -58,6 +58,8 @@ import {
   renderStepError,
 } from '../output/ui.js';
 
+import type { ChromeManager } from '@remote-hands/daemon';
+
 export interface CommandContext {
   stdout?: ((msg: string) => void) | undefined;
   stderr?: ((msg: string) => void) | undefined;
@@ -68,6 +70,7 @@ export interface CommandContext {
   projectRoot?: string | undefined;
   configDir?: string | undefined;
   once?: boolean | undefined;
+  chromeManager?: ChromeManager | undefined;
 }
 
 export async function setupCommand(args: string[], context: CommandContext = {}): Promise<number> {
