@@ -468,13 +468,21 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           ];
         });
       } else if (kind === 'thinking') {
-        const text = payload?.text || 'Analyzing and planning next actions...';
+        const text = typeof payload === 'object' && payload?.text !== undefined ? String(payload.text) : String(payload || 'Analyzing...');
         setMessages((prev) => {
-          const filtered = prev.filter((m) => m.type !== 'thinking');
+          const last = prev[prev.length - 1];
+          if (last && last.type === 'thinking') {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              ...last,
+              text,
+            };
+            return updated;
+          }
           return [
-            ...filtered,
+            ...prev,
             {
-              id: `thinking-${Date.now()}`,
+              id: `thinking-${Date.now()}-${Math.random()}`,
               type: 'thinking',
               text,
               time: new Date().toISOString(),
@@ -485,9 +493,8 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         const toolName = payload?.tool || 'tool';
         const callId = String(payload?.call_id || Date.now());
         setMessages((prev) => {
-          const filtered = prev.filter((m) => m.type !== 'thinking');
           return [
-            ...filtered,
+            ...prev,
             {
               id: `tool-${callId}`,
               type: 'tool',
@@ -522,9 +529,8 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           const mapped = prev.map((m) =>
             m.type === 'tool' && m.toolStatus === 'active' ? { ...m, toolStatus: 'done' as const } : m
           );
-          const filtered = mapped.filter((m) => m.type !== 'thinking');
-          const lastUserIdx = filtered.findLastIndex((m) => m.type === 'user');
-          const hasAgentAfterLastUser = filtered
+          const lastUserIdx = mapped.findLastIndex((m) => m.type === 'user');
+          const hasAgentAfterLastUser = mapped
             .slice(lastUserIdx + 1)
             .some((m) => m.type === 'agent' && (m.text?.length ?? 0) > 0);
           if (!hasAgentAfterLastUser && payload?.summary) {
@@ -533,7 +539,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
               ? 'Task completed successfully.'
               : rawSummary;
             return [
-              ...filtered,
+              ...mapped,
               {
                 id: `result-${Date.now()}`,
                 type: 'agent',
@@ -542,7 +548,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
               },
             ];
           }
-          return filtered;
+          return mapped;
         });
       } else if (kind === 'error') {
         setIsWorking(false);
@@ -873,7 +879,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             >
               {isWorking ? (
                 <>
-                  <ThinkingOrb state="working" size={20} theme="dark" role="presentation" />
+                  <span className="status-dot working" />
                   <span>agy working...</span>
                 </>
               ) : isMachineOnline ? (
