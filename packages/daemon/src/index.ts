@@ -1,6 +1,7 @@
 export * from './agy-runner.js';
 export * from './approval-gate.js';
 export * from './browser-snapshot.js';
+export * from './browser-driver.js';
 export * from './chrome-manager.js';
 export * from './cloudflare-client.js';
 export * from './cloudflare-task-store.js';
