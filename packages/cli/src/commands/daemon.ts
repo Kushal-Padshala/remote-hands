@@ -8,6 +8,8 @@ import {
   ProcessAgentRunner,
   getRuntimeMetadata,
   runDaemonOnce,
+  ChromeManager,
+  type ChromeProfileMode,
 } from '@remote-hands/daemon';
 import type { CommandContext } from './setup.js';
 import { c } from '../output/ui.js';
@@ -138,10 +140,20 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
     try {
       realtime?.close();
     } catch {}
+    try {
+      chromeManager.close();
+    } catch {}
   };
 
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
+
+  const browserProfileArg = args.find((a) => a.startsWith('--browser-profile='));
+  const profileMode: ChromeProfileMode = browserProfileArg
+    ? (browserProfileArg.split('=')[1] as ChromeProfileMode)
+    : 'dedicated';
+
+  const chromeManager = new ChromeManager({ mode: profileMode, port: 9222 });
 
   try {
     while (isRunning) {
@@ -160,6 +172,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
           runtime,
           store,
           runner,
+          chromeManager,
         });
 
         if (result.claimed) {

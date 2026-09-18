@@ -1,6 +1,7 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { CommandContext } from './setup.js';
+import { ChromeManager } from '@remote-hands/daemon';
 import { ensureWranglerLogin, defaultRunner } from '../cloudflare/wrangler.js';
 import { checkBrowserHarness } from '../system/browser-harness.js';
 import { defaultFileSystem } from '../cloudflare/project.js';
@@ -63,6 +64,14 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
     stdout(`[✓] Daemon configuration: ${daemonConfig} exists`);
   } else {
     stdout('[!] Daemon configuration: not found (run: rh setup)');
+  }
+
+  const chromeManager = new ChromeManager({ mode: 'dedicated', port: 9222 });
+  const chromeStatus = await chromeManager.checkDebuggerStatus();
+  if (chromeStatus.available) {
+    stdout(`[✓] Chrome remote debugging: active on port ${chromeStatus.port}`);
+  } else {
+    stdout(`[✓] Chrome remote debugging: ready on demand (port 9222, profile: ${chromeStatus.profileDir})`);
   }
 
   if (process.platform === 'darwin') {
