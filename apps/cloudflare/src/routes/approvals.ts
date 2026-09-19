@@ -171,6 +171,10 @@ export async function handleGetApproval(
     throw new NotFoundError('Approval not found');
   }
 
+  if (approval.decision === 'pending' && Date.now() > Date.parse(approval.expires_at)) {
+    return jsonOk({ approval: { ...approval, decision: 'expired' } });
+  }
+
   return jsonOk({ approval });
 }
 
@@ -189,6 +193,13 @@ export async function handleListTaskApprovals(
 
   const approvalsRepo = new ApprovalsRepository(env.DB);
   const approvals = await approvalsRepo.listByTask(taskId);
+  const now = Date.now();
+  const evaluated = approvals.map((a) => {
+    if (a.decision === 'pending' && now > Date.parse(a.expires_at)) {
+      return { ...a, decision: 'expired' as const };
+    }
+    return a;
+  });
 
-  return jsonOk({ approvals });
+  return jsonOk({ approvals: evaluated });
 }

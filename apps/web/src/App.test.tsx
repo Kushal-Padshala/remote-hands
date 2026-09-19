@@ -397,6 +397,37 @@ describe('Web App Workflow', () => {
     });
   });
 
+  it('does not resurrect dismissed or expired approvals during polling', async () => {
+    vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+    const expiredApproval = {
+      id: '99999999-9999-9999-8999-999999999999',
+      task_id: fakeTask.id,
+      owner_id: fakeTask.owner_id,
+      action_kind: 'publish' as const,
+      summary: 'Post tweet: Hello world',
+      risk: 'high' as const,
+      tool_payload: {},
+      frame_path: null,
+      decision: 'pending' as const,
+      decided_at: null,
+      expires_at: new Date(Date.now() - 10000).toISOString(),
+      created_at: new Date(Date.now() - 65000).toISOString(),
+    };
+    vi.spyOn(apiClient, 'listTaskApprovals').mockResolvedValue([expiredApproval]);
+
+    const socket = new MockSocket();
+    render(
+      <LiveTaskScreen
+        task={fakeTask}
+        onBack={() => {}}
+        webSocketFactory={() => socket as any}
+      />,
+    );
+
+    await new Promise((r) => setTimeout(r, 200));
+    expect(screen.queryByTestId('approval-sheet')).toBeNull();
+  });
+
   it('renders inline thinking status and expires old frame in 5s', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);

@@ -176,6 +176,15 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
   const [sendingMessage, setSendingMessage] = useState(false);
   const frameExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const dismissedApprovalIdsRef = useRef<Set<string>>(new Set());
+
+  const handleDismissApproval = (approvalId?: string) => {
+    const id = approvalId || activeApproval?.id;
+    if (id) {
+      dismissedApprovalIdsRef.current.add(id);
+    }
+    setActiveApproval(null);
+  };
 
   useEffect(() => {
     if (task) {
@@ -607,7 +616,12 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
       try {
         const approvals = await apiClient.listTaskApprovals(currentTaskId!);
         if (closed) return;
-        const pending = approvals.find((a) => a.decision === 'pending');
+        const pending = approvals.find(
+          (a) =>
+            a.decision === 'pending' &&
+            Date.now() < Date.parse(a.expires_at) &&
+            !dismissedApprovalIdsRef.current.has(a.id)
+        );
         if (pending) {
           setActiveApproval((prev) => {
             if (!prev) return pending;
@@ -617,7 +631,14 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             };
           });
         } else {
-          setActiveApproval((prev) => (prev && prev.decision === 'pending' ? null : prev));
+          setActiveApproval((prev) =>
+            prev &&
+            prev.decision === 'pending' &&
+            Date.now() < Date.parse(prev.expires_at) &&
+            !dismissedApprovalIdsRef.current.has(prev.id)
+              ? prev
+              : null
+          );
         }
       } catch {}
     }
@@ -660,6 +681,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           }
           processIncomingEvent(msg.event.kind, msg.event.payload);
         } else if (msg.type === 'approval.requested') {
+          if (dismissedApprovalIdsRef.current.has(msg.approval_id)) return;
           setActiveApproval({
             id: msg.approval_id,
             task_id: msg.task_id,
@@ -844,11 +866,11 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
     setDecidingApproval(true);
     try {
       await apiClient.decideApproval(approvalId, 'approved');
-      setActiveApproval(null);
+      handleDismissApproval(approvalId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.toLowerCase().includes('expired')) {
-        setActiveApproval(null);
+        handleDismissApproval(approvalId);
         setMessages((prev) => [
           ...prev,
           {
@@ -870,7 +892,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
     setDecidingApproval(true);
     try {
       await apiClient.decideApproval(approvalId, 'rejected', reason);
-      setActiveApproval(null);
+      handleDismissApproval(approvalId);
       if (reason) {
         setMessages((prev) => [
           ...prev,
@@ -885,7 +907,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.toLowerCase().includes('expired')) {
-        setActiveApproval(null);
+        handleDismissApproval(approvalId);
         setMessages((prev) => [
           ...prev,
           {
@@ -1200,7 +1222,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         frameBase64={frameBase64}
         onApprove={handleApprove}
         onReject={handleReject}
-        onDismiss={() => setActiveApproval(null)}
+        onDismiss={() => handleDismissApproval(activeApproval?.id)}
         loading={decidingApproval}
       />
     </div>
