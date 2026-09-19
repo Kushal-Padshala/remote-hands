@@ -179,6 +179,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
     });
   context.chromeManager = chromeManager;
 
+  const lastHeartbeatAtRef = { current: 0 };
   try {
     while (isRunning) {
       try {
@@ -191,12 +192,13 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
             agyCommand: 'agy',
             workspaceAllowlist: [],
             pollIntervalMs: 1000,
-            heartbeatIntervalMs: 15000,
+            heartbeatIntervalMs: 60000,
           },
           runtime,
           store,
           runner,
           chromeManager,
+          lastHeartbeatAtRef,
         });
 
         if (result.claimed) {

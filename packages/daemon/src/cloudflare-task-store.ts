@@ -74,6 +74,7 @@ function toTaskEvent<K extends EventKind>(row: TaskEventRow): TaskEvent<K> {
 export class CloudflareTaskStore implements TaskStore {
   private readonly client: CloudflareControlPlaneClient;
   private readonly machineId: string;
+  private cachedMachine: Machine | null = null;
 
   constructor(options: CloudflareTaskStoreOptions) {
     this.client = options.client;
@@ -81,13 +82,21 @@ export class CloudflareTaskStore implements TaskStore {
   }
 
   async registerMachine(_input: RegisterMachineInput): Promise<Machine> {
+    if (this.cachedMachine) return this.cachedMachine;
     const row = await this.client.heartbeat(this.machineId);
-    return toMachine(row);
+    this.cachedMachine = toMachine(row);
+    return this.cachedMachine;
+  }
+
+  async getMachine(): Promise<Machine> {
+    if (this.cachedMachine) return this.cachedMachine;
+    return this.registerMachine({} as any);
   }
 
   async heartbeat(machineId: string): Promise<Machine> {
     const row = await this.client.heartbeat(machineId);
-    return toMachine(row);
+    this.cachedMachine = toMachine(row);
+    return this.cachedMachine;
   }
 
   async claimNextTask(machineId: string): Promise<Task | null> {

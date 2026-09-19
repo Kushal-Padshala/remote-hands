@@ -17,6 +17,7 @@ export interface RunDaemonOnceInput {
   onFrame?: ((frame: BrowserFrame) => Promise<void> | void) | undefined;
   frameSource?: FrameSource | undefined;
   chromeManager?: ChromeManager | undefined;
+  lastHeartbeatAtRef?: { current: number } | undefined;
 }
 
 export type RunDaemonOnceResult =
@@ -24,15 +25,24 @@ export type RunDaemonOnceResult =
   | { claimed: true; taskId: string; status: Extract<TaskStatus, 'done' | 'failed' | 'cancelled'> };
 
 export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemonOnceResult> {
-  const machine = await input.store.registerMachine({
-    userId: input.userId,
-    name: input.config.machineName,
-    hostname: input.runtime.hostname,
-    agyVersion: input.runtime.agyVersion,
-    daemonVersion: input.runtime.daemonVersion,
-  });
+  const machine = input.store.getMachine
+    ? await input.store.getMachine()
+    : await input.store.registerMachine({
+        userId: input.userId,
+        name: input.config.machineName,
+        hostname: input.runtime.hostname,
+        agyVersion: input.runtime.agyVersion,
+        daemonVersion: input.runtime.daemonVersion,
+      });
 
-  await input.store.heartbeat(machine.id);
+  const now = Date.now();
+  const interval = input.config.heartbeatIntervalMs || 60000;
+  if (!input.lastHeartbeatAtRef || now - input.lastHeartbeatAtRef.current >= interval) {
+    await input.store.heartbeat(machine.id);
+    if (input.lastHeartbeatAtRef) {
+      input.lastHeartbeatAtRef.current = now;
+    }
+  }
 
   const claimed = await input.store.claimNextTask(machine.id);
   if (claimed === null) return { claimed: false };

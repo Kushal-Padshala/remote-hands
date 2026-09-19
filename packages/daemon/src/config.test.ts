@@ -13,7 +13,7 @@ describe('parseDaemonConfig', () => {
 
     expect(config.agyCommand).toBe('agy');
     expect(config.pollIntervalMs).toBe(5_000);
-    expect(config.heartbeatIntervalMs).toBe(15_000);
+    expect(config.heartbeatIntervalMs).toBe(60_000);
     expect(config.workspaceAllowlist).toEqual([]);
   });
 

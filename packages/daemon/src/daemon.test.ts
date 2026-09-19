@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Machine, Task } from '@remote-hands/shared';
 import type { AgentRunner } from './agy-runner.js';
 import { StaticAgentRunner } from './agy-runner.js';
@@ -80,6 +80,24 @@ describe('runDaemonOnce', () => {
         runner: new StaticAgentRunner({ events: [], summary: 'unused', conversationId: null }),
       }),
     ).resolves.toEqual({ claimed: false });
+  });
+
+  it('skips heartbeat when heartbeatIntervalMs has not elapsed', async () => {
+    const lastHeartbeatAtRef = { current: Date.now() - 5000 };
+    const fakeM = machine();
+    const mockStore = new MemoryTaskStore({ machines: [fakeM] });
+    const heartbeatSpy = vi.spyOn(mockStore, 'heartbeat');
+
+    await runDaemonOnce({
+      userId,
+      config: { ...config, heartbeatIntervalMs: 60000 },
+      runtime,
+      store: mockStore,
+      runner: new StaticAgentRunner({ events: [], summary: 'unused', conversationId: null }),
+      lastHeartbeatAtRef,
+    });
+
+    expect(heartbeatSpy).not.toHaveBeenCalled();
   });
 
   it('runs one queued task and marks it done with agent events', async () => {

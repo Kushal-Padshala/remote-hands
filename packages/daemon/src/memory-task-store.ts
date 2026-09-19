@@ -61,6 +61,18 @@ export class MemoryTaskStore implements TaskStore {
     return machine;
   }
 
+  async getMachine(): Promise<Machine> {
+    const first = Array.from(this.#machines.values())[0];
+    if (first) return first;
+    return this.registerMachine({
+      userId: 'default-user',
+      name: 'default-machine',
+      hostname: 'localhost',
+      agyVersion: null,
+      daemonVersion: null,
+    });
+  }
+
   async heartbeat(machineId: string): Promise<Machine> {
     const machine = this.#requireMachine(machineId);
     const updated: Machine = {

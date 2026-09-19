@@ -27,7 +27,7 @@ const envSchema = z.object({
   REMOTE_HANDS_AGY_COMMAND: z.string().min(1).default('agy'),
   REMOTE_HANDS_WORKSPACE_ALLOWLIST: z.string().optional(),
   REMOTE_HANDS_POLL_INTERVAL_MS: positiveInteger.default(5_000),
-  REMOTE_HANDS_HEARTBEAT_INTERVAL_MS: positiveInteger.default(15_000),
+  REMOTE_HANDS_HEARTBEAT_INTERVAL_MS: positiveInteger.default(60_000),
 }).refine(
   (data) => Boolean(data.REMOTE_HANDS_SUPABASE_URL || data.REMOTE_HANDS_CLOUDFLARE_API_URL || data.REMOTE_HANDS_API_URL),
   {

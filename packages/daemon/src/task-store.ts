@@ -33,6 +33,7 @@ export interface FailTaskInput {
 
 export interface TaskStore {
   registerMachine(input: RegisterMachineInput): Promise<Machine>;
+  getMachine?(): Promise<Machine>;
   heartbeat(machineId: string): Promise<Machine>;
   claimNextTask(machineId: string): Promise<Task | null>;
   markTaskRunning(taskId: string): Promise<Task>;
