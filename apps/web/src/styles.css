@@ -517,11 +517,21 @@ main {
   border: 1px solid #262628;
   border-radius: 12px;
   padding: 28px 20px;
-  text-align: left;
+  text-align: center;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
+  align-items: center;
   gap: 0;
+}
+
+.empty-state-card .empty-state-desc {
+  text-align: center;
+}
+
+.empty-state-card .btn {
+  margin-top: 14px;
+  width: auto;
+  min-width: 160px;
 }
 
 .empty-state-card.home-onboard {
@@ -536,6 +546,10 @@ main {
 .empty-state-card.home-onboard .empty-state-desc {
   text-align: left;
   align-self: flex-start;
+}
+
+.empty-state-card.home-onboard .empty-state-desc {
+  max-width: 100%;
 }
 
 .empty-state-icon {
@@ -666,6 +680,46 @@ main {
 
 .home-content {
   gap: 10px;
+}
+
+.home-error {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: #131314;
+  border: 1px solid #2e2e31;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.8125rem;
+  color: #d4d4d8;
+  line-height: 1.45;
+}
+
+.home-error svg {
+  flex-shrink: 0;
+  color: #e5484d;
+}
+
+.home-error span {
+  flex: 1;
+  min-width: 0;
+}
+
+.home-error-retry {
+  background: transparent;
+  border: 1px solid #333336;
+  color: #ededed;
+  border-radius: 7px;
+  padding: 4px 11px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-family: inherit;
+}
+
+.home-error-retry:hover {
+  background: #1e1e20;
 }
 
 .home-toolbar {
@@ -3780,7 +3834,11 @@ main {
   }
 
   .screen-content {
-    gap: 24px;
+    gap: 12px;
+  }
+
+  .home-content {
+    gap: 10px;
   }
 
   .new-task-content {
@@ -3795,20 +3853,12 @@ main {
     width: 100%;
   }
 
-  .machines-list {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-    gap: 16px;
+  .empty-state-card.home-onboard {
+    padding: 22px;
   }
 
-  .machine-card {
-    padding: 20px;
-  }
-
-  .empty-state-card {
-    max-width: 520px;
-    margin: 36px auto;
-    padding: 48px 32px;
+  .machine-row {
+    padding: 13px 10px 13px 16px;
   }
 
   .history-tab {
