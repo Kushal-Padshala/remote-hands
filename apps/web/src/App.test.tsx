@@ -816,7 +816,7 @@ describe('Web App Workflow', () => {
       expect(screen.getByText('Work Laptop')).toBeDefined();
     });
 
-    const historyTabBtn = screen.getByText('💬 History');
+    const historyTabBtn = screen.getByRole('tab', { name: /History/ });
     fireEvent.click(historyTabBtn);
 
     await waitFor(() => {

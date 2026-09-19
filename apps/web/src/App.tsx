@@ -223,48 +223,71 @@ export function App() {
     }
   };
 
+  const onlineCount = machines.filter(
+    (m) =>
+      m.status === 'online' &&
+      m.last_seen_at &&
+      Date.now() - new Date(m.last_seen_at).getTime() < 45000,
+  ).length;
+
   return (
     <div className={`app-shell ${currentScreen === 'live-task' ? 'chat-mode' : ''}`}>
       {currentScreen !== 'live-task' && (
         <header className="app-header">
           <div className="brand-group">
-            <div className="brand-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-                <line x1="8" y1="21" x2="16" y2="21" />
-                <line x1="12" y1="17" x2="12" y2="21" />
+            <div className="brand-icon" aria-hidden="true">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="4 17 10 11 4 5" />
+                <line x1="12" y1="19" x2="20" y2="19" />
               </svg>
             </div>
-            <span className="brand-title">Remote Hands</span>
+            <span className="brand-text">
+              <span className="brand-title">Remote Hands</span>
+              <span className="brand-sub">
+                {machines.length === 0 ? 'Not connected' : `${onlineCount} of ${machines.length} online`}
+              </span>
+            </span>
           </div>
           <div className="header-actions">
+            <button
+              type="button"
+              className="btn-header-icon"
+              onClick={loadMachines}
+              title="Refresh"
+              aria-label="Refresh machines list"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+              </svg>
+            </button>
             {!isStandalone && (
               <button
                 type="button"
-                className="btn-header-pill"
+                className="btn-header-icon"
                 onClick={() => setShowInstallModal(true)}
                 title="Add to Home Screen"
+                aria-label="Add to Home Screen"
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-                  <line x1="12" y1="18" x2="12.01" y2="18" />
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <polyline points="19 12 12 19 5 12" />
                 </svg>
-                <span>Install</span>
               </button>
             )}
             <button
               type="button"
-              className="btn-header-pill qr-button"
+              className="btn-header-icon"
               onClick={() => setShowPairModal(true)}
-              title="Pair with QR code"
+              title="Pair a computer"
+              aria-label="Pair a computer"
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
               </svg>
-              <span>Pair QR</span>
+              {pairingCode && <span className="header-dot" aria-hidden="true" />}
             </button>
           </div>
         </header>
@@ -272,30 +295,35 @@ export function App() {
 
       {currentScreen !== 'live-task' && (
         <div className="segmented-nav-wrapper">
-          <div className="segmented-control">
+          <div className="segmented-control" role="tablist" aria-label="Primary">
             <button
               type="button"
+              role="tab"
+              aria-selected={activeTab === 'devices'}
               className={clsx('segmented-button', activeTab === 'devices' && 'active')}
               onClick={() => setActiveTab('devices')}
             >
-              <span>💻 Devices</span>
+              <span>Devices</span>
+              {machines.length > 0 && <span className="tab-count">{machines.length}</span>}
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={activeTab === 'history'}
               className={clsx('segmented-button', activeTab === 'history' && 'active')}
               onClick={() => setActiveTab('history')}
             >
-              <span>💬 History</span>
+              <span>History</span>
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={activeTab === 'pairing'}
               className={clsx('segmented-button', activeTab === 'pairing' && 'active')}
               onClick={() => setActiveTab('pairing')}
             >
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span>📱 Pairing</span>
-                {pairingCode && <span className="status-dot" style={{ background: 'var(--claude-text-accent)' }} />}
-              </span>
+              <span>Pairing</span>
+              {pairingCode && <span className="tab-dot" aria-hidden="true" />}
             </button>
           </div>
         </div>
