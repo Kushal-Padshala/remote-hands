@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { ApprovalRow } from '@remote-hands/shared';
 
 export interface ApprovalSheetProps {
@@ -26,12 +26,34 @@ export function ApprovalSheet({
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
 
+  const [timeLeftSeconds, setTimeLeftSeconds] = useState<number>(() => {
+    if (!approval?.expires_at) return 600;
+    return Math.max(0, Math.round((new Date(approval.expires_at).getTime() - Date.now()) / 1000));
+  });
+
+  useEffect(() => {
+    if (!approval?.expires_at) return;
+    const update = () => {
+      const diff = Math.max(0, Math.round((new Date(approval.expires_at).getTime() - Date.now()) / 1000));
+      setTimeLeftSeconds(diff);
+    };
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [approval?.expires_at]);
+
   if (!approval) return null;
 
+  const isExpired = timeLeftSeconds <= 0;
   const isHighRisk = approval.risk === 'high';
   const previewImage = approval.frame_path || frameBase64;
 
+  const mins = Math.floor(timeLeftSeconds / 60);
+  const secs = timeLeftSeconds % 60;
+  const timeLabel = isExpired ? 'Expired' : `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+
   const handleConfirmReject = () => {
+    if (isExpired) return;
     onReject(approval.id, rejectionReason.trim() || undefined);
   };
 
@@ -43,9 +65,20 @@ export function ApprovalSheet({
         {isRejecting ? (
           <div data-testid="rejection-form">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                Why are you rejecting this?
-              </h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  Why are you rejecting this?
+                </h3>
+                <span
+                  style={{
+                    fontSize: '0.75rem',
+                    fontVariantNumeric: 'tabular-nums',
+                    color: isExpired ? 'var(--accent-rose)' : timeLeftSeconds < 60 ? 'var(--accent-amber)' : 'var(--text-muted)',
+                  }}
+                >
+                  ⏱ {timeLabel}
+                </span>
+              </div>
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -116,10 +149,10 @@ export function ApprovalSheet({
                 type="button"
                 className="btn btn-reject"
                 data-testid="confirm-reject-btn"
-                disabled={loading}
+                disabled={loading || isExpired}
                 onClick={handleConfirmReject}
               >
-                {loading ? 'Rejecting...' : 'Reject & Send'}
+                {loading ? 'Rejecting...' : isExpired ? 'Expired' : 'Reject & Send'}
               </button>
             </div>
           </div>
@@ -129,16 +162,27 @@ export function ApprovalSheet({
               <h3 style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                 Action Approval Required
               </h3>
-              <span
-                className="badge"
-                style={{
-                  background: isHighRisk ? 'rgba(244, 63, 94, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-                  color: isHighRisk ? 'var(--accent-rose)' : 'var(--accent-amber)',
-                  border: `1px solid ${isHighRisk ? 'rgba(244, 63, 94, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
-                }}
-              >
-                {approval.risk}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span
+                  style={{
+                    fontSize: '0.75rem',
+                    fontVariantNumeric: 'tabular-nums',
+                    color: isExpired ? 'var(--accent-rose)' : timeLeftSeconds < 60 ? 'var(--accent-amber)' : 'var(--text-muted)',
+                  }}
+                >
+                  ⏱ {timeLabel}
+                </span>
+                <span
+                  className="badge"
+                  style={{
+                    background: isHighRisk ? 'rgba(244, 63, 94, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                    color: isHighRisk ? 'var(--accent-rose)' : 'var(--accent-amber)',
+                    border: `1px solid ${isHighRisk ? 'rgba(244, 63, 94, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
+                  }}
+                >
+                  {approval.risk}
+                </span>
+              </div>
             </div>
 
             <div style={{ marginBottom: 12 }}>
@@ -211,7 +255,7 @@ export function ApprovalSheet({
               <button
                 className="btn btn-reject"
                 data-testid="reject-approval-btn"
-                disabled={loading}
+                disabled={loading || isExpired}
                 onClick={() => setIsRejecting(true)}
               >
                 Reject
@@ -219,10 +263,10 @@ export function ApprovalSheet({
               <button
                 className="btn btn-approve"
                 data-testid="approve-approval-btn"
-                disabled={loading}
+                disabled={loading || isExpired}
                 onClick={() => onApprove(approval.id)}
               >
-                {loading ? 'Confirming...' : 'Approve'}
+                {loading ? 'Confirming...' : isExpired ? 'Expired' : 'Approve'}
               </button>
             </div>
           </>

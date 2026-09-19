@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { CloudflareControlPlaneClient, DefaultFrameSource } from '@remote-hands/daemon';
-import type { ActionKind, RiskLevel } from '@remote-hands/shared';
+import { DEFAULT_APPROVAL_TIMEOUT_MS, type ActionKind, type RiskLevel } from '@remote-hands/shared';
 import type { CommandContext } from './setup.js';
 
 export interface ApproveOptions {
@@ -26,7 +26,7 @@ export function parseApproveArgs(args: string[]): ParsedApproveArgs {
   let action: ActionKind = 'other';
   let risk: RiskLevel = 'medium';
   let taskId: string | undefined = process.env.REMOTE_HANDS_TASK_ID;
-  let timeoutSeconds = 60;
+  let timeoutSeconds = Math.round(DEFAULT_APPROVAL_TIMEOUT_MS / 1000);
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;

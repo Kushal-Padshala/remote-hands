@@ -257,6 +257,95 @@ describe('Web App Workflow', () => {
     });
   });
 
+  it('dismisses approval sheet and displays error message when decideApproval fails with expired error', async () => {
+    vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+    vi.spyOn(apiClient, 'getApproval').mockResolvedValue({
+      approval: {
+        id: '66666666-6666-6666-8666-666666666666',
+        task_id: fakeTask.id,
+        owner_id: fakeTask.owner_id,
+        action_kind: 'publish',
+        summary: 'Post tweet: Hello world',
+        risk: 'high',
+        tool_payload: {},
+        frame_path: null,
+        decision: 'pending',
+        decided_at: null,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        created_at: new Date().toISOString(),
+      },
+    });
+    vi.spyOn(apiClient, 'decideApproval').mockRejectedValue(new Error('Cannot decide approval: request has expired'));
+
+    const socket = new MockSocket();
+    render(
+      <LiveTaskScreen
+        task={fakeTask}
+        onBack={() => {}}
+        webSocketFactory={() => socket as any}
+      />,
+    );
+
+    socket.triggerMessage({
+      type: 'approval.requested',
+      task_id: fakeTask.id,
+      approval_id: '66666666-6666-6666-8666-666666666666',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approval-sheet')).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId('approve-approval-btn'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('approval-sheet')).toBeNull();
+      expect(screen.getByText('Action approval expired. The pending request timed out.')).toBeDefined();
+    });
+  });
+
+  it('disables buttons when approval is already expired', async () => {
+    vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+    vi.spyOn(apiClient, 'getApproval').mockResolvedValue({
+      approval: {
+        id: '77777777-7777-7777-8777-777777777777',
+        task_id: fakeTask.id,
+        owner_id: fakeTask.owner_id,
+        action_kind: 'publish',
+        summary: 'Post tweet: Hello world',
+        risk: 'high',
+        tool_payload: {},
+        frame_path: null,
+        decision: 'pending',
+        decided_at: null,
+        expires_at: new Date(Date.now() - 5000).toISOString(),
+        created_at: new Date(Date.now() - 65000).toISOString(),
+      },
+    });
+
+    const socket = new MockSocket();
+    render(
+      <LiveTaskScreen
+        task={fakeTask}
+        onBack={() => {}}
+        webSocketFactory={() => socket as any}
+      />,
+    );
+
+    socket.triggerMessage({
+      type: 'approval.requested',
+      task_id: fakeTask.id,
+      approval_id: '77777777-7777-7777-8777-777777777777',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approval-sheet')).toBeDefined();
+      const approveBtn = screen.getByTestId('approve-approval-btn') as HTMLButtonElement;
+      expect(approveBtn.disabled).toBe(true);
+      expect(approveBtn.textContent).toBe('Expired');
+    });
+  });
+
   it('renders inline thinking status and expires old frame in 5s', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);

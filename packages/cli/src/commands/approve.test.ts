@@ -24,7 +24,7 @@ describe('parseApproveArgs', () => {
     expect(res.summary).toBe('Deploy to production');
     expect(res.action).toBe('other');
     expect(res.risk).toBe('medium');
-    expect(res.timeoutSeconds).toBe(60);
+    expect(res.timeoutSeconds).toBe(600);
   });
 
   it('parses flags with equals and spaces', () => {

@@ -846,7 +846,21 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
       await apiClient.decideApproval(approvalId, 'approved');
       setActiveApproval(null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.toLowerCase().includes('expired')) {
+        setActiveApproval(null);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `approval-expired-${Date.now()}`,
+            type: 'error',
+            text: 'Action approval expired. The pending request timed out.',
+            time: new Date().toISOString(),
+          },
+        ]);
+      } else {
+        alert(msg);
+      }
     } finally {
       setDecidingApproval(false);
     }
@@ -869,7 +883,21 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         ]);
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.toLowerCase().includes('expired')) {
+        setActiveApproval(null);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `approval-expired-${Date.now()}`,
+            type: 'error',
+            text: 'Action approval expired. The pending request timed out.',
+            time: new Date().toISOString(),
+          },
+        ]);
+      } else {
+        alert(msg);
+      }
     } finally {
       setDecidingApproval(false);
     }
