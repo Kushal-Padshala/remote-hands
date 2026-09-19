@@ -6,6 +6,7 @@ export interface ApprovalSheetProps {
   frameBase64?: string | null | undefined;
   onApprove: (approvalId: string) => Promise<void>;
   onReject: (approvalId: string, reason?: string) => Promise<void>;
+  onDismiss?: () => void;
   loading?: boolean | undefined;
 }
 
@@ -21,6 +22,7 @@ export function ApprovalSheet({
   frameBase64,
   onApprove,
   onReject,
+  onDismiss,
   loading,
 }: ApprovalSheetProps) {
   const [isRejecting, setIsRejecting] = useState(false);
@@ -58,9 +60,21 @@ export function ApprovalSheet({
   };
 
   return (
-    <div className="sheet-overlay" data-testid="approval-sheet">
+    <div
+      className="sheet-overlay"
+      data-testid="approval-sheet"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && onDismiss) {
+          onDismiss();
+        }
+      }}
+    >
       <div className="sheet-content">
-        <div className="sheet-grabber" />
+        <div
+          className="sheet-grabber"
+          onClick={onDismiss}
+          style={{ cursor: onDismiss ? 'pointer' : 'default' }}
+        />
 
         {isRejecting ? (
           <div data-testid="rejection-form">
@@ -79,15 +93,41 @@ export function ApprovalSheet({
                   ⏱ {timeLabel}
                 </span>
               </div>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                style={{ padding: '4px 10px', fontSize: '0.75rem', height: 'auto', minHeight: 'unset' }}
-                onClick={() => setIsRejecting(false)}
-                disabled={loading}
-              >
-                Back
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ padding: '4px 10px', fontSize: '0.75rem', height: 'auto', minHeight: 'unset' }}
+                  onClick={() => setIsRejecting(false)}
+                  disabled={loading}
+                >
+                  Back
+                </button>
+                {onDismiss && (
+                  <button
+                    type="button"
+                    data-testid="close-rejection-btn"
+                    onClick={onDismiss}
+                    aria-label="Close"
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: 'none',
+                      borderRadius: '50%',
+                      width: 28,
+                      height: 28,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      fontSize: '0.875rem',
+                      lineHeight: 1,
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
 
             <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: 12, lineHeight: 1.4 }}>
@@ -136,25 +176,39 @@ export function ApprovalSheet({
               }}
             />
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={loading}
-                onClick={() => setIsRejecting(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-reject"
-                data-testid="confirm-reject-btn"
-                disabled={loading || isExpired}
-                onClick={handleConfirmReject}
-              >
-                {loading ? 'Rejecting...' : isExpired ? 'Expired' : 'Reject & Send'}
-              </button>
-            </div>
+            {isExpired ? (
+              <div style={{ marginTop: 14 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  data-testid="dismiss-rejection-btn"
+                  style={{ width: '100%', justifyContent: 'center' }}
+                  onClick={onDismiss}
+                >
+                  Dismiss
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={loading}
+                  onClick={() => setIsRejecting(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-reject"
+                  data-testid="confirm-reject-btn"
+                  disabled={loading}
+                  onClick={handleConfirmReject}
+                >
+                  {loading ? 'Rejecting...' : 'Reject & Send'}
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <>
@@ -182,6 +236,31 @@ export function ApprovalSheet({
                 >
                   {approval.risk}
                 </span>
+                {onDismiss && (
+                  <button
+                    type="button"
+                    data-testid="close-approval-btn"
+                    onClick={onDismiss}
+                    aria-label="Close"
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: 'none',
+                      borderRadius: '50%',
+                      width: 28,
+                      height: 28,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      fontSize: '0.875rem',
+                      lineHeight: 1,
+                      marginLeft: 2,
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
             </div>
 
@@ -251,24 +330,38 @@ export function ApprovalSheet({
               </div>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
-              <button
-                className="btn btn-reject"
-                data-testid="reject-approval-btn"
-                disabled={loading || isExpired}
-                onClick={() => setIsRejecting(true)}
-              >
-                Reject
-              </button>
-              <button
-                className="btn btn-approve"
-                data-testid="approve-approval-btn"
-                disabled={loading || isExpired}
-                onClick={() => onApprove(approval.id)}
-              >
-                {loading ? 'Confirming...' : isExpired ? 'Expired' : 'Approve'}
-              </button>
-            </div>
+            {isExpired ? (
+              <div style={{ marginTop: 14 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  data-testid="dismiss-approval-btn"
+                  style={{ width: '100%', justifyContent: 'center' }}
+                  onClick={onDismiss}
+                >
+                  Dismiss
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
+                <button
+                  className="btn btn-reject"
+                  data-testid="reject-approval-btn"
+                  disabled={loading}
+                  onClick={() => setIsRejecting(true)}
+                >
+                  Reject
+                </button>
+                <button
+                  className="btn btn-approve"
+                  data-testid="approve-approval-btn"
+                  disabled={loading}
+                  onClick={() => onApprove(approval.id)}
+                >
+                  {loading ? 'Confirming...' : 'Approve'}
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>

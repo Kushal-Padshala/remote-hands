@@ -1200,6 +1200,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         frameBase64={frameBase64}
         onApprove={handleApprove}
         onReject={handleReject}
+        onDismiss={() => setActiveApproval(null)}
         loading={decidingApproval}
       />
     </div>

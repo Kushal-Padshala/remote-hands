@@ -340,9 +340,60 @@ describe('Web App Workflow', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('approval-sheet')).toBeDefined();
-      const approveBtn = screen.getByTestId('approve-approval-btn') as HTMLButtonElement;
-      expect(approveBtn.disabled).toBe(true);
-      expect(approveBtn.textContent).toBe('Expired');
+      const dismissBtn = screen.getByTestId('dismiss-approval-btn');
+      expect(dismissBtn).toBeDefined();
+      expect(dismissBtn.textContent).toBe('Dismiss');
+    });
+
+    fireEvent.click(screen.getByTestId('dismiss-approval-btn'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('approval-sheet')).toBeNull();
+    });
+  });
+
+  it('dismisses approval sheet when close button is clicked', async () => {
+    vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+    vi.spyOn(apiClient, 'getApproval').mockResolvedValue({
+      approval: {
+        id: '88888888-8888-8888-8888-888888888888',
+        task_id: fakeTask.id,
+        owner_id: fakeTask.owner_id,
+        action_kind: 'publish',
+        summary: 'Post tweet: Hello world',
+        risk: 'high',
+        tool_payload: {},
+        frame_path: null,
+        decision: 'pending',
+        decided_at: null,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        created_at: new Date().toISOString(),
+      },
+    });
+
+    const socket = new MockSocket();
+    render(
+      <LiveTaskScreen
+        task={fakeTask}
+        onBack={() => {}}
+        webSocketFactory={() => socket as any}
+      />,
+    );
+
+    socket.triggerMessage({
+      type: 'approval.requested',
+      task_id: fakeTask.id,
+      approval_id: '88888888-8888-8888-8888-888888888888',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approval-sheet')).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId('close-approval-btn'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('approval-sheet')).toBeNull();
     });
   });
 
