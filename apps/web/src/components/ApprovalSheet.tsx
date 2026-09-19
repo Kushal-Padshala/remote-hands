@@ -107,7 +107,7 @@ export function ApprovalSheet({
               <div className="approval-title-group">
                 <h3 className="approval-title">Why are you rejecting this?</h3>
                 <span className={`approval-timer ${isExpired ? 'expired' : isUrgent ? 'urgent' : ''}`}>
-                  <span aria-hidden="true">⏱</span> {timeLabel}
+                  {timeLabel}
                 </span>
               </div>
               <div className="approval-top-actions">
@@ -196,12 +196,16 @@ export function ApprovalSheet({
           <div className="approval-body">
             <div className="approval-topbar">
               <div className="approval-title-group">
-                <div className="approval-icon" aria-hidden="true">✦</div>
+                <div className="approval-icon" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  </svg>
+                </div>
                 <h3 className="approval-title">Action Approval Required</h3>
               </div>
               <div className="approval-top-actions">
                 <span className={`approval-timer ${isExpired ? 'expired' : isUrgent ? 'urgent' : ''}`}>
-                  <span aria-hidden="true">⏱</span> {timeLabel}
+                  {timeLabel}
                 </span>
                 <span className={`approval-risk ${isHighRisk ? 'high' : 'medium'}`}>
                   {approval.risk}
@@ -233,8 +237,12 @@ export function ApprovalSheet({
             {previewImage && (
               <div className="approval-preview">
                 <div className="approval-preview-header">
-                  <span aria-hidden="true">🖥️</span>
-                  <span>Live Screen Preview</span>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                    <line x1="8" y1="21" x2="16" y2="21" />
+                    <line x1="12" y1="17" x2="12" y2="21" />
+                  </svg>
+                  <span>Screen preview</span>
                 </div>
                 <img
                   src={previewImage}
