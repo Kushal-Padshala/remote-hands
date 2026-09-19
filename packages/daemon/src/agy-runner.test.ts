@@ -76,7 +76,62 @@ describe('buildAgyArgs', () => {
       'stream-json',
       '--print-timeout',
       '60m',
+      '--model',
+      'gemini-3.8-flash-high',
+      '--effort',
+      'low',
     ]);
+  });
+
+  it('omits --effort flag when model is claude', () => {
+    const argsLow = buildAgyArgs(
+      task({ model: 'claude-sonnet-4-6', effort: 'low' }),
+      { agyCommand: 'agy' },
+    );
+    expect(argsLow).toContain('--model');
+    expect(argsLow).toContain('claude-sonnet-4-6');
+    expect(argsLow).not.toContain('--effort');
+
+    const argsHigh = buildAgyArgs(
+      task({ model: 'claude-sonnet-4-6', effort: 'high' }),
+      { agyCommand: 'agy' },
+    );
+    expect(argsHigh).toContain('--model');
+    expect(argsHigh).toContain('claude-sonnet-4-6');
+    expect(argsHigh).not.toContain('--effort');
+  });
+
+  it('includes --model and --effort when model supports effort', () => {
+    const args = buildAgyArgs(
+      task({ model: 'gemini-3.8-flash', effort: 'medium' }),
+      { agyCommand: 'agy' },
+    );
+    expect(args).toContain('--model');
+    const modelIndex = args.indexOf('--model');
+    expect(args[modelIndex + 1]).toBe('gemini-3.8-flash');
+    expect(args).toContain('--effort');
+    const effortIndex = args.indexOf('--effort');
+    expect(args[effortIndex + 1]).toBe('medium');
+  });
+
+  it('falls back to gemini-3.8-flash-high when model is null', () => {
+    const args = buildAgyArgs(
+      task({ model: null }),
+      { agyCommand: 'agy' },
+    );
+    expect(args).toContain('--model');
+    const modelIndex = args.indexOf('--model');
+    expect(args[modelIndex + 1]).toBe('gemini-3.8-flash-high');
+  });
+
+  it('defaults effort to low when effort is null on a model that supports effort', () => {
+    const args = buildAgyArgs(
+      task({ model: 'gemini-3.8-flash', effort: null }),
+      { agyCommand: 'agy' },
+    );
+    expect(args).toContain('--effort');
+    const effortIndex = args.indexOf('--effort');
+    expect(args[effortIndex + 1]).toBe('low');
   });
 
   it('defaults effort to low instead of high to minimize startup latency', () => {

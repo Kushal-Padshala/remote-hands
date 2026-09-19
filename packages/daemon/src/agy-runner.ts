@@ -182,11 +182,12 @@ export function buildAgyArgs(task: Task, config: AgyArgConfig): readonly string[
   if (task.conversation_id) args.push('--conversation', task.conversation_id);
   if (task.mode && task.mode !== 'default') args.push('--mode', task.mode);
 
-  const model = task.model === null ? null : (task.model || 'gemini-3.8-flash-high');
-  const effort = task.effort === null ? null : (task.effort || 'low');
+  const model = task.model || 'gemini-3.8-flash-high';
+  const effort = task.effort || 'low';
+  const supportsEffort = !model.toLowerCase().includes('claude');
 
   if (model) args.push('--model', model);
-  if (effort) args.push('--effort', effort);
+  if (supportsEffort && effort) args.push('--effort', effort);
 
   return args;
 }
