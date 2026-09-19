@@ -34,7 +34,15 @@ export function ApprovalSheet({
   });
 
   useEffect(() => {
-    if (!approval?.expires_at) return;
+    setIsRejecting(false);
+    setRejectionReason('');
+  }, [approval?.id]);
+
+  useEffect(() => {
+    if (!approval?.expires_at) {
+      setTimeLeftSeconds(600);
+      return;
+    }
     const update = () => {
       const diff = Math.max(0, Math.round((new Date(approval.expires_at).getTime() - Date.now()) / 1000));
       setTimeLeftSeconds(diff);
@@ -42,7 +50,7 @@ export function ApprovalSheet({
     update();
     const interval = setInterval(update, 1000);
     return () => clearInterval(interval);
-  }, [approval?.expires_at]);
+  }, [approval?.id, approval?.expires_at]);
 
   if (!approval) return null;
 
@@ -54,9 +62,25 @@ export function ApprovalSheet({
   const secs = timeLeftSeconds % 60;
   const timeLabel = isExpired ? 'Expired' : `${mins}:${secs < 10 ? '0' : ''}${secs}`;
 
+  const handleCancelReject = () => {
+    setIsRejecting(false);
+    setRejectionReason('');
+  };
+
+  const handleDismiss = () => {
+    setIsRejecting(false);
+    setRejectionReason('');
+    if (onDismiss) {
+      onDismiss();
+    }
+  };
+
   const handleConfirmReject = () => {
     if (isExpired) return;
-    onReject(approval.id, rejectionReason.trim() || undefined);
+    const reason = rejectionReason.trim() || undefined;
+    setIsRejecting(false);
+    setRejectionReason('');
+    onReject(approval.id, reason);
   };
 
   return (
@@ -64,15 +88,15 @@ export function ApprovalSheet({
       className="sheet-overlay"
       data-testid="approval-sheet"
       onClick={(e) => {
-        if (e.target === e.currentTarget && onDismiss) {
-          onDismiss();
+        if (e.target === e.currentTarget) {
+          handleDismiss();
         }
       }}
     >
       <div className="sheet-content">
         <div
           className="sheet-grabber"
-          onClick={onDismiss}
+          onClick={handleDismiss}
           style={{ cursor: onDismiss ? 'pointer' : 'default' }}
         />
 
@@ -98,7 +122,7 @@ export function ApprovalSheet({
                   type="button"
                   className="btn btn-secondary"
                   style={{ padding: '4px 10px', fontSize: '0.75rem', height: 'auto', minHeight: 'unset' }}
-                  onClick={() => setIsRejecting(false)}
+                  onClick={handleCancelReject}
                   disabled={loading}
                 >
                   Back
@@ -107,7 +131,7 @@ export function ApprovalSheet({
                   <button
                     type="button"
                     data-testid="close-rejection-btn"
-                    onClick={onDismiss}
+                    onClick={handleDismiss}
                     aria-label="Close"
                     style={{
                       background: 'rgba(255, 255, 255, 0.08)',
@@ -183,7 +207,7 @@ export function ApprovalSheet({
                   className="btn btn-secondary"
                   data-testid="dismiss-rejection-btn"
                   style={{ width: '100%', justifyContent: 'center' }}
-                  onClick={onDismiss}
+                  onClick={handleDismiss}
                 >
                   Dismiss
                 </button>
@@ -194,7 +218,7 @@ export function ApprovalSheet({
                   type="button"
                   className="btn btn-secondary"
                   disabled={loading}
-                  onClick={() => setIsRejecting(false)}
+                  onClick={handleCancelReject}
                 >
                   Cancel
                 </button>
@@ -240,7 +264,7 @@ export function ApprovalSheet({
                   <button
                     type="button"
                     data-testid="close-approval-btn"
-                    onClick={onDismiss}
+                    onClick={handleDismiss}
                     aria-label="Close"
                     style={{
                       background: 'rgba(255, 255, 255, 0.08)',
@@ -337,7 +361,7 @@ export function ApprovalSheet({
                   className="btn btn-secondary"
                   data-testid="dismiss-approval-btn"
                   style={{ width: '100%', justifyContent: 'center' }}
-                  onClick={onDismiss}
+                  onClick={handleDismiss}
                 >
                   Dismiss
                 </button>

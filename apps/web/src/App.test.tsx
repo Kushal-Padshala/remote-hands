@@ -257,6 +257,101 @@ describe('Web App Workflow', () => {
     });
   });
 
+  it('resets rejection state when a new approval is requested after previous rejection', async () => {
+    vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+    vi.spyOn(apiClient, 'getApproval').mockImplementation(async (id: string) => ({
+      approval: {
+        id,
+        task_id: fakeTask.id,
+        owner_id: fakeTask.owner_id,
+        action_kind: 'publish',
+        summary: id.startsWith('7777') ? 'Post tweet: Updated tweet' : 'Post tweet: Initial draft',
+        risk: 'high',
+        tool_payload: {},
+        frame_path: null,
+        decision: 'pending',
+        decided_at: null,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        created_at: new Date().toISOString(),
+      },
+    }));
+    vi.spyOn(apiClient, 'decideApproval').mockResolvedValue({
+      approval: {
+        id: '55555555-5555-5555-8555-555555555555',
+        task_id: fakeTask.id,
+        owner_id: fakeTask.owner_id,
+        action_kind: 'publish',
+        summary: 'Post tweet',
+        risk: 'high',
+        tool_payload: {},
+        frame_path: null,
+        decision: 'rejected',
+        decided_at: new Date().toISOString(),
+        expires_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      },
+    });
+
+    const socket = new MockSocket();
+    render(
+      <LiveTaskScreen
+        task={fakeTask}
+        onBack={() => {}}
+        webSocketFactory={() => socket as any}
+      />,
+    );
+
+    socket.triggerMessage({
+      type: 'approval.requested',
+      task_id: fakeTask.id,
+      approval_id: '55555555-5555-5555-8555-555555555555',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approval-sheet')).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId('reject-approval-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('rejection-form')).toBeDefined();
+    });
+
+    const input = screen.getByTestId('rejection-reason-input') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'Put link in first reply' } });
+
+    fireEvent.click(screen.getByTestId('confirm-reject-btn'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('approval-sheet')).toBeNull();
+    });
+
+    socket.triggerMessage({
+      type: 'approval.requested',
+      task_id: fakeTask.id,
+      approval_id: '77777777-7777-4777-8777-777777777777',
+      summary: 'Post tweet: Updated tweet',
+      action_kind: 'publish',
+      risk: 'high',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('approval-sheet')).toBeDefined();
+      expect(screen.getByText('Action Approval Required')).toBeDefined();
+      expect(screen.queryByTestId('rejection-form')).toBeNull();
+      expect(screen.getByTestId('reject-approval-btn')).toBeDefined();
+      expect(screen.getByTestId('approve-approval-btn')).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId('reject-approval-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('rejection-form')).toBeDefined();
+      const freshInput = screen.getByTestId('rejection-reason-input') as HTMLTextAreaElement;
+      expect(freshInput.value).toBe('');
+    });
+  });
+
   it('dismisses approval sheet and displays error message when decideApproval fails with expired error', async () => {
     vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
     vi.spyOn(apiClient, 'getApproval').mockResolvedValue({
