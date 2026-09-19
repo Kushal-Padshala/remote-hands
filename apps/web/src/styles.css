@@ -33,7 +33,6 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  /* Editorial chat system — flat, neutral, no gradients or glows */
   --chat-bg: #0b0b0c;
   --chat-surface: #131314;
   --chat-surface-2: #1a1a1c;
@@ -101,7 +100,6 @@ body.chat-mode-active {
   flex-direction: column;
 }
 
-/* Editorial foundation */
 ::selection {
   background: #333336;
   color: #fff;
@@ -1348,7 +1346,6 @@ main {
   flex-shrink: 0;
 }
 
-/* Legacy grid class kept for compat, maps to list */
 .chat-suggestions-grid {
   display: flex;
   flex-direction: column;
