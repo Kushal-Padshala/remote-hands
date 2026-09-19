@@ -1,6 +1,6 @@
 {
   "name": "remote-hands-cli",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Phone-operated remote control plane for autonomous coding agents and browsers. Run tasks on your Mac or PC from your mobile phone with live screen streaming, human-in-the-loop approval gates, clamshell sleep prevention, and a 100% free Cloudflare serverless backend.",
   "keywords": [
     "remote-hands",
