@@ -1040,6 +1040,63 @@ main {
   color: var(--text-muted);
 }
 
+.home-no-results .home-meta-action {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Touch devices: no sticky hover states */
+@media (hover: none) {
+  .machine-row:hover {
+    background: transparent;
+  }
+
+  .machine-row:hover .machine-open {
+    background: transparent;
+    color: #6f6f76;
+  }
+
+  .machine-open:hover {
+    background: transparent;
+    color: #6f6f76;
+  }
+
+  .segmented-button:hover:not(.active) {
+    color: #6f6f76;
+  }
+
+  .btn-header-icon:hover {
+    background: transparent;
+    color: #a1a1aa;
+  }
+
+  .btn-icon:hover:not(:disabled) {
+    color: #a1a1aa;
+    border-color: #262628;
+  }
+
+  .home-meta-action:hover {
+    color: #a1a1aa;
+    text-decoration: none;
+  }
+
+  .home-search-clear:hover,
+  .home-error-retry:hover {
+    background: transparent;
+    color: #6f6f76;
+  }
+
+  .machine-row:active {
+    background: #161617;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skel-line {
+    animation: none;
+  }
+}
+
 .status-dot {
   width: 6px;
   height: 6px;
@@ -3911,6 +3968,36 @@ main {
   .machine-row {
     padding: 13px 10px 13px 16px;
   }
+
+  .machines-list {
+    border-radius: 14px;
+  }
+
+  .home-search,
+  .btn-icon {
+    height: 38px;
+  }
+
+  .btn-icon {
+    width: 38px;
+  }
+
+@media (min-width: 1024px) {
+  .app-header {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  .segmented-nav-wrapper {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  .app-main {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+}
 
   .history-tab {
     max-width: 860px;
