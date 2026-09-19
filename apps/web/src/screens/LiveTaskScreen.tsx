@@ -961,12 +961,33 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
       return '';
     }
   };
-  const promptSuggestions: { title: string; sub: string; icon: string }[] = [
-    { title: 'Check git status & recent changes', sub: 'Review diffs and history', icon: '🌿' },
-    { title: 'Open browser and search web', sub: 'Navigate and research', icon: '🌐' },
-    { title: 'Inspect running processes', sub: 'Check system health', icon: '⚡' },
-    { title: 'Run tests and verify build', sub: 'Validate your code', icon: '✅' },
+  const promptSuggestions: { title: string; sub: string; icon: 'branch' | 'globe' | 'activity' | 'check' }[] = [
+    { title: 'Check git status & recent changes', sub: 'Review diffs and history', icon: 'branch' },
+    { title: 'Open browser and search web', sub: 'Navigate and research', icon: 'globe' },
+    { title: 'Inspect running processes', sub: 'Check system health', icon: 'activity' },
+    { title: 'Run tests and verify build', sub: 'Validate your code', icon: 'check' },
   ];
+  const suggestionIcon = (kind: 'branch' | 'globe' | 'activity' | 'check') => {
+    const common = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
+    if (kind === 'branch') {
+      return (
+        <svg {...common} aria-hidden="true"><line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" /></svg>
+      );
+    }
+    if (kind === 'globe') {
+      return (
+        <svg {...common} aria-hidden="true"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
+      );
+    }
+    if (kind === 'activity') {
+      return (
+        <svg {...common} aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
+      );
+    }
+    return (
+      <svg {...common} aria-hidden="true"><polyline points="20 6 9 17 4 12" /></svg>
+    );
+  };
 
   return (
     <div
@@ -1015,25 +1036,34 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         {messages.length === 0 && (
           <div className="chat-welcome-state">
             <div className="chat-welcome-icon">
-              <div className="chat-welcome-orb-glow">
-                <ThinkingOrb state="breathing" size={64} theme="dark" role="presentation" />
+              <div className="chat-welcome-mark" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                  <line x1="8" y1="21" x2="16" y2="21" />
+                  <line x1="12" y1="17" x2="12" y2="21" />
+                </svg>
               </div>
             </div>
-            <div className="chat-welcome-eyebrow">
+            <div className="chat-welcome-meta">
               <span className="status-dot" />
-              <span>{isMachineOnline ? 'Connected' : 'Ready'} · {resolvedMachineName}</span>
+              <span>{resolvedMachineName} · {isMachineOnline ? 'Online' : 'Offline'}</span>
             </div>
             <h3 className="chat-welcome-title">New Task on {resolvedMachineName}</h3>
             <p className="chat-welcome-desc">
-              Message <span className="chat-welcome-title-accent" style={{ fontWeight: 650 }}>agy</span> below to browse, code, and run system actions directly on this machine.
+              Type a task below. agy runs it on this machine and asks before anything sensitive.
             </p>
             {!isMachineOnline && (
               <div className="chat-offline-notice">
-                <span aria-hidden="true">⚠️</span>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
                 <span>Computer offline. Run <code>rh start</code> in terminal to connect.</span>
               </div>
             )}
             <div className="chat-suggestions-grid">
+              <div className="chat-suggestions-label">Try</div>
               {promptSuggestions.map((suggestion) => (
                 <button
                   key={suggestion.title}
@@ -1044,10 +1074,15 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
                     textareaRef.current?.focus();
                   }}
                 >
-                  <span className="chat-suggestion-icon" aria-hidden="true">{suggestion.icon}</span>
+                  <span className="chat-suggestion-icon" aria-hidden="true">{suggestionIcon(suggestion.icon)}</span>
                   <span className="chat-suggestion-text">
                     <span className="chat-suggestion-title">{suggestion.title}</span>
                     <span className="chat-suggestion-sub">{suggestion.sub}</span>
+                  </span>
+                  <span className="chat-suggestion-chevron" aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
                   </span>
                 </button>
               ))}
@@ -1083,7 +1118,6 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             return (
               <div key={item.message.id} className="chat-message-agent-wrap">
                 <div className="chat-agent-row">
-                  <div className="chat-agent-avatar" aria-hidden="true">✦</div>
                   <span className="chat-agent-name">agy</span>
                   {item.message.time && (
                     <span className="chat-agent-time">{formatMessageTime(item.message.time)}</span>
@@ -1102,7 +1136,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           if (item.kind === 'error') {
             return (
               <div key={item.message.id} className="error-banner" style={{ margin: '4px 0' }}>
-                <div className="error-banner-title">Something went wrong</div>
+                <div className="error-banner-title">Error</div>
                 <div style={{ fontSize: '0.8125rem' }}>{item.message.text}</div>
               </div>
             );
