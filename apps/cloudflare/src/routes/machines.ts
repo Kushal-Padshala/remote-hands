@@ -33,7 +33,13 @@ export async function handleMachineHeartbeat(machineId: string, request: Request
     throw new NotFoundError('Machine not found');
   }
 
-  await repo.updateHeartbeat(machineId, new Date().toISOString());
+  const lastSeenMs = machine.last_seen_at ? Date.parse(machine.last_seen_at) : 0;
+  const now = Date.now();
+  if (machine.status === 'online' && now - lastSeenMs < 60_000) {
+    return jsonOk({ machine });
+  }
+
+  await repo.updateHeartbeat(machineId, new Date(now).toISOString());
   const updated = await repo.getById(machineId);
   return jsonOk({ machine: updated });
 }
