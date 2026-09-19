@@ -2279,67 +2279,58 @@ main {
 
 .chat-input-container {
   position: relative;
-  bottom: auto;
-  left: auto;
-  right: auto;
   width: 100%;
   max-width: 100%;
   margin: 0 auto;
   flex-shrink: 0;
-  padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 10px)) 14px;
-  background: linear-gradient(180deg, transparent 0%, rgba(16, 16, 15, 0.88) 28%, rgba(16, 16, 15, 0.96) 100%);
-  backdrop-filter: blur(24px) saturate(1.15);
-  -webkit-backdrop-filter: blur(24px) saturate(1.15);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 8px)) 12px;
+  background: #0b0b0c;
+  border-top: 1px solid #1e1e21;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
   z-index: 40;
 }
 
 .chat-input-container.keyboard-open {
   padding-bottom: 8px;
-  background: rgba(16, 16, 15, 0.96);
 }
 
 .chat-composer-card {
   display: flex;
   flex-direction: column;
-  background: rgba(30, 29, 28, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 20px;
-  padding: 12px 12px 10px 16px;
-  gap: 8px;
-  transition: border-color 200ms var(--chat-ease), box-shadow 200ms var(--chat-ease), transform 200ms var(--chat-ease), background-color 200ms var(--chat-ease);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  position: relative;
+  background: #131314;
+  border: 1px solid #262628;
+  border-radius: 12px;
+  padding: 10px 10px 8px 14px;
+  gap: 6px;
+  transition: border-color 120ms ease;
 }
 
 .chat-composer-card:focus-within {
-  border-color: rgba(224, 120, 86, 0.45);
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5), 0 0 0 3px rgba(224, 120, 86, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  background: rgba(32, 31, 30, 0.96);
+  border-color: #3a3a3e;
+  background: #141415;
 }
 
 .chat-input-field {
   width: 100%;
   background: transparent;
   border: none;
-  color: var(--chat-text, var(--claude-text));
+  color: var(--chat-text);
   font-size: 0.9375rem;
-  line-height: 1.55;
-  letter-spacing: -0.011em;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
   outline: none;
   font-family: inherit;
   resize: none;
-  min-height: 26px;
+  min-height: 24px;
   max-height: 120px;
   overflow-y: auto;
   padding: 0;
 }
 
 .chat-input-field::placeholder {
-  color: var(--chat-text-3, var(--claude-text-muted));
+  color: var(--chat-text-3);
 }
 
 .chat-composer-actions {
@@ -2353,13 +2344,15 @@ main {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .chat-composer-hint {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   color: var(--chat-text-3);
-  letter-spacing: 0.01em;
-  padding-left: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   user-select: none;
 }
 
@@ -2370,77 +2363,56 @@ main {
 }
 
 .chat-send-button {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  background: var(--chat-accent-gradient);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: #ffffff;
+  background: #ededed;
+  border: 1px solid #ededed;
+  color: #0b0b0c;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  transition: all 180ms var(--chat-ease);
-  box-shadow: 0 4px 16px rgba(217, 98, 60, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transition: background-color 120ms ease, border-color 120ms ease;
 }
 
 .chat-send-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(217, 98, 60, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.22);
-  filter: brightness(1.06);
+  background: #ffffff;
+  border-color: #ffffff;
 }
 
 .chat-send-button:disabled {
-  opacity: 1;
+  background: #1e1e20;
+  border-color: #262628;
+  color: #52525b;
   cursor: not-allowed;
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.07);
-  color: var(--chat-text-3);
-  box-shadow: none;
 }
 
 .chat-send-button:not(:disabled):active {
-  transform: scale(0.93);
-  filter: brightness(0.96);
+  background: #d4d4d8;
 }
 
 .chat-send-button.stop {
-  background: linear-gradient(135deg, #f87171 0%, #dc2626 100%);
-  border-color: rgba(255, 255, 255, 0.16);
-  color: #ffffff;
-  box-shadow: 0 4px 16px rgba(220, 38, 38, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  animation: glowPulse 1.6s ease-in-out infinite;
+  background: #1e1e20;
+  border-color: #333336;
+  color: #ededed;
 }
 
 .chat-send-button.stop:active {
-  transform: scale(0.93);
-  background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+  background: #2a2a2e;
 }
 
 .chat-composer-footer {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
   padding: 0 4px;
 }
 
 .chat-composer-footer-text {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   color: var(--chat-text-3);
-  letter-spacing: 0.01em;
-}
-
-.chat-composer-footer kbd {
-  font-family: var(--font-mono);
-  font-size: 0.625rem;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-bottom-width: 2px;
-  border-radius: 5px;
-  padding: 1px 5px;
-  color: var(--chat-text-2);
 }
 
 .frame-meta-bar {
@@ -3135,36 +3107,32 @@ main {
 }
 
 .voice-btn {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  color: var(--chat-text-2, var(--claude-text-secondary));
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--chat-text-3);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  position: relative;
-  transition: all 180ms var(--chat-ease);
+  transition: background-color 120ms ease, color 120ms ease;
   user-select: none;
-  box-shadow: var(--chat-shadow-sm);
 }
 
 .voice-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.09);
-  color: var(--chat-text, var(--claude-text));
-  border-color: rgba(255, 255, 255, 0.16);
-  transform: translateY(-1px);
+  background: #1e1e20;
+  color: var(--chat-text);
 }
 
 .voice-btn:active:not(:disabled) {
-  transform: scale(0.93);
+  background: #262628;
 }
 
 .voice-btn:disabled {
-  opacity: 0.35;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
@@ -3174,11 +3142,9 @@ main {
 }
 
 .voice-btn.listening {
-  background: rgba(239, 68, 68, 0.16);
-  border-color: rgba(239, 68, 68, 0.5);
-  color: #f87171;
-  box-shadow: 0 0 18px rgba(239, 68, 68, 0.4);
-  animation: voiceGlow 1.8s ease-in-out infinite alternate;
+  background: #1e1e20;
+  border-color: #333336;
+  color: #e5484d;
 }
 
 @keyframes voiceGlow {

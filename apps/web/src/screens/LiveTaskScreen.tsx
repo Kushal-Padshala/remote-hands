@@ -1233,7 +1233,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
                 disabled={sendingMessage}
               />
               <span className="chat-composer-hint">
-                {isWorking ? 'agy is working — you can interrupt anytime' : 'Ask anything on this Mac'}
+                {isWorking ? 'Working — you can interrupt' : 'Ask anything'}
               </span>
             </div>
             <div className="chat-composer-right">
@@ -1245,8 +1245,8 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
                   aria-label="Stop task"
                   title="Stop current task"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <rect x="5" y="5" width="14" height="14" rx="3" />
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
                   </svg>
                 </button>
               ) : (
@@ -1258,7 +1258,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
                   aria-label="Send message"
                   title="Send message"
                 >
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'translateY(-0.5px)' }} aria-hidden="true">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <line x1="12" y1="19" x2="12" y2="5" />
                     <polyline points="5 12 12 5 19 12" />
                   </svg>
@@ -1268,7 +1268,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           </div>
         </div>
         <div className="chat-composer-footer" aria-hidden="true">
-          <span className="chat-composer-footer-text"><kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for new line</span>
+          <span className="chat-composer-footer-text">Enter to send · Shift + Enter for new line</span>
         </div>
       </div>
 
