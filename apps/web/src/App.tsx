@@ -103,12 +103,14 @@ export function App() {
       }
     } catch (err: any) {
       const msg = err?.message || 'Failed to load machines';
-      setError(msg);
-      if (msg.includes('Valid session token required') || msg.includes('401') || msg.includes('Unauthorized')) {
+      if (msg.includes('Valid session token required') || msg.includes('Owner session required') || msg.includes('401') || msg.includes('Unauthorized')) {
+        setError(null);
         setPairingCode(undefined);
         try {
           localStorage.removeItem('rh_pairing_code');
         } catch {}
+      } else {
+        setError(msg);
       }
     } finally {
       setLoading(false);
@@ -269,7 +271,7 @@ export function App() {
       )}
 
       {currentScreen !== 'live-task' && (
-        <div style={{ padding: '8px 16px 0 16px' }}>
+        <div className="segmented-nav-wrapper">
           <div className="segmented-control">
             <button
               type="button"
@@ -292,7 +294,7 @@ export function App() {
             >
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span>📱 Pairing</span>
-                {pairingCode && <span className="status-dot" style={{ background: 'var(--accent-emerald)' }} />}
+                {pairingCode && <span className="status-dot" style={{ background: 'var(--claude-text-accent)' }} />}
               </span>
             </button>
           </div>
