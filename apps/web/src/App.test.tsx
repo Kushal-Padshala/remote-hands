@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import type { MachineRow, TaskRow } from '@remote-hands/shared';
 import { App } from './App.js';
+import { NewTaskScreen } from './screens/NewTaskScreen.js';
 import { LiveTaskScreen, inferTaskKind } from './screens/LiveTaskScreen.js';
 import { apiClient } from './api/client.js';
 import { ErrorBoundary } from './components/ErrorBoundary.js';
@@ -871,5 +872,244 @@ describe('Web App Workflow', () => {
     );
 
     expect(container).toBeDefined();
+  });
+
+  describe('Model and Reasoning Effort Selection', () => {
+    beforeEach(() => {
+      localStorage.clear();
+      vi.restoreAllMocks();
+    });
+
+    it('renders model selector and effort controls in NewTaskScreen with default values', () => {
+      const onCreateTask = vi.fn();
+      render(
+        <NewTaskScreen
+          machine={fakeMachine}
+          onCreateTask={onCreateTask}
+          onCancel={() => {}}
+          loading={false}
+        />,
+      );
+
+      const modelSelect = screen.getByTestId('task-model-select') as HTMLSelectElement;
+      expect(modelSelect).toBeDefined();
+      expect(modelSelect.value).toBe('gemini-3.8-flash');
+
+      const effortGroup = screen.getByTestId('task-effort-group');
+      expect(effortGroup).toBeDefined();
+
+      const highBtn = screen.getByTestId('effort-btn-high');
+      const medBtn = screen.getByTestId('effort-btn-medium');
+      const lowBtn = screen.getByTestId('effort-btn-low');
+
+      expect(highBtn.classList.contains('active')).toBe(true);
+      expect(medBtn.classList.contains('active')).toBe(false);
+      expect(lowBtn.classList.contains('active')).toBe(false);
+    });
+
+    it('passes selected model and effort to onCreateTask and persists selection in localStorage', async () => {
+      const onCreateTask = vi.fn().mockResolvedValue(undefined);
+      render(
+        <NewTaskScreen
+          machine={fakeMachine}
+          onCreateTask={onCreateTask}
+          onCancel={() => {}}
+          loading={false}
+        />,
+      );
+
+      const modelSelect = screen.getByTestId('task-model-select');
+      fireEvent.change(modelSelect, { target: { value: 'gemini-3.7-flash' } });
+
+      const medBtn = screen.getByTestId('effort-btn-medium');
+      fireEvent.click(medBtn);
+
+      expect(localStorage.getItem('rh_model')).toBe('gemini-3.7-flash');
+      expect(localStorage.getItem('rh_effort')).toBe('medium');
+
+      const input = screen.getByTestId('task-prompt-input');
+      fireEvent.change(input, { target: { value: 'Optimize database indexes' } });
+
+      fireEvent.click(screen.getByTestId('submit-task-btn'));
+
+      await waitFor(() => {
+        expect(onCreateTask).toHaveBeenCalledWith(
+          'Optimize database indexes',
+          'browser',
+          'default',
+          'gemini-3.7-flash',
+          'medium',
+        );
+      });
+    });
+
+    it('initializes NewTaskScreen model and effort from localStorage when available', () => {
+      localStorage.setItem('rh_model', 'gemini-3.1-pro');
+      localStorage.setItem('rh_effort', 'low');
+
+      render(
+        <NewTaskScreen
+          machine={fakeMachine}
+          onCreateTask={vi.fn()}
+          onCancel={() => {}}
+          loading={false}
+        />,
+      );
+
+      const modelSelect = screen.getByTestId('task-model-select') as HTMLSelectElement;
+      expect(modelSelect.value).toBe('gemini-3.1-pro');
+
+      const lowBtn = screen.getByTestId('effort-btn-low');
+      expect(lowBtn.classList.contains('active')).toBe(true);
+    });
+
+    it('disables effort controls when Claude model is selected and omits effort on submit', async () => {
+      const onCreateTask = vi.fn().mockResolvedValue(undefined);
+      render(
+        <NewTaskScreen
+          machine={fakeMachine}
+          onCreateTask={onCreateTask}
+          onCancel={() => {}}
+          loading={false}
+        />,
+      );
+
+      const modelSelect = screen.getByTestId('task-model-select');
+      fireEvent.change(modelSelect, { target: { value: 'claude-sonnet-4-6' } });
+
+      expect(localStorage.getItem('rh_model')).toBe('claude-sonnet-4-6');
+
+      const highBtn = screen.getByTestId('effort-btn-high');
+      expect(highBtn.hasAttribute('disabled')).toBe(true);
+
+      const input = screen.getByTestId('task-prompt-input');
+      fireEvent.change(input, { target: { value: 'Analyze server architecture' } });
+
+      fireEvent.click(screen.getByTestId('submit-task-btn'));
+
+      await waitFor(() => {
+        expect(onCreateTask).toHaveBeenCalledWith(
+          'Analyze server architecture',
+          'browser',
+          'default',
+          'claude-sonnet-4-6',
+          undefined,
+        );
+      });
+    });
+
+    it('forwards model and effort from NewTaskScreen in App to apiClient.createTask', async () => {
+      vi.spyOn(apiClient, 'listMachines').mockResolvedValue([fakeMachine]);
+      const createSpy = vi.spyOn(apiClient, 'createTask').mockResolvedValue(fakeTask);
+      vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+      vi.spyOn(apiClient, 'createTaskWebSocket').mockReturnValue(new MockSocket() as any);
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Work Laptop')).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByTestId(`create-task-btn-${fakeMachine.id}`));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('task-prompt-input')).toBeDefined();
+      });
+
+      const modelPill = screen.getByTestId('composer-model-pill');
+      expect(modelPill).toBeDefined();
+      expect(modelPill.textContent).toContain('Gemini 3.8 · High');
+    });
+
+    it('provides model & effort controls in LiveTaskScreen and uses selected model for subsequent messages', async () => {
+      vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+      const createSpy = vi.spyOn(apiClient, 'createTask').mockResolvedValue({
+        ...fakeTask,
+        id: 'task-turn-2',
+        conversation_id: 'conv-123',
+      });
+      const socket = new MockSocket();
+
+      render(
+        <LiveTaskScreen
+          task={{ ...fakeTask, id: 'task-turn-1', conversation_id: 'conv-123', status: 'done', model: 'gemini-3.8-flash', effort: 'high' }}
+          onBack={() => {}}
+          webSocketFactory={() => socket as any}
+        />,
+      );
+
+      const pill = screen.getByTestId('composer-model-pill');
+      expect(pill).toBeDefined();
+      expect(pill.textContent).toContain('Gemini 3.8 · High');
+
+      fireEvent.click(pill);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('composer-model-popover')).toBeDefined();
+      });
+
+      const claudeBtn = screen.getByTestId('model-option-claude-opus-4-6-thinking');
+      fireEvent.click(claudeBtn);
+
+      expect(localStorage.getItem('rh_model')).toBe('claude-opus-4-6-thinking');
+
+      const input = screen.getByTestId('task-prompt-input');
+      fireEvent.change(input, { target: { value: 'Refactor auth service' } });
+      fireEvent.click(screen.getByTestId('submit-task-btn'));
+
+      await waitFor(() => {
+        expect(createSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            prompt: 'Refactor auth service',
+            model: 'claude-opus-4-6-thinking',
+            effort: undefined,
+          }),
+        );
+      });
+    });
+
+    it('updates effort in LiveTaskScreen popover and passes it for subsequent messages', async () => {
+      vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+      const createSpy = vi.spyOn(apiClient, 'createTask').mockResolvedValue({
+        ...fakeTask,
+        id: 'task-turn-3',
+        conversation_id: 'conv-456',
+      });
+      const socket = new MockSocket();
+
+      render(
+        <LiveTaskScreen
+          task={{ ...fakeTask, id: 'task-turn-1', conversation_id: 'conv-456', status: 'done', model: 'gemini-3.7-flash', effort: 'high' }}
+          onBack={() => {}}
+          webSocketFactory={() => socket as any}
+        />,
+      );
+
+      const pill = screen.getByTestId('composer-model-pill');
+      fireEvent.click(pill);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('composer-model-popover')).toBeDefined();
+      });
+
+      const lowEffortBtn = screen.getByTestId('effort-option-low');
+      fireEvent.click(lowEffortBtn);
+
+      expect(localStorage.getItem('rh_effort')).toBe('low');
+
+      const input = screen.getByTestId('task-prompt-input');
+      fireEvent.change(input, { target: { value: 'Inspect logs' } });
+      fireEvent.click(screen.getByTestId('submit-task-btn'));
+
+      await waitFor(() => {
+        expect(createSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            prompt: 'Inspect logs',
+            model: 'gemini-3.7-flash',
+            effort: 'low',
+          }),
+        );
+      });
+    });
   });
 });

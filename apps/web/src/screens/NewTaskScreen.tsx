@@ -2,10 +2,19 @@ import { useState, useRef } from 'react';
 import type { MachineRow, TaskKind, TaskMode } from '@remote-hands/shared';
 import { SafeThinkingOrb as ThinkingOrb } from '../components/SafeThinkingOrb.js';
 import { useVoiceInput } from '../hooks/useVoiceInput.js';
+import {
+  SUPPORTED_MODELS,
+  EFFORT_OPTIONS,
+  DEFAULT_MODEL,
+  DEFAULT_EFFORT,
+  isClaudeModel,
+  getModelOption,
+  getValidEffortForModel,
+} from '../models.js';
 
 export interface NewTaskScreenProps {
   machine: MachineRow;
-  onCreateTask: (prompt: string, kind: TaskKind, mode: TaskMode) => Promise<void>;
+  onCreateTask: (prompt: string, kind: TaskKind, mode: TaskMode, model?: string, effort?: string) => Promise<void>;
   onCancel: () => void;
   loading: boolean;
 }
@@ -26,7 +35,43 @@ export function NewTaskScreen({ machine, onCreateTask, onCancel, loading }: NewT
   const [prompt, setPrompt] = useState('');
   const [kind, setKind] = useState<TaskKind>('browser');
   const [mode, setMode] = useState<TaskMode>('default');
+  const [model, setModel] = useState<string>(() => {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem('rh_model') || DEFAULT_MODEL;
+    }
+    return DEFAULT_MODEL;
+  });
+  const [effort, setEffort] = useState<string>(() => {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem('rh_effort') || DEFAULT_EFFORT;
+    }
+    return DEFAULT_EFFORT;
+  });
   const voiceBasePromptRef = useRef('');
+
+  const isClaude = isClaudeModel(model);
+  const currentModelOption = getModelOption(model);
+
+  const handleModelChange = (nextModel: string) => {
+    setModel(nextModel);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('rh_model', nextModel);
+    }
+    const nextEffort = getValidEffortForModel(nextModel, effort);
+    if (nextEffort !== effort) {
+      setEffort(nextEffort);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('rh_effort', nextEffort);
+      }
+    }
+  };
+
+  const handleEffortChange = (nextEffort: string) => {
+    setEffort(nextEffort);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('rh_effort', nextEffort);
+    }
+  };
 
   const handleTranscriptChange = (spokenText: string) => {
     const fullText = voiceBasePromptRef.current
@@ -60,7 +105,7 @@ export function NewTaskScreen({ machine, onCreateTask, onCancel, loading }: NewT
       stopVoiceListening();
     }
     if (!prompt.trim() || loading) return;
-    onCreateTask(prompt.trim(), kind, mode);
+    onCreateTask(prompt.trim(), kind, mode, model, isClaude ? undefined : effort);
   };
 
   return (
@@ -175,6 +220,65 @@ export function NewTaskScreen({ machine, onCreateTask, onCancel, loading }: NewT
             <option value="default">Default</option>
             <option value="plan">Plan</option>
             <option value="accept-edits">Accept Edits</option>
+          </select>
+        </div>
+
+        <div className="segmented-group">
+          <label className="segmented-label" htmlFor="task-model-select">Model</label>
+          <div className="model-select-wrapper">
+            <select
+              id="task-model-select"
+              data-testid="task-model-select"
+              className="select-input model-select"
+              value={model}
+              onChange={(e) => handleModelChange(e.target.value)}
+            >
+              {SUPPORTED_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+            <span className="select-arrow" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </span>
+          </div>
+        </div>
+
+        <div className="segmented-group" data-testid="task-effort-group">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <label className="segmented-label">Reasoning Effort</label>
+            {isClaude && <span className="effort-badge-hint" data-testid="effort-claude-hint">Adaptive Thinking</span>}
+          </div>
+          <div className={`segmented-control ${isClaude ? 'is-disabled' : ''}`}>
+            {EFFORT_OPTIONS.map((eff) => {
+              const isSupported = !isClaude && currentModelOption.supportedEfforts.includes(eff.value);
+              return (
+                <button
+                  key={eff.value}
+                  type="button"
+                  data-testid={`effort-btn-${eff.value}`}
+                  className={`segmented-button ${!isClaude && effort === eff.value ? 'active' : ''} ${!isSupported ? 'disabled' : ''}`}
+                  disabled={!isSupported}
+                  onClick={() => isSupported && handleEffortChange(eff.value)}
+                >
+                  <span>{eff.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <select
+            data-testid="task-effort-select"
+            value={effort}
+            disabled={isClaude}
+            onChange={(e) => handleEffortChange(e.target.value)}
+            style={{ display: 'none' }}
+          >
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
           </select>
         </div>
 

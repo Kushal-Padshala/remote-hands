@@ -14,6 +14,16 @@ import { MarkdownView } from '../components/MarkdownView.js';
 import { SafeThinkingOrb as ThinkingOrb } from '../components/SafeThinkingOrb.js';
 import { VoiceButton } from '../components/VoiceButton.js';
 import { useVoiceInput } from '../hooks/useVoiceInput.js';
+import {
+  SUPPORTED_MODELS,
+  EFFORT_OPTIONS,
+  DEFAULT_MODEL,
+  DEFAULT_EFFORT,
+  isClaudeModel,
+  formatModelBadge,
+  getModelOption,
+  getValidEffortForModel,
+} from '../models.js';
 
 export function inferTaskKind(prompt: string): TaskKind {
   const lower = prompt.toLowerCase();
@@ -163,6 +173,24 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(task?.id ?? null);
   const [conversationId, setConversationId] = useState<string | undefined>(task?.conversation_id ?? undefined);
   const [taskKind, setTaskKind] = useState<TaskKind>(task?.kind ?? 'browser');
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    if (task?.model) return task.model;
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem('rh_model');
+      if (stored) return stored;
+    }
+    return DEFAULT_MODEL;
+  });
+  const [selectedEffort, setSelectedEffort] = useState<string>(() => {
+    if (task?.effort) return task.effort;
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem('rh_effort');
+      if (stored) return stored;
+    }
+    return DEFAULT_EFFORT;
+  });
+  const [showModelPicker, setShowModelPicker] = useState(false);
+  const modelPickerRef = useRef<HTMLDivElement | null>(null);
   const [frameBase64, setFrameBase64] = useState<string | null>(null);
   const [showFrame, setShowFrame] = useState(true);
   const [activeApproval, setActiveApproval] = useState<ApprovalRow | null>(null);
@@ -193,7 +221,53 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
       if (task.kind) setTaskKind(task.kind);
       setIsWorking(isTaskActive(task));
     }
-  }, [task?.id]);
+    if (task?.model) {
+      setSelectedModel(task.model);
+    }
+    if (task?.effort) {
+      setSelectedEffort(task.effort);
+    }
+  }, [task?.id, task?.model, task?.effort]);
+
+  useEffect(() => {
+    if (!showModelPicker) return;
+    const handleOutsideClick = (e: MouseEvent | TouchEvent) => {
+      if (modelPickerRef.current && !modelPickerRef.current.contains(e.target as Node)) {
+        setShowModelPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, [showModelPicker]);
+
+  const handleSelectModel = (nextModel: string) => {
+    setSelectedModel(nextModel);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('rh_model', nextModel);
+    }
+    const nextEffort = getValidEffortForModel(nextModel, selectedEffort);
+    if (nextEffort !== selectedEffort) {
+      setSelectedEffort(nextEffort);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('rh_effort', nextEffort);
+      }
+    }
+    if (isClaudeModel(nextModel)) {
+      setShowModelPicker(false);
+    }
+  };
+
+  const handleSelectEffort = (nextEffort: string) => {
+    setSelectedEffort(nextEffort);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('rh_effort', nextEffort);
+    }
+    setShowModelPicker(false);
+  };
 
   useEffect(() => {
     if (task?.kind) {
@@ -776,8 +850,8 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         mode: task?.mode ?? 'default',
         conversation_id: resolvedConversationId,
         workspace_path: task?.workspace_path ?? undefined,
-        model: 'gemini-3.8-flash-high',
-        effort: 'low',
+        model: selectedModel,
+        effort: isClaudeModel(selectedModel) ? undefined : selectedEffort,
       });
       setFrameBase64(null);
       setCurrentTaskId(nextTask.id);
@@ -1232,6 +1306,77 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
                 onToggle={handleToggleVoice}
                 disabled={sendingMessage}
               />
+              <div className="composer-model-picker-anchor" ref={modelPickerRef}>
+                <button
+                  type="button"
+                  className={`composer-model-pill ${showModelPicker ? 'active' : ''}`}
+                  data-testid="composer-model-pill"
+                  onClick={() => setShowModelPicker(!showModelPicker)}
+                  title="Select AI model and reasoning effort"
+                  aria-expanded={showModelPicker}
+                  aria-haspopup="true"
+                >
+                  <span className="composer-model-pill-text">
+                    {formatModelBadge(selectedModel, selectedEffort)}
+                  </span>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+                {showModelPicker && (
+                  <div className="composer-model-popover" data-testid="composer-model-popover">
+                    <div className="popover-header">
+                      <span className="popover-title">Model</span>
+                    </div>
+                    <div className="popover-models-list">
+                      {SUPPORTED_MODELS.map((m) => {
+                        const isSelected = selectedModel === m.id;
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            data-testid={`model-option-${m.id}`}
+                            className={`popover-model-row ${isSelected ? 'selected' : ''}`}
+                            onClick={() => handleSelectModel(m.id)}
+                          >
+                            <span className="popover-model-name">{m.name}</span>
+                            {isSelected && (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {!isClaudeModel(selectedModel) && (
+                      <div className="popover-effort-section" data-testid="popover-effort-section">
+                        <div className="popover-header">
+                          <span className="popover-title">Reasoning Effort</span>
+                        </div>
+                        <div className="segmented-control popover-segmented">
+                          {EFFORT_OPTIONS.map((eff) => {
+                            const currentOption = getModelOption(selectedModel);
+                            const isSupported = Boolean(currentOption.supportedEfforts.includes(eff.value));
+                            return (
+                              <button
+                                key={eff.value}
+                                type="button"
+                                data-testid={`effort-option-${eff.value}`}
+                                className={`segmented-button ${selectedEffort === eff.value ? 'active' : ''} ${!isSupported ? 'disabled' : ''}`}
+                                disabled={!isSupported}
+                                onClick={() => isSupported && handleSelectEffort(eff.value)}
+                              >
+                                <span>{eff.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
               <span className="chat-composer-hint">
                 {isWorking ? 'Working — you can interrupt' : 'Ask anything'}
               </span>

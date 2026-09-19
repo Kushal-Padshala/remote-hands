@@ -4374,3 +4374,221 @@ main {
     transform: scale(1) translateY(0);
   }
 }
+
+.model-select-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.model-select-input,
+.select-input.model-select {
+  width: 100%;
+  min-height: 44px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 0 38px 0 14px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.model-select-input:focus,
+.select-input.model-select:focus {
+  border-color: var(--border-focus);
+}
+
+.model-select-input option,
+.select-input.model-select option {
+  background: #1c1b19;
+  color: #eceae5;
+  padding: 8px 12px;
+}
+
+.select-arrow {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.effort-badge-hint {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--accent-claude);
+  background: rgba(217, 119, 87, 0.12);
+  border: 1px solid rgba(217, 119, 87, 0.28);
+  border-radius: 999px;
+  padding: 2px 8px;
+  line-height: 1.4;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.segmented-control.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.segmented-button.disabled,
+.segmented-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.composer-model-picker-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.composer-model-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid #2e2e31;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #a1a1aa;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  min-height: 30px;
+}
+
+.composer-model-pill:hover,
+.composer-model-pill.active {
+  background: rgba(255, 255, 255, 0.09);
+  color: #ededed;
+  border-color: #3e3e42;
+}
+
+.composer-model-pill-text {
+  letter-spacing: -0.01em;
+}
+
+.composer-model-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 250px;
+  background: #18181a;
+  border: 1px solid #2e2e31;
+  border-radius: 12px;
+  padding: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: modalScaleIn 0.15s ease-out;
+}
+
+.popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+
+.popover-title {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #71717a;
+}
+
+.popover-models-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.popover-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: #d4d4d8;
+  font-size: 0.8125rem;
+  font-weight: 450;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+  min-height: 36px;
+  width: 100%;
+}
+
+.popover-model-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+.popover-model-row.selected {
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+  font-weight: 550;
+}
+
+.popover-effort-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #262629;
+}
+
+.popover-segmented {
+  padding: 2px;
+  background: #111112;
+  border-color: #262629;
+}
+
+.popover-segmented .segmented-button {
+  padding: 6px 8px;
+  min-height: 30px;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 480px) {
+  .composer-model-pill {
+    min-height: 36px;
+    padding: 6px 12px;
+  }
+
+  .composer-model-popover {
+    width: min(290px, calc(100vw - 32px));
+  }
+
+  .popover-model-row {
+    min-height: 44px;
+    padding: 10px 12px;
+    font-size: 0.875rem;
+  }
+
+  .popover-segmented .segmented-button {
+    min-height: 40px;
+    font-size: 0.8125rem;
+  }
+}

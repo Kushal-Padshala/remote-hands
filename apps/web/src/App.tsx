@@ -204,7 +204,13 @@ export function App() {
     setCurrentScreen('live-task');
   };
 
-  const handleCreateTask = async (prompt: string, kind: TaskKind, mode: TaskMode) => {
+  const handleCreateTask = async (
+    prompt: string,
+    kind: TaskKind,
+    mode: TaskMode,
+    model?: string,
+    effort?: string,
+  ) => {
     if (!selectedMachine) return;
     setSubmittingTask(true);
     try {
@@ -213,6 +219,8 @@ export function App() {
         prompt,
         kind,
         mode,
+        model,
+        effort,
       });
       setActiveTask(task);
       setCurrentScreen('live-task');
