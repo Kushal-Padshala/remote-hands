@@ -1053,7 +1053,6 @@ main {
   text-underline-offset: 3px;
 }
 
-/* Touch devices: no sticky hover states */
 @media (hover: none) {
   .machine-row:hover {
     background: transparent;
