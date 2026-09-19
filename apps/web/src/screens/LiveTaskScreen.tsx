@@ -984,9 +984,6 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           </svg>
         </button>
         <div className="chat-nav-center">
-          <div className="chat-machine-avatar" aria-hidden="true">
-            {(resolvedMachineName || 'R').trim().charAt(0).toUpperCase()}
-          </div>
           <div className="chat-nav-info">
             <div className="chat-nav-title">{resolvedMachineName}</div>
             <div
@@ -995,20 +992,19 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
               title="Tap to check connection"
               style={{ cursor: 'pointer' }}
             >
-              <span className={`status-dot ${isWorking ? 'working' : ''}`} style={!isWorking && !isMachineOnline ? { background: 'var(--chat-warning)', boxShadow: '0 0 8px rgba(251, 191, 36, 0.6)' } : undefined} />
+              <span className={`status-dot ${isWorking ? 'working' : ''}`} />
               <span>{isWorking ? 'Working...' : isMachineOnline ? 'Online' : 'Offline'}</span>
-              {isWorking && <span aria-hidden="true" style={{ opacity: 0.55 }}>· agy active</span>}
             </div>
           </div>
         </div>
         {frameBase64 ? (
           <button className="chat-nav-btn" onClick={() => setShowFrame(!showFrame)}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
               <line x1="8" y1="21" x2="16" y2="21" />
               <line x1="12" y1="17" x2="12" y2="21" />
             </svg>
-            <span>{showFrame ? 'Hide screen' : 'View screen'}</span>
+            <span>{showFrame ? 'Hide' : 'Screen'}</span>
           </button>
         ) : (
           <div style={{ width: 32 }} />
