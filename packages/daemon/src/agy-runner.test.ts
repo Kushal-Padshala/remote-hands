@@ -79,6 +79,16 @@ describe('buildAgyArgs', () => {
     ]);
   });
 
+  it('defaults effort to low instead of high to minimize startup latency', () => {
+    const args = buildAgyArgs(
+      task({ workspace_path: null, conversation_id: null, effort: undefined }),
+      { agyCommand: 'agy' },
+    );
+    expect(args).toContain('--effort');
+    const effortIndex = args.indexOf('--effort');
+    expect(args[effortIndex + 1]).toBe('low');
+  });
+
   it('prepends systemPrompt on initial conversation turn', () => {
     const args = buildAgyArgs(
       task({ conversation_id: null }),

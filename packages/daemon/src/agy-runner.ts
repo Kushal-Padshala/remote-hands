@@ -183,7 +183,7 @@ export function buildAgyArgs(task: Task, config: AgyArgConfig): readonly string[
   if (task.mode && task.mode !== 'default') args.push('--mode', task.mode);
 
   const model = task.model === null ? null : (task.model || 'gemini-3.8-flash-high');
-  const effort = task.effort === null ? null : (task.effort || 'high');
+  const effort = task.effort === null ? null : (task.effort || 'low');
 
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
