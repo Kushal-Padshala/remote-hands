@@ -283,11 +283,6 @@ function TerminalViewer({ command, output }: { command: string; output?: string 
   return (
     <div className="terminal-container">
       <div className="terminal-header">
-        <span className="terminal-dots">
-          <span className="term-dot red" />
-          <span className="term-dot yellow" />
-          <span className="term-dot green" />
-        </span>
         <span className="terminal-title">bash</span>
       </div>
       <div className="terminal-body">
@@ -557,7 +552,6 @@ export function StepsDropdown({ steps, isWorking, initialOpen }: StepsDropdownPr
                   </div>
 
                   <div className="step-branch-line" onClick={() => toggleStep(step.id)}>
-                    <span className="step-branch-symbol">└</span>
                     {info.category === 'edit' && info.diffStats ? (
                       <span className="step-branch-diff">
                         <span className="diff-stat-add">+{info.diffStats.added}</span>
