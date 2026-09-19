@@ -951,11 +951,21 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
   };
 
   const activeInfo = getActiveWorkingInfo(messages);
-  const promptSuggestions = [
-    'Check git status & recent changes',
-    'Open browser and search web',
-    'Inspect running processes',
-    'Run tests and verify build',
+  const formatMessageTime = (iso?: string) => {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '';
+      return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    } catch {
+      return '';
+    }
+  };
+  const promptSuggestions: { title: string; sub: string; icon: string }[] = [
+    { title: 'Check git status & recent changes', sub: 'Review diffs and history', icon: '🌿' },
+    { title: 'Open browser and search web', sub: 'Navigate and research', icon: '🌐' },
+    { title: 'Inspect running processes', sub: 'Check system health', icon: '⚡' },
+    { title: 'Run tests and verify build', sub: 'Validate your code', icon: '✅' },
   ];
 
   return (
@@ -1009,14 +1019,20 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         {messages.length === 0 && (
           <div className="chat-welcome-state">
             <div className="chat-welcome-icon">
-              <ThinkingOrb state="breathing" size={64} theme="dark" role="presentation" />
+              <div className="chat-welcome-orb-glow">
+                <ThinkingOrb state="breathing" size={64} theme="dark" role="presentation" />
+              </div>
+            </div>
+            <div className="chat-welcome-eyebrow">
+              <span className="status-dot" />
+              <span>{isMachineOnline ? 'Connected' : 'Ready'} · {resolvedMachineName}</span>
             </div>
             <h3 className="chat-welcome-title">New Task on {resolvedMachineName}</h3>
             <p className="chat-welcome-desc">
-              Message agy below to perform browsing, coding, and system actions directly on this machine.
+              Message <span className="chat-welcome-title-accent" style={{ fontWeight: 650 }}>agy</span> below to browse, code, and run system actions directly on this machine.
             </p>
             {!isMachineOnline && (
-              <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: '0.8125rem', color: '#fbbf24' }}>
+              <div className="chat-offline-notice">
                 <span aria-hidden="true">⚠️</span>
                 <span>Computer offline. Run <code>rh start</code> in terminal to connect.</span>
               </div>
@@ -1024,15 +1040,19 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             <div className="chat-suggestions-grid">
               {promptSuggestions.map((suggestion) => (
                 <button
-                  key={suggestion}
+                  key={suggestion.title}
                   type="button"
                   className="chat-suggestion-chip"
                   onClick={() => {
-                    setChatInput(suggestion);
+                    setChatInput(suggestion.title);
                     textareaRef.current?.focus();
                   }}
                 >
-                  <span>{suggestion}</span>
+                  <span className="chat-suggestion-icon" aria-hidden="true">{suggestion.icon}</span>
+                  <span className="chat-suggestion-text">
+                    <span className="chat-suggestion-title">{suggestion.title}</span>
+                    <span className="chat-suggestion-sub">{suggestion.sub}</span>
+                  </span>
                 </button>
               ))}
             </div>
@@ -1042,8 +1062,13 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         {groupMessages(messages, isWorking).map((item) => {
           if (item.kind === 'user') {
             return (
-              <div key={item.message.id} className="chat-bubble-user">
-                {item.message.text}
+              <div key={item.message.id} className="chat-message-user-wrap">
+                <div className="chat-bubble-user">
+                  {item.message.text}
+                </div>
+                {item.message.time && (
+                  <div className="chat-user-time">{formatMessageTime(item.message.time)}</div>
+                )}
               </div>
             );
           }
@@ -1060,11 +1085,20 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
 
           if (item.kind === 'agent') {
             return (
-              <div key={item.message.id} className="chat-bubble-agent">
-                <MarkdownView
-                  content={item.message.text || ''}
-                  isLatest={isWorking && item.isLatest}
-                />
+              <div key={item.message.id} className="chat-message-agent-wrap">
+                <div className="chat-agent-row">
+                  <div className="chat-agent-avatar" aria-hidden="true">✦</div>
+                  <span className="chat-agent-name">agy</span>
+                  {item.message.time && (
+                    <span className="chat-agent-time">{formatMessageTime(item.message.time)}</span>
+                  )}
+                </div>
+                <div className="chat-bubble-agent">
+                  <MarkdownView
+                    content={item.message.text || ''}
+                    isLatest={isWorking && item.isLatest}
+                  />
+                </div>
               </div>
             );
           }
@@ -1072,7 +1106,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           if (item.kind === 'error') {
             return (
               <div key={item.message.id} className="error-banner" style={{ margin: '4px 0' }}>
-                <div className="error-banner-title">Error</div>
+                <div className="error-banner-title">Something went wrong</div>
                 <div style={{ fontSize: '0.8125rem' }}>{item.message.text}</div>
               </div>
             );
