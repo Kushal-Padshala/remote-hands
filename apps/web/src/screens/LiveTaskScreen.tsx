@@ -627,7 +627,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
             if (!prev) return pending;
             return {
               ...pending,
-              frame_path: pending.frame_path || prev.frame_path || frameBase64 || null,
+              frame_path: pending.frame_path || (prev.id === pending.id ? prev.frame_path : null) || frameBase64 || null,
             };
           });
         } else {
@@ -969,18 +969,11 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
     >
       <header className="chat-nav-header" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
         <button className="chat-nav-back-circle" onClick={onBack} aria-label="Back to machines">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
         <div className="chat-nav-center">
-          <div className="chat-nav-device-avatar">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-              <line x1="8" y1="21" x2="16" y2="21" />
-              <line x1="12" y1="17" x2="12" y2="21" />
-            </svg>
-          </div>
           <div className="chat-nav-info">
             <div className="chat-nav-title">{resolvedMachineName}</div>
             <div
@@ -989,32 +982,17 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
               title="Tap to check connection"
               style={{ cursor: 'pointer' }}
             >
-              {isWorking ? (
-                <>
-                  <span className="status-dot working" />
-                  <span>agy working...</span>
-                </>
-              ) : isMachineOnline ? (
-                <>
-                  <span className="status-dot" />
-                  <span>Online · Ready</span>
-                </>
-              ) : (
-                <>
-                  <span className="status-dot" style={{ background: 'var(--accent-amber)' }} />
-                  <span style={{ color: 'var(--accent-amber)' }}>Offline · rh start needed</span>
-                </>
-              )}
+              <span className={`status-dot ${isWorking ? 'working' : ''}`} style={!isWorking && !isMachineOnline ? { background: 'var(--accent-amber)' } : undefined} />
+              <span>{isWorking ? 'Working...' : isMachineOnline ? 'Online' : 'Offline'}</span>
             </div>
           </div>
         </div>
         {frameBase64 ? (
           <button className="chat-nav-btn" onClick={() => setShowFrame(!showFrame)}>
-            <span aria-hidden="true">📺</span>
-            <span>{showFrame ? 'Hide' : 'Screen'}</span>
+            <span>{showFrame ? 'Hide screen' : 'View screen'}</span>
           </button>
         ) : (
-          <div style={{ width: 36 }} />
+          <div style={{ width: 32 }} />
         )}
       </header>
 
@@ -1045,7 +1023,6 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
                     textareaRef.current?.focus();
                   }}
                 >
-                  <span className="suggestion-spark" aria-hidden="true">✦</span>
                   <span>{suggestion}</span>
                 </button>
               ))}
@@ -1075,10 +1052,6 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           if (item.kind === 'agent') {
             return (
               <div key={item.message.id} className="chat-bubble-agent">
-                <div className="chat-agent-header">
-                  <span className="chat-agent-spark" aria-hidden="true">✦</span>
-                  <span>agy</span>
-                </div>
                 <MarkdownView
                   content={item.message.text || ''}
                   isLatest={isWorking && item.isLatest}
@@ -1122,7 +1095,9 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         {isVoiceListening && (
           <div className="voice-listening-banner" data-testid="voice-listening-banner">
             <div className="voice-listening-left">
-              <div className="voice-soundwave">
+              <div className="voice-soundwave" aria-hidden="true">
+                <span className="voice-soundwave-bar" />
+                <span className="voice-soundwave-bar" />
                 <span className="voice-soundwave-bar" />
                 <span className="voice-soundwave-bar" />
                 <span className="voice-soundwave-bar" />
@@ -1130,7 +1105,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
                 <span className="voice-soundwave-bar" />
               </div>
               <span className="voice-listening-text">
-                {chatInput ? 'Transcribing speech...' : 'Listening... speak your prompt'}
+                {chatInput ? 'Transcribing...' : 'Listening...'}
               </span>
             </div>
             <div className="voice-listening-actions">
@@ -1140,15 +1115,16 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
                 onClick={() => setAutoSendVoice(!autoSendVoice)}
                 title="Automatically dispatch when you stop speaking"
               >
-                <span>⚡ Auto-send: {autoSendVoice ? 'ON' : 'OFF'}</span>
+                <span className="voice-autosend-dot" />
+                <span>Auto-send {autoSendVoice ? 'On' : 'Off'}</span>
               </button>
               <button
                 type="button"
                 className="voice-stop-btn"
                 onClick={stopVoiceListening}
-                title="Stop recording and keep text"
+                title="Finish speaking"
               >
-                Stop
+                Done
               </button>
               <button
                 type="button"
@@ -1183,10 +1159,6 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
                 onToggle={handleToggleVoice}
                 disabled={sendingMessage}
               />
-              <div className="chat-model-pill">
-                <span className="model-pill-dot" />
-                <span>Hermes</span>
-              </div>
             </div>
             {isWorking ? (
               <button
@@ -1218,6 +1190,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
       </div>
 
       <ApprovalSheet
+        key={activeApproval?.id || 'none'}
         approval={activeApproval}
         frameBase64={frameBase64}
         onApprove={handleApprove}

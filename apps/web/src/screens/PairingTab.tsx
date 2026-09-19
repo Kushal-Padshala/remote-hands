@@ -24,7 +24,7 @@ export function PairingTab({
   };
 
   return (
-    <div className="screen-content">
+    <div className="screen-content pairing-content">
       <div className="section-header">
         <div>
           <h2 className="section-title">Pairing & Session</h2>
@@ -52,8 +52,14 @@ export function PairingTab({
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 4 }}>
-            <button className="btn btn-primary" onClick={onShowPairQr} style={{ padding: '8px 12px', fontSize: '0.8125rem' }}>
-              📱 View QR
+            <button className="btn btn-primary" onClick={onShowPairQr} style={{ padding: '8px 12px', fontSize: '0.8125rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+              </svg>
+              <span>View QR</span>
             </button>
             <button className="btn-ghost" onClick={onClearCache} style={{ padding: '8px 12px', fontSize: '0.8125rem' }}>
               Disconnect

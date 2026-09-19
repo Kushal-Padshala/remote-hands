@@ -64,7 +64,7 @@ export function NewTaskScreen({ machine, onCreateTask, onCancel, loading }: NewT
   };
 
   return (
-    <div className="screen-content">
+    <div className="screen-content new-task-content">
       <div className="section-header" style={{ marginBottom: 8 }}>
         <button className="chat-nav-back" onClick={onCancel} type="button">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
