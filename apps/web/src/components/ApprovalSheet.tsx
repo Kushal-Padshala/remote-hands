@@ -61,6 +61,7 @@ export function ApprovalSheet({
   const mins = Math.floor(timeLeftSeconds / 60);
   const secs = timeLeftSeconds % 60;
   const timeLabel = isExpired ? 'Expired' : `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  const isUrgent = !isExpired && timeLeftSeconds < 60;
 
   const handleCancelReject = () => {
     setIsRejecting(false);
@@ -85,7 +86,7 @@ export function ApprovalSheet({
 
   return (
     <div
-      className="sheet-overlay"
+      className="sheet-overlay approval-overlay"
       data-testid="approval-sheet"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
@@ -93,7 +94,7 @@ export function ApprovalSheet({
         }
       }}
     >
-      <div className="sheet-content">
+      <div className="sheet-content approval-sheet" role="dialog" aria-modal="true" aria-label="Action approval">
         <div
           className="sheet-grabber"
           onClick={handleDismiss}
@@ -101,27 +102,18 @@ export function ApprovalSheet({
         />
 
         {isRejecting ? (
-          <div data-testid="rejection-form">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <h3 style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  Why are you rejecting this?
-                </h3>
-                <span
-                  style={{
-                    fontSize: '0.75rem',
-                    fontVariantNumeric: 'tabular-nums',
-                    color: isExpired ? 'var(--accent-rose)' : timeLeftSeconds < 60 ? 'var(--accent-amber)' : 'var(--text-muted)',
-                  }}
-                >
-                  ⏱ {timeLabel}
+          <div data-testid="rejection-form" className="approval-body">
+            <div className="approval-topbar">
+              <div className="approval-title-group">
+                <h3 className="approval-title">Why are you rejecting this?</h3>
+                <span className={`approval-timer ${isExpired ? 'expired' : isUrgent ? 'urgent' : ''}`}>
+                  <span aria-hidden="true">⏱</span> {timeLabel}
                 </span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div className="approval-top-actions">
                 <button
                   type="button"
-                  className="btn btn-secondary"
-                  style={{ padding: '4px 10px', fontSize: '0.75rem', height: 'auto', minHeight: 'unset' }}
+                  className="approval-ghost-btn"
                   onClick={handleCancelReject}
                   disabled={loading}
                 >
@@ -133,20 +125,7 @@ export function ApprovalSheet({
                     data-testid="close-rejection-btn"
                     onClick={handleDismiss}
                     aria-label="Close"
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.08)',
-                      border: 'none',
-                      borderRadius: '50%',
-                      width: 28,
-                      height: 28,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'var(--text-muted)',
-                      cursor: 'pointer',
-                      fontSize: '0.875rem',
-                      lineHeight: 1,
-                    }}
+                    className="approval-close-btn"
                   >
                     ✕
                   </button>
@@ -154,25 +133,17 @@ export function ApprovalSheet({
               </div>
             </div>
 
-            <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: 12, lineHeight: 1.4 }}>
+            <p className="approval-desc">
               Your feedback will be sent directly to the agent so it knows why this action was rejected and how to adjust.
             </p>
 
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+            <div className="approval-quick-grid">
               {QUICK_REASONS.map((suggestion) => (
                 <button
                   key={suggestion}
                   type="button"
                   onClick={() => setRejectionReason(suggestion)}
-                  style={{
-                    background: rejectionReason === suggestion ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.05)',
-                    color: rejectionReason === suggestion ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-                    border: `1px solid ${rejectionReason === suggestion ? 'var(--accent-cyan)' : 'rgba(255, 255, 255, 0.1)'}`,
-                    borderRadius: 14,
-                    padding: '4px 10px',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                  }}
+                  className={`approval-quick-chip ${rejectionReason === suggestion ? 'selected' : ''}`}
                 >
                   {suggestion}
                 </button>
@@ -185,38 +156,25 @@ export function ApprovalSheet({
               value={rejectionReason}
               onChange={(e) => setRejectionReason(e.target.value)}
               placeholder="Explain what to change or why you rejected (e.g. adjust tone, delete hashtags, cancel task)..."
-              style={{
-                width: '100%',
-                background: 'rgba(0, 0, 0, 0.4)',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
-                borderRadius: 8,
-                padding: '10px 12px',
-                color: 'var(--text-primary)',
-                fontSize: '0.875rem',
-                fontFamily: 'inherit',
-                resize: 'none',
-                boxSizing: 'border-box',
-                marginBottom: 14,
-              }}
+              className="approval-textarea"
             />
 
             {isExpired ? (
-              <div style={{ marginTop: 14 }}>
+              <div className="approval-actions-single">
                 <button
                   type="button"
-                  className="btn btn-secondary"
+                  className="btn btn-secondary approval-btn-secondary"
                   data-testid="dismiss-rejection-btn"
-                  style={{ width: '100%', justifyContent: 'center' }}
                   onClick={handleDismiss}
                 >
                   Dismiss
                 </button>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div className="approval-actions-duo">
                 <button
                   type="button"
-                  className="btn btn-secondary"
+                  className="btn btn-secondary approval-btn-secondary"
                   disabled={loading}
                   onClick={handleCancelReject}
                 >
@@ -224,7 +182,7 @@ export function ApprovalSheet({
                 </button>
                 <button
                   type="button"
-                  className="btn btn-reject"
+                  className="btn btn-reject approval-btn-reject"
                   data-testid="confirm-reject-btn"
                   disabled={loading}
                   onClick={handleConfirmReject}
@@ -235,29 +193,17 @@ export function ApprovalSheet({
             )}
           </div>
         ) : (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <h3 style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                Action Approval Required
-              </h3>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span
-                  style={{
-                    fontSize: '0.75rem',
-                    fontVariantNumeric: 'tabular-nums',
-                    color: isExpired ? 'var(--accent-rose)' : timeLeftSeconds < 60 ? 'var(--accent-amber)' : 'var(--text-muted)',
-                  }}
-                >
-                  ⏱ {timeLabel}
+          <div className="approval-body">
+            <div className="approval-topbar">
+              <div className="approval-title-group">
+                <div className="approval-icon" aria-hidden="true">✦</div>
+                <h3 className="approval-title">Action Approval Required</h3>
+              </div>
+              <div className="approval-top-actions">
+                <span className={`approval-timer ${isExpired ? 'expired' : isUrgent ? 'urgent' : ''}`}>
+                  <span aria-hidden="true">⏱</span> {timeLabel}
                 </span>
-                <span
-                  className="badge"
-                  style={{
-                    background: isHighRisk ? 'rgba(244, 63, 94, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-                    color: isHighRisk ? 'var(--accent-rose)' : 'var(--accent-amber)',
-                    border: `1px solid ${isHighRisk ? 'rgba(244, 63, 94, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
-                  }}
-                >
+                <span className={`approval-risk ${isHighRisk ? 'high' : 'medium'}`}>
                   {approval.risk}
                 </span>
                 {onDismiss && (
@@ -266,21 +212,7 @@ export function ApprovalSheet({
                     data-testid="close-approval-btn"
                     onClick={handleDismiss}
                     aria-label="Close"
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.08)',
-                      border: 'none',
-                      borderRadius: '50%',
-                      width: 28,
-                      height: 28,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'var(--text-muted)',
-                      cursor: 'pointer',
-                      fontSize: '0.875rem',
-                      lineHeight: 1,
-                      marginLeft: 2,
-                    }}
+                    className="approval-close-btn"
                   >
                     ✕
                   </button>
@@ -288,88 +220,46 @@ export function ApprovalSheet({
               </div>
             </div>
 
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4, letterSpacing: '0.04em', fontWeight: 600 }}>
-                Requested Action
-              </div>
-              <div style={{ fontWeight: 600, color: 'var(--accent-cyan)', fontSize: '0.9375rem', fontFamily: 'var(--font-mono)' }}>
-                {approval.action_kind}
-              </div>
+            <div className="approval-action-row">
+              <div className="approval-label">Requested Action</div>
+              <div className="approval-action-name">{approval.action_kind}</div>
             </div>
 
-            <div
-              style={{
-                marginBottom: 14,
-                background: 'rgba(255, 255, 255, 0.03)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: 8,
-                padding: '12px 14px',
-              }}
-            >
-              <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 6, letterSpacing: '0.04em', fontWeight: 600 }}>
-                Proposed Content & Details
-              </div>
-              <div style={{ fontSize: '0.875rem', color: 'var(--text-primary)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {approval.summary}
-              </div>
+            <div className="approval-summary-card">
+              <div className="approval-label">Proposed Content & Details</div>
+              <div className="approval-summary-text">{approval.summary}</div>
             </div>
 
             {previewImage && (
-              <div
-                style={{
-                  marginBottom: 16,
-                  borderRadius: 10,
-                  overflow: 'hidden',
-                  border: '1px solid rgba(255, 255, 255, 0.12)',
-                  background: '#09090d',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '6px 10px',
-                    background: 'rgba(255, 255, 255, 0.04)',
-                    fontSize: '0.6875rem',
-                    color: 'var(--text-muted)',
-                    borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-                  }}
-                >
+              <div className="approval-preview">
+                <div className="approval-preview-header">
                   <span aria-hidden="true">🖥️</span>
-                  <span style={{ fontWeight: 500 }}>Live Screen Preview</span>
+                  <span>Live Screen Preview</span>
                 </div>
                 <img
                   src={previewImage}
                   alt="Screen state before action approval"
                   data-testid="approval-screen-preview"
-                  style={{
-                    width: '100%',
-                    maxHeight: '220px',
-                    objectFit: 'contain',
-                    display: 'block',
-                    background: '#000',
-                  }}
+                  className="approval-preview-img"
                 />
               </div>
             )}
 
             {isExpired ? (
-              <div style={{ marginTop: 14 }}>
+              <div className="approval-actions-single">
                 <button
                   type="button"
-                  className="btn btn-secondary"
+                  className="btn btn-secondary approval-btn-secondary"
                   data-testid="dismiss-approval-btn"
-                  style={{ width: '100%', justifyContent: 'center' }}
                   onClick={handleDismiss}
                 >
                   Dismiss
                 </button>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
+              <div className="approval-actions-duo">
                 <button
-                  className="btn btn-reject"
+                  className="btn btn-reject approval-btn-reject"
                   data-testid="reject-approval-btn"
                   disabled={loading}
                   onClick={() => setIsRejecting(true)}
@@ -377,7 +267,7 @@ export function ApprovalSheet({
                   Reject
                 </button>
                 <button
-                  className="btn btn-approve"
+                  className="btn btn-approve approval-btn-approve"
                   data-testid="approve-approval-btn"
                   disabled={loading}
                   onClick={() => onApprove(approval.id)}
@@ -386,7 +276,7 @@ export function ApprovalSheet({
                 </button>
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>
