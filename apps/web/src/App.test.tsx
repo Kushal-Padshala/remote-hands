@@ -129,7 +129,7 @@ describe('Web App Workflow', () => {
     await waitFor(() => {
       const img = screen.getByRole('img');
       expect(img.getAttribute('src')).toContain('fake-frame-jpeg-data');
-      expect(screen.getByText('🌐 Logged-in Chrome Profile')).toBeDefined();
+      expect(screen.getByText('Screen · Chrome')).toBeDefined();
     });
   });
 

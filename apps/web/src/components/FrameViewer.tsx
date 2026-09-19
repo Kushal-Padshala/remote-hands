@@ -14,8 +14,8 @@ export function FrameViewer({ frameBase64, onClose }: FrameViewerProps) {
     <div className="frame-viewer" data-testid="frame-viewer">
       <div className="frame-viewer-header">
         <div className="frame-viewer-live-badge">
-          <span className="live-dot pulse" />
-          <span>LIVE • Chrome</span>
+          <span className="live-dot" />
+          <span>Live</span>
         </div>
         {onClose && (
           <button

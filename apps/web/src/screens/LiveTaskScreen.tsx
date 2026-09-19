@@ -1153,9 +1153,9 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         )}
 
         {showFrame && frameBase64 && (
-          <div className="chat-inline-frame" style={{ margin: '8px 0 12px 0' }}>
+          <div className="chat-inline-frame" style={{ margin: '6px 0 10px 0' }}>
             <div className="frame-meta-bar">
-              <span className="frame-profile-badge">🌐 Logged-in Chrome Profile</span>
+              <span className="frame-profile-badge">Screen · Chrome</span>
             </div>
             <FrameViewer frameBase64={frameBase64} onClose={() => setShowFrame(false)} />
           </div>
