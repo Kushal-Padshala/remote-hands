@@ -18,8 +18,15 @@
     "mobile-ai",
     "self-hosted"
   ],
-  "engines": { "node": ">=22.0.0" },
-  "workspaces": ["packages/*", "apps/*", "supabase", "tests"],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "supabase",
+    "tests"
+  ],
   "scripts": {
     "build": "tsc --build --verbose && npm --prefix packages/cli run build",
     "typecheck": "tsc --build --verbose && npm run --workspaces --if-present typecheck:tests",
@@ -31,8 +38,9 @@
     "db:types": "npx --yes supabase@latest gen types typescript --local > packages/shared/src/database.generated.ts"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
     "typescript": "^5.7.0",
-    "vitest": "^5.0.1",
-    "@types/node": "^22.0.0"
+    "vitest": "^5.0.1"
   }
 }
