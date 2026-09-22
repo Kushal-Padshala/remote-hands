@@ -95,6 +95,60 @@ describe('Web App Workflow', () => {
     });
   });
 
+  it('starts a fresh chat from the sidebar New chat button', async () => {
+    vi.spyOn(apiClient, 'listMachines').mockResolvedValue([fakeMachine]);
+    vi.spyOn(apiClient, 'listTasks').mockResolvedValue([]);
+    vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+    vi.spyOn(apiClient, 'createTaskWebSocket').mockReturnValue(new MockSocket() as any);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Work Laptop').length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByTestId('sidebar-open-workspace'));
+
+    await waitFor(() => {
+      expect(screen.getByText(`New Task on ${fakeMachine.name}`)).toBeDefined();
+    });
+  });
+
+  it('resets the conversation when New chat is clicked while already chatting', async () => {
+    vi.spyOn(apiClient, 'listMachines').mockResolvedValue([fakeMachine]);
+    vi.spyOn(apiClient, 'listTasks').mockResolvedValue([]);
+    vi.spyOn(apiClient, 'createTask').mockResolvedValue(fakeTask);
+    vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
+    vi.spyOn(apiClient, 'createTaskWebSocket').mockReturnValue(new MockSocket() as any);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Work Laptop').length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByTestId(`create-task-btn-${fakeMachine.id}`));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-prompt-input')).toBeDefined();
+    });
+
+    const promptInput = screen.getByTestId('task-prompt-input');
+    fireEvent.change(promptInput, { target: { value: 'Add privacy policy page' } });
+    fireEvent.click(screen.getByTestId('submit-task-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Add privacy policy page')).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByTestId('sidebar-open-workspace'));
+
+    await waitFor(() => {
+      expect(screen.getByText(`New Task on ${fakeMachine.name}`)).toBeDefined();
+    });
+    expect(screen.queryByText('Add privacy policy page')).toBeNull();
+  });
+
   it('displays live events and frame updates over websocket', async () => {
     vi.spyOn(apiClient, 'listEvents').mockResolvedValue([]);
     const socket = new MockSocket();

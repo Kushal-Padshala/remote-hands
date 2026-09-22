@@ -31,6 +31,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
 
   const [currentScreen, setCurrentScreen] = useState<'machines' | 'new-task' | 'live-task'>('machines');
+  const [chatSession, setChatSession] = useState(0);
   const [activeTab, setActiveTab] = useState<'devices' | 'history' | 'pairing'>('devices');
   const [selectedMachine, setSelectedMachine] = useState<MachineRow | null>(null);
   const [activeTask, setActiveTask] = useState<TaskRow | null>(null);
@@ -184,6 +185,7 @@ export function App() {
   const handleSelectMachine = (machine: MachineRow) => {
     setSelectedMachine(machine);
     setActiveTask(null);
+    setChatSession((n) => n + 1);
     setCurrentScreen('live-task');
   };
 
@@ -600,6 +602,7 @@ export function App() {
               }}
             >
               <LiveTaskScreen
+                key={activeTask ? `task-${activeTask.id}` : `fresh-${selectedMachine?.id ?? 'none'}-${chatSession}`}
                 task={activeTask ?? undefined}
                 machine={(selectedMachine || (activeTask ? machines.find((m) => m.id === activeTask.machine_id) : machines[0])) ?? undefined}
                 machineName={selectedMachine?.name || (activeTask ? 'Remote Mac' : machines[0]?.name)}
