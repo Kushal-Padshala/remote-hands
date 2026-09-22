@@ -193,6 +193,22 @@ export class LocalTaskStore implements TaskStore {
     return this.toTask(row);
   }
 
+  async listTasks(options?: { status?: TaskStatus; limit?: number }): Promise<LocalTask[]> {
+    let query = 'SELECT * FROM tasks';
+    const params: any[] = [];
+    if (options?.status) {
+      query += ' WHERE status = ?';
+      params.push(options.status);
+    }
+    query += ' ORDER BY created_at DESC';
+    if (options?.limit) {
+      query += ' LIMIT ?';
+      params.push(options.limit);
+    }
+    const rows = this.db.prepare(query).all(...params) as any[];
+    return rows.map((r) => this.toTask(r));
+  }
+
   async claimNextTask(machineId: string): Promise<LocalTask | null> {
     let row = this.db.prepare(`
       SELECT * FROM tasks
@@ -411,8 +427,10 @@ export class LocalTaskStore implements TaskStore {
     return this.toApproval(row);
   }
 
-  async listApprovals(taskId: string): Promise<ApprovalRow[]> {
-    const rows = this.db.prepare('SELECT * FROM approvals WHERE task_id = ? ORDER BY created_at ASC').all(taskId) as any[];
+  async listApprovals(taskId?: string): Promise<ApprovalRow[]> {
+    const rows = taskId
+      ? (this.db.prepare('SELECT * FROM approvals WHERE task_id = ? ORDER BY created_at ASC').all(taskId) as any[])
+      : (this.db.prepare('SELECT * FROM approvals ORDER BY created_at ASC').all() as any[]);
     return rows.map((r) => this.toApproval(r));
   }
 
