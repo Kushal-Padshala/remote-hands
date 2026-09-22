@@ -17,3 +17,10 @@ export * from './runtime.js';
 export * from './screen-capture.js';
 export * from './task-store.js';
 export * from './desktop/macos-driver.js';
+export {
+  AxWalker,
+  type RawAxNode,
+  type AxWalkerOptions,
+  type IndexedElement as AxIndexedElement,
+  type IndexedElement as DesktopIndexedElement,
+} from './desktop/ax-walker.js';
