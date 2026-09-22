@@ -140,7 +140,7 @@ export async function desktopCommand(
         const targetIndex = parseInt(indexMatch[1], 10);
         const elements = await walker.walkActiveApp();
         const el = elements.find((e) => e.index === targetIndex);
-        if (!el && !context.actEngine && elements.length > 0) {
+        if (!el && !context.actEngine) {
           stderr(`Element [${targetIndex}] not found`);
           return 1;
         }

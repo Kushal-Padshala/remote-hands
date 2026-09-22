@@ -73,6 +73,7 @@ export interface CommandContext {
   chromeManager?: ChromeManager | undefined;
   client?: any;
   frameSource?: any;
+  localStore?: any;
 }
 
 export async function setupCommand(args: string[], context: CommandContext = {}): Promise<number> {

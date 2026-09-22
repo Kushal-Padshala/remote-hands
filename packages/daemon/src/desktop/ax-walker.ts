@@ -135,10 +135,66 @@ export class AxWalker {
     try {
       const res = execFunc('osascript', ['-l', 'JavaScript', '-e', script]);
       const raw = JSON.parse(res.stdout.trim() || '[]');
-      if (!Array.isArray(raw)) return [];
-      return this.pruneAndIndex(raw);
-    } catch {
-      return [];
-    }
+      if (Array.isArray(raw)) {
+        const indexed = this.pruneAndIndex(raw);
+        if (indexed.length > 0) return indexed;
+      }
+    } catch {}
+
+    return this.walkVisionOcr(execFunc);
+  }
+
+  async walkVisionOcr(execFunc: ExecFunction): Promise<IndexedElement[]> {
+    const tmpShot = '/tmp/rh_ax_ocr.png';
+    const captureRes = execFunc('screencapture', ['-x', '-m', tmpShot]);
+    if (captureRes.status !== 0) return [];
+
+    const swiftScript = `
+import Vision
+import Cocoa
+
+guard let img = NSImage(contentsOfFile: "${tmpShot}"),
+      let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+  print("[]")
+  exit(0)
+}
+let req = VNRecognizeTextRequest()
+req.recognitionLevel = .accurate
+let handler = VNImageRequestHandler(cgImage: cg, options: [:])
+try? handler.perform([req])
+let w = CGFloat(cg.width)
+let h = CGFloat(cg.height)
+var out: [[String: Any]] = []
+for obs in (req.results ?? []) {
+  guard let cand = obs.topCandidates(1).first else { continue }
+  let b = obs.boundingBox
+  let x = Int(b.origin.x * w)
+  let y = Int((1.0 - b.origin.y - b.size.height) * h)
+  let bw = Int(b.size.width * w)
+  let bh = Int(b.size.height * h)
+  out.append([
+    "role": "AXStaticText",
+    "label": cand.string,
+    "x": x,
+    "y": y,
+    "width": bw,
+    "height": bh
+  ])
+}
+if let data = try? JSONSerialization.data(withJSONObject: out),
+   let str = String(data: data, encoding: .utf8) {
+  print(str)
+} else {
+  print("[]")
+}
+`;
+    try {
+      const res = execFunc('swift', ['-e', swiftScript]);
+      const raw = JSON.parse(res.stdout.trim() || '[]');
+      if (Array.isArray(raw) && raw.length > 0) {
+        return this.pruneAndIndex(raw);
+      }
+    } catch {}
+    return [];
   }
 }

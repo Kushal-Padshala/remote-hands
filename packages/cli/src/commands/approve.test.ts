@@ -88,10 +88,26 @@ describe('approveCommand', () => {
     expect(stderrLogs.join('\n')).toContain('Error: No task ID provided');
   });
 
-  it('errors when daemon.json is missing', async () => {
+  it('errors when daemon.json is missing and no local store', async () => {
     const code = await approveCommand(['Publish post', '--task=t1'], getCtx());
     expect(code).toBe(1);
     expect(stderrLogs.join('\n')).toContain('Daemon configuration not found');
+  });
+
+  it('creates and completes approval via localStore when daemon.json is missing', async () => {
+    const mockLocalStore = {
+      createApproval: vi.fn().mockResolvedValue({ id: 'local-app-1', status: 'pending' }),
+      waitForApprovalDecision: vi.fn().mockResolvedValue({ id: 'local-app-1', status: 'approved' }),
+    };
+
+    const ctx = getCtx();
+    ctx.localStore = mockLocalStore;
+
+    const code = await approveCommand(['Publish post locally', '--task=t-local', '--timeout=2'], ctx);
+    expect(code).toBe(0);
+    expect(mockLocalStore.createApproval).toHaveBeenCalled();
+    expect(mockLocalStore.waitForApprovalDecision).toHaveBeenCalledWith('local-app-1', 2000);
+    expect(stdoutLogs.join('\n')).toContain('Approval granted.');
   });
 
   it('creates approval and succeeds when user approves', async () => {

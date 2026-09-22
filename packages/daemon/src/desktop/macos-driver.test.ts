@@ -171,4 +171,22 @@ describe('MacOsDriver', () => {
     const callArgs = execMock.mock.calls[0]![1];
     expect(callArgs.join(' ')).toContain('keystroke "\\""');
   });
+
+  it('uses key code for named keys like enter, tab, space, escape', async () => {
+    const execMock = vi.fn().mockReturnValue({ stdout: '', stderr: '', status: 0 });
+    const driver = new MacOsDriver({ exec: execMock });
+    await driver.sendKeyCombo(['enter'], ['command']);
+    expect(execMock).toHaveBeenCalled();
+    const callArgs = execMock.mock.calls[0]![1];
+    expect(callArgs.join(' ')).toContain('key code 36 using {command down}');
+  });
+
+  it('activates target application before sending close window keystroke', async () => {
+    const execMock = vi.fn().mockReturnValue({ stdout: '', stderr: '', status: 0 });
+    const driver = new MacOsDriver({ exec: execMock });
+    await driver.closeWindow('Google Chrome');
+    expect(execMock).toHaveBeenCalled();
+    const callArgs = execMock.mock.calls[0]![1];
+    expect(callArgs.join(' ')).toContain('tell application "Google Chrome" to activate');
+  });
 });

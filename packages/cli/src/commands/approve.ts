@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { CloudflareControlPlaneClient, DefaultFrameSource } from '@remote-hands/daemon';
+import { CloudflareControlPlaneClient, DefaultFrameSource, LocalTaskStore } from '@remote-hands/daemon';
 import { DEFAULT_APPROVAL_TIMEOUT_MS, type ActionKind, type RiskLevel } from '@remote-hands/shared';
 import type { CommandContext } from './setup.js';
 
@@ -75,6 +75,61 @@ export async function approveCommand(args: string[], context: CommandContext = {
   const daemonConfigFile = path.join(configDir, 'daemon.json');
 
   if (!fs.existsSync(daemonConfigFile)) {
+    const localDbPath = path.join(configDir, 'local.db');
+    if (context.localStore !== undefined || fs.existsSync(localDbPath)) {
+      const localStore = context.localStore ?? new LocalTaskStore({ dbPath: localDbPath });
+      let framePath: string | null = null;
+      try {
+        const frameSource =
+          context.frameSource ??
+          new DefaultFrameSource({ taskStartTime: Date.now() - 10000, browserActive: true });
+        const frame = await frameSource.captureFrame();
+        if (frame?.jpegBase64) {
+          framePath = frame.jpegBase64;
+        }
+      } catch {}
+
+      let approval: any;
+      try {
+        approval = await localStore.createApproval(parsed.taskId, {
+          actionKind: parsed.action,
+          summary: parsed.summary,
+          risk: parsed.risk,
+          framePath,
+          expiresInMs: parsed.timeoutSeconds * 1000,
+        });
+      } catch (err: any) {
+        stderr(`Failed to create approval request: ${err.message || err}`);
+        return 1;
+      }
+
+      stdout(`Approval request created (${approval.id}). Waiting for decision on mobile app...`);
+
+      try {
+        const decided = await localStore.waitForApprovalDecision(approval.id, parsed.timeoutSeconds * 1000);
+        if (decided.status === 'approved') {
+          stdout('Approval granted.');
+          return 0;
+        }
+        if (decided.status === 'rejected') {
+          const reason = decided.rejection_reason;
+          if (reason) {
+            stderr(`Approval rejected by user: ${reason}`);
+          } else {
+            stderr('Approval rejected by user.');
+          }
+          return 1;
+        }
+      } catch (err: any) {
+        if (err?.message?.includes('timed out')) {
+          stderr('Approval request timed out.');
+          return 1;
+        }
+        stderr(`Approval failed: ${err.message || err}`);
+        return 1;
+      }
+    }
+
     stderr(`Daemon configuration not found at ${daemonConfigFile}. Run "rh setup" first.`);
     return 1;
   }

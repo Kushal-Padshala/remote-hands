@@ -147,7 +147,7 @@ async function runLocalDaemon(
 
   const actualPort = await localServer.start();
   const localIp = getLocalIp();
-  const localUrl = `http://${localIp}:${actualPort}/?token=${pairingToken}`;
+  const localUrl = `http://${localIp}:${actualPort}/?token=${pairingToken}&api=http://${localIp}:${actualPort}`;
 
   let cloudflaredProc: ChildProcess | null = null;
   let remoteUrl: string | null = null;
@@ -165,7 +165,7 @@ async function runLocalDaemon(
         const match = text.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
         if (match && !remoteUrl) {
           remoteUrl = match[0];
-          options.stdout(`${c.brightMagenta('🌐')} Public Tunnel: ${remoteUrl}/?token=${pairingToken}`);
+          options.stdout(`${c.brightMagenta('🌐')} Public Tunnel: ${remoteUrl}/?token=${pairingToken}&api=${remoteUrl}`);
         }
       };
       cloudflaredProc.stdout?.on('data', captureTunnelUrl);

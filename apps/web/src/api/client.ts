@@ -11,6 +11,18 @@ function resolveDefaultBaseUrl(providedUrl?: string): string {
   if (providedUrl && providedUrl.trim().length > 0) {
     return providedUrl.replace(/\/+$/, '');
   }
+  if (typeof window !== 'undefined') {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const queryApi = params.get('api');
+      if (queryApi && queryApi.trim().length > 0) {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('rh_api_url', queryApi.trim().replace(/\/+$/, ''));
+        }
+        return queryApi.trim().replace(/\/+$/, '');
+      }
+    } catch {}
+  }
   if (typeof localStorage !== 'undefined') {
     const stored = localStorage.getItem('rh_api_url');
     if (stored && stored.trim().length > 0) {
@@ -23,12 +35,10 @@ function resolveDefaultBaseUrl(providedUrl?: string): string {
   }
   if (typeof window !== 'undefined') {
     const host = window.location.host;
-    if (host.includes('pages.dev') || host.includes('remote-hands') || host.includes('workers.dev')) {
+    if (host.includes('pages.dev') || host.includes('workers.dev')) {
       return 'https://remote-hands-backend.remote-hands-cloudflare.workers.dev';
     }
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      return 'http://localhost:8787';
-    }
+    return window.location.origin;
   }
   return 'https://remote-hands-backend.remote-hands-cloudflare.workers.dev';
 }

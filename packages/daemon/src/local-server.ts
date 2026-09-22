@@ -2,6 +2,7 @@ import * as http from 'node:http';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { LocalTaskStore } from './local-task-store.js';
 
@@ -79,15 +80,16 @@ export class LocalServer {
   }
 
   private async handleHttp(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204, {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-      });
-      res.end();
-      return;
-    }
+    try {
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+        });
+        res.end();
+        return;
+      }
 
     const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     const pathname = parsedUrl.pathname;
@@ -98,6 +100,7 @@ export class LocalServer {
       pathname === '/api' ||
       pathname.startsWith('/tasks') ||
       pathname.startsWith('/approvals') ||
+      pathname.startsWith('/machines') ||
       pathname === '/status';
 
     if (isApiRoute) {
@@ -107,6 +110,18 @@ export class LocalServer {
       }
 
       const apiPath = pathname.startsWith('/api') ? pathname.slice(4) || '/' : pathname;
+
+      if ((apiPath === '/machines' || apiPath.startsWith('/machines')) && method === 'GET') {
+        const storedMachine = await (this.options.store.getMachine ? this.options.store.getMachine() : null);
+        const machine = storedMachine ?? {
+          id: 'primary-machine',
+          name: os.hostname(),
+          status: 'online',
+          lastSeenAt: new Date().toISOString(),
+        };
+        this.sendJson(res, 200, { machines: [machine] });
+        return;
+      }
 
       if (apiPath === '/status' && method === 'GET') {
         this.sendJson(res, 200, { status: 'ok', uptime: process.uptime() });
@@ -176,7 +191,10 @@ export class LocalServer {
       const taskCancelMatch = apiPath.match(/^\/tasks\/([^\/]+)\/cancel$/);
       if (taskCancelMatch && method === 'POST') {
         const taskId = taskCancelMatch[1]!;
-        const body = await this.readBody(req);
+        let body: any = {};
+        try {
+          body = await this.readBody(req);
+        } catch {}
         const task = await (this.options.store.cancelTask ? this.options.store.cancelTask(taskId, body?.reason) : null);
         if (!task) {
           this.sendJson(res, 404, { error: 'Task not found' });
@@ -330,6 +348,11 @@ export class LocalServer {
 
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Remote Hands Local Daemon');
+    } catch (err: any) {
+      if (!res.headersSent) {
+        this.sendJson(res, 500, { error: 'Internal server error', message: err?.message || String(err) });
+      }
+    }
   }
 
   private setupWebSocket(): void {

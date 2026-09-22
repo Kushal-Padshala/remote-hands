@@ -18,6 +18,29 @@ function escapeAppleScript(str: string): string {
   return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
+const NAMED_KEY_CODES: Record<string, number> = {
+  return: 36,
+  enter: 36,
+  tab: 48,
+  space: 49,
+  delete: 51,
+  backspace: 51,
+  escape: 53,
+  esc: 53,
+  command: 55,
+  cmd: 55,
+  shift: 56,
+  capslock: 57,
+  option: 58,
+  alt: 58,
+  control: 59,
+  ctrl: 59,
+  left: 123,
+  right: 124,
+  down: 125,
+  up: 126,
+};
+
 export class MacOsDriver {
   public exec: ExecFunction;
 
@@ -63,9 +86,11 @@ export class MacOsDriver {
   }
 
   async closeWindow(appName: string): Promise<void> {
+    const escaped = escapeAppleScript(appName);
     const script = `
+      tell application "${escaped}" to activate
       tell application "System Events"
-        tell process "${escapeAppleScript(appName)}"
+        tell process "${escaped}"
           keystroke "w" using command down
         end tell
       end tell
@@ -99,11 +124,12 @@ export class MacOsDriver {
       .join(', ');
     const modString = mods.length > 0 ? ` using {${mods}}` : '';
     const key = keys[0] ?? '';
-    const script = `
-      tell application "System Events"
-        keystroke "${escapeAppleScript(key)}"${modString}
-      end tell
-    `;
+    const lowerKey = key.toLowerCase();
+    const keyCode = NAMED_KEY_CODES[lowerKey];
+    const script =
+      keyCode !== undefined
+        ? `tell application "System Events"\n  key code ${keyCode}${modString}\nend tell`
+        : `tell application "System Events"\n  keystroke "${escapeAppleScript(key)}"${modString}\nend tell`;
     this.exec('osascript', ['-e', script]);
   }
 }

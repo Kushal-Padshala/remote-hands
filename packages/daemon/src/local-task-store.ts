@@ -487,8 +487,19 @@ export class LocalTaskStore implements TaskStore {
 
     return new Promise<ApprovalRow>((resolve, reject) => {
       let timer: NodeJS.Timeout | null = null;
-      const onAbort = () => {
+      const cleanup = () => {
         if (timer) clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        const list = this.decisionResolvers.get(approvalId);
+        if (list) {
+          const idx = list.indexOf(onDecision);
+          if (idx !== -1) list.splice(idx, 1);
+          if (list.length === 0) this.decisionResolvers.delete(approvalId);
+        }
+      };
+
+      const onAbort = () => {
+        cleanup();
         reject(new Error('Aborted while waiting for approval decision'));
       };
       if (signal?.aborted) {
@@ -498,8 +509,7 @@ export class LocalTaskStore implements TaskStore {
       signal?.addEventListener('abort', onAbort, { once: true });
 
       const onDecision = (approval: ApprovalRow) => {
-        if (timer) clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
+        cleanup();
         resolve(approval);
       };
 
@@ -508,7 +518,7 @@ export class LocalTaskStore implements TaskStore {
       this.decisionResolvers.set(approvalId, list);
 
       timer = setTimeout(async () => {
-        signal?.removeEventListener('abort', onAbort);
+        cleanup();
         const cur = await this.getApproval(approvalId);
         if (cur && cur.status !== 'pending') {
           resolve(cur);

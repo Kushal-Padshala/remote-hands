@@ -23,6 +23,23 @@ export async function pairCommand(args: string[] = [], context: CommandContext =
   }
 
   if (!daemonConfig?.cloudflareApiUrl || !daemonConfig?.sessionToken) {
+    const localTokenFile = path.join(configDir, 'local-token.txt');
+    try {
+      const rawToken = await fs.readFile(localTokenFile, 'utf-8');
+      const localToken = rawToken.trim();
+      if (localToken) {
+        const localUrl = `http://localhost:3000/?token=${localToken}&api=http://localhost:3000`;
+        const tui = await renderPairingTui({
+          webUrl: localUrl,
+          pairingCode: 'LOCAL',
+          pairingUrl: localUrl,
+          daemonCommand: 'rh start --local',
+        });
+        stdout(tui);
+        return 0;
+      }
+    } catch {}
+
     stderr(renderStepError('No active daemon configuration found. Run "rh setup" first.'));
     return 1;
   }

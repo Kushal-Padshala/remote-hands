@@ -187,4 +187,28 @@ describe('AxWalker', () => {
     expect(elements[0]?.label).toBe('DirectExec');
     expect(execMock).toHaveBeenCalled();
   });
+
+  it('falls back to walkVisionOcr when JXA returns empty elements', async () => {
+    const ocrNodes = [
+      { role: 'AXStaticText', label: 'Canvas Button', x: 50, y: 50, width: 80, height: 25 },
+    ];
+    const execMock = vi.fn().mockImplementation((cmd: string) => {
+      if (cmd === 'osascript') {
+        return { stdout: '[]', stderr: '', status: 0 };
+      }
+      if (cmd === 'screencapture') {
+        return { stdout: '', stderr: '', status: 0 };
+      }
+      if (cmd === 'swift') {
+        return { stdout: JSON.stringify(ocrNodes), stderr: '', status: 0 };
+      }
+      return { stdout: '', stderr: '', status: 0 };
+    });
+
+    const walker = new AxWalker({ exec: execMock });
+    const elements = await walker.walkActiveApp();
+    expect(elements.length).toBe(1);
+    expect(elements[0]?.label).toBe('Canvas Button');
+    expect(elements[0]?.index).toBe(1);
+  });
 });

@@ -78,6 +78,25 @@ describe('LocalServer', () => {
     expect(typeof json.uptime).toBe('number');
   });
 
+  it('handles GET /machines and GET /api/machines', async () => {
+    const res1 = await fetch(`http://127.0.0.1:${server.port}/machines`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res1.status).toBe(200);
+    const json1 = await res1.json();
+    expect(Array.isArray(json1.machines)).toBe(true);
+    expect(json1.machines.length).toBe(1);
+    expect(typeof json1.machines[0]?.id).toBe('string');
+    expect(json1.machines[0]?.id.length).toBeGreaterThan(0);
+
+    const res2 = await fetch(`http://127.0.0.1:${server.port}/api/machines`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res2.status).toBe(200);
+    const json2 = await res2.json();
+    expect(Array.isArray(json2.machines)).toBe(true);
+  });
+
   it('creates and retrieves tasks via POST and GET /api/tasks', async () => {
     const createRes = await fetch(`http://127.0.0.1:${server.port}/api/tasks`, {
       method: 'POST',
