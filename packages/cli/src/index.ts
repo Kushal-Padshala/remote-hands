@@ -8,6 +8,7 @@ import { pairCommand } from './commands/pair.js';
 import { browserCommand } from './commands/browser.js';
 import { profilesCommand } from './commands/profiles.js';
 import { approveCommand } from './commands/approve.js';
+import { desktopCommand } from './commands/desktop.js';
 
 export {
   setupCommand,
@@ -19,6 +20,7 @@ export {
   browserCommand,
   profilesCommand,
   approveCommand,
+  desktopCommand,
   type CommandContext,
 };
 
@@ -35,6 +37,7 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
     stdout('  start    Start daemon with lid-closed clamshell sleep prevention');
     stdout('  pair     Display phone pairing QR code and direct link');
     stdout('  daemon   Run the local execution daemon');
+    stdout('  desktop  Control native desktop applications and GUI automation');
     stdout('  browser  Run headless browser automation bridge with live screen streaming');
     stdout('  approve  Request human-in-the-loop approval on the mobile app');
     stdout('  profiles List detected Chrome browser profiles and launch commands');
@@ -51,6 +54,10 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
 
   if (command === 'pair') {
     return await pairCommand(args, context);
+  }
+
+  if (command === 'desktop') {
+    return await desktopCommand(args, context);
   }
 
   if (command === 'browser') {
@@ -102,6 +109,10 @@ if (isEntrypoint()) {
   const binaryName = path.basename(process.argv[1] || '');
   if (binaryName === 'rh-browser') {
     browserCommand(process.argv.slice(2)).then((code) => {
+      if (code !== 0) process.exit(code);
+    });
+  } else if (binaryName === 'rh-desktop') {
+    desktopCommand(process.argv.slice(2)).then((code) => {
       if (code !== 0) process.exit(code);
     });
   } else {
