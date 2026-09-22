@@ -5008,3 +5008,96 @@ main {
     padding-right: 40px;
   }
 }
+
+/* ============ Stage 2: Devices / History / Pairing desktop polish ============ */
+/* All rules are desktop-only (>=1024px). Mobile rendering is untouched. */
+@media (min-width: 1024px) {
+  .home-content {
+    gap: 20px;
+  }
+
+  .home-toolbar {
+    background: #101012;
+    border: 1px solid #1e1e21;
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .home-search {
+    background: #0b0b0c;
+    max-width: none;
+  }
+
+  .home-meta {
+    padding: 0 4px;
+  }
+
+  .machines-list {
+    align-items: stretch;
+  }
+
+  .machine-card {
+    height: 100%;
+    background: #131316;
+  }
+
+  .empty-state-card.home-onboard {
+    max-width: 640px;
+  }
+
+  .history-tab {
+    max-width: none;
+    width: 100%;
+    margin: 0;
+    padding: 4px 0 48px 0;
+  }
+
+  .history-header {
+    background: #101012;
+    border: 1px solid #1e1e21;
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .history-search-input {
+    background: #0b0b0c;
+  }
+
+  .pairing-content {
+    max-width: 720px;
+  }
+
+  .pairing-content .card {
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  }
+
+  .new-task-content {
+    max-width: 780px;
+  }
+}
+
+@media (hover: hover) and (min-width: 1024px) {
+  .machine-card:hover {
+    transform: translateY(-1px);
+    border-color: #3d3d44;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+
+  .history-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+}
+
+@media (min-width: 1280px) {
+  .history-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    align-items: start;
+  }
+
+  .machines-list {
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  }
+}
