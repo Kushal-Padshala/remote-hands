@@ -24,3 +24,9 @@ export {
   type IndexedElement as AxIndexedElement,
   type IndexedElement as DesktopIndexedElement,
 } from './desktop/ax-walker.js';
+export {
+  DesktopActEngine,
+  type MicroDecision,
+  type MicroActionType,
+  type DesktopActEngineOptions,
+} from './desktop/desktop-act.js';
