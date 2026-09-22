@@ -5443,3 +5443,219 @@ main {
     width: 280px;
   }
 }
+
+.history-header {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 2px 0 0 0;
+}
+
+.history-search-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #232326;
+  border-radius: 0;
+  padding: 10px 34px 10px 34px;
+}
+
+.history-search-input:focus {
+  border-color: #52525b;
+  box-shadow: none;
+}
+
+.history-refresh-btn {
+  background: transparent;
+  border: none;
+  color: #71717a;
+}
+
+.history-refresh-btn:hover:not(:disabled) {
+  background: transparent;
+  color: #ededed;
+}
+
+.history-filter-chip {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 6px 2px;
+  margin-right: 16px;
+  color: #71717a;
+}
+
+.history-filter-chip.active {
+  background: transparent;
+  border: none;
+  color: #ededed;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.history-card {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #1c1c1f;
+  border-radius: 0;
+  padding: 16px 4px;
+  gap: 8px;
+}
+
+.history-card:hover {
+  background: transparent;
+  border-color: #1c1c1f;
+  transform: none;
+  box-shadow: none;
+}
+
+.history-card:active {
+  transform: none;
+}
+
+.history-card-summary {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+.history-status-badge {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.history-status-badge.status-done {
+  background: transparent;
+  border: none;
+  color: #4caf7d;
+}
+
+.history-status-badge.status-running {
+  background: transparent;
+  border: none;
+  color: #e8a15c;
+}
+
+.history-status-badge.status-queued {
+  background: transparent;
+  border: none;
+  color: #eab308;
+}
+
+.history-status-badge.status-failed {
+  background: transparent;
+  border: none;
+  color: #f87171;
+}
+
+.history-status-badge.status-cancelled {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+}
+
+.history-skeleton-card {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #1c1c1f;
+  border-radius: 0;
+}
+
+.history-empty-icon {
+  background: transparent;
+  border: none;
+  width: auto;
+  height: auto;
+}
+
+.home-toolbar {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 4px 0;
+}
+
+@media (min-width: 1024px) {
+  .app-sidebar .brand-icon {
+    background: transparent;
+    border: none;
+    width: auto;
+    height: auto;
+  }
+
+  .sidebar-cta {
+    background: transparent;
+    border: none;
+    color: #ededed;
+    justify-content: flex-start;
+    padding: 8px 10px;
+  }
+
+  .sidebar-cta:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .sidebar-nav {
+    border-top: none;
+    border-bottom: none;
+  }
+
+  .sidebar-nav-item.active {
+    background: transparent;
+    border-radius: 0;
+    box-shadow: inset 2px 0 0 #ededed;
+    color: #ffffff;
+  }
+
+  .sidebar-nav-count {
+    background: transparent;
+    border: none;
+    padding: 0;
+  }
+
+  .sidebar-machine-row.expanded {
+    background: transparent;
+    border-color: transparent;
+  }
+
+  .sidebar-chat:hover {
+    background: transparent;
+  }
+
+  .sidebar-chat:hover .sidebar-chat-prompt {
+    color: #ffffff;
+  }
+
+  .sidebar-chat.active {
+    background: transparent;
+  }
+
+  .sidebar-chat.active .sidebar-chat-prompt {
+    color: #ffffff;
+  }
+
+  .sidebar-pair-btn {
+    background: transparent;
+    border: none;
+    justify-content: flex-start;
+    color: #a1a1aa;
+    padding: 8px 10px;
+  }
+
+  .sidebar-pair-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: transparent;
+    color: #ffffff;
+  }
+
+  .sidebar-empty {
+    background: transparent;
+    border: none;
+    padding: 8px 10px;
+  }
+}
