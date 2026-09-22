@@ -52,7 +52,14 @@ export class MacOsDriver {
   }
 
   async openApp(appName: string): Promise<void> {
+    const escaped = escapeAppleScript(appName);
     this.exec('open', ['-a', appName]);
+    this.exec('osascript', [
+      '-e',
+      `tell application "${escaped}" to activate`,
+      '-e',
+      `tell application "${escaped}" to reopen`,
+    ]);
   }
 
   async listWindows(): Promise<WindowInfo[]> {

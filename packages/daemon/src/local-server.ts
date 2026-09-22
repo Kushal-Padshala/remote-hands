@@ -471,19 +471,35 @@ export class LocalServer {
   }
 
   start(): Promise<number> {
-    return new Promise((resolve, reject) => {
-      this.server.once('error', reject);
-      this.server.listen(this.options.port ?? 3000, this.options.host ?? '0.0.0.0', () => {
-        this.server.removeListener('error', reject);
-        const addr = this.server.address();
-        if (addr && typeof addr === 'object') {
-          this.port = addr.port;
-        } else {
-          this.port = this.options.port ?? 3000;
-        }
-        resolve(this.port);
+    const desiredPort = this.options.port ?? 3000;
+    const isExplicitPort = this.options.port !== undefined && this.options.port !== 0;
+
+    const tryListen = (port: number): Promise<number> => {
+      return new Promise((resolve, reject) => {
+        const onError = (err: any) => {
+          this.server.removeListener('error', onError);
+          if (err?.code === 'EADDRINUSE' && !isExplicitPort) {
+            resolve(tryListen(0));
+            return;
+          }
+          reject(err);
+        };
+
+        this.server.once('error', onError);
+        this.server.listen(port, this.options.host ?? '0.0.0.0', () => {
+          this.server.removeListener('error', onError);
+          const addr = this.server.address();
+          if (addr && typeof addr === 'object') {
+            this.port = addr.port;
+          } else {
+            this.port = port;
+          }
+          resolve(this.port);
+        });
       });
-    });
+    };
+
+    return tryListen(desiredPort);
   }
 
   stop(): Promise<void> {

@@ -113,7 +113,7 @@ describe('AxWalker', () => {
     expect(walker.formatTable([])).toBe('');
   });
 
-  it('walkActiveApp calls osascript with JXA script and parses nodes', async () => {
+  it('walkActiveApp calls swift native accessibility engine and parses nodes', async () => {
     const mockNodes: RawAxNode[] = [
       { role: 'AXButton', label: 'Save', x: 20, y: 30, width: 60, height: 25 },
       { role: 'AXTextField', label: 'File Name', x: 90, y: 30, width: 120, height: 25 },
@@ -130,7 +130,26 @@ describe('AxWalker', () => {
     expect(elements[0]?.label).toBe('Save');
     expect(elements[1]?.index).toBe(2);
     expect(elements[1]?.label).toBe('File Name');
-    expect(execMock).toHaveBeenCalledWith('osascript', expect.arrayContaining(['-l', 'JavaScript', '-e']));
+    expect(execMock).toHaveBeenCalledWith('swift', expect.arrayContaining(['-e']));
+  });
+
+  it('falls back to bounded JXA when swift returns empty or fails', async () => {
+    const mockNodes: RawAxNode[] = [
+      { role: 'AXButton', label: 'JXA Button', x: 20, y: 30, width: 60, height: 25 },
+    ];
+    const execMock = vi.fn().mockImplementation((cmd: string) => {
+      if (cmd === 'swift') {
+        return { stdout: '[]', stderr: '', status: 0 };
+      }
+      if (cmd === 'osascript') {
+        return { stdout: JSON.stringify(mockNodes), stderr: '', status: 0 };
+      }
+      return { stdout: '', stderr: '', status: 0 };
+    });
+    const walker = new AxWalker({ exec: execMock });
+    const elements = await walker.walkActiveApp();
+    expect(elements.length).toBe(1);
+    expect(elements[0]?.label).toBe('JXA Button');
   });
 
   it('walkActiveApp supports specific application name', async () => {

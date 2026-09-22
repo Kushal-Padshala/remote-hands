@@ -59,7 +59,7 @@ function findWebDist(customRoot?: string): string | undefined {
   return undefined;
 }
 
-function parsePort(args: string[], context: CommandContext): number {
+function parsePort(args: string[], context: CommandContext): number | undefined {
   const portArgIdx = args.findIndex((a) => a === '--port' || a.startsWith('--port='));
   if (portArgIdx !== -1) {
     const arg = args[portArgIdx];
@@ -75,7 +75,7 @@ function parsePort(args: string[], context: CommandContext): number {
     const val = Number((context as any).port);
     if (!isNaN(val)) return val;
   }
-  return 3000;
+  return undefined;
 }
 
 function resolveProfileSettings(args: string[]): { profileMode: ChromeProfileMode; targetProfile?: string | undefined } {
