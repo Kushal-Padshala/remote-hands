@@ -21,6 +21,8 @@ export async function startCommand(args: string[], context: CommandContext = {})
   const noClamshell = args.includes('--no-clamshell') || args.includes('--no-sleep-prevent');
   const once = args.includes('--once');
   const noAutoSetup = args.includes('--no-auto-setup') || once;
+  const isLocal = args.includes('--local') || (context as any).local === true;
+  const isRemote = args.includes('--remote') || (context as any).remote === true;
 
   const browserProfileIdx = args.findIndex((a) => a === '--browser-profile' || a.startsWith('--browser-profile='));
   let rawProfile: string | undefined;
@@ -159,7 +161,7 @@ export async function startCommand(args: string[], context: CommandContext = {})
     }
   } catch {}
 
-  if (!hasConfig && !noAutoSetup) {
+  if (!hasConfig && !noAutoSetup && !isLocal) {
     stdout(
       '\n' +
         c.yellow(`╭─ ${c.bold('⚡ Setup Required')} ${'─'.repeat(Math.max(2, termWidth - 20))}\n`) +
@@ -167,10 +169,13 @@ export async function startCommand(args: string[], context: CommandContext = {})
         `${c.yellow('│')}  ${c.cyan('Launching setup wizard now...')}\n` +
         c.yellow(`╰${hr}\n`),
     );
-    const setupExit = await setupCommand([], context);
-    if (setupExit !== 0) {
-      restoreSleep();
-      return setupExit;
+    try {
+      const setupExit = await setupCommand([], context);
+      if (setupExit !== 0) {
+        stdout(c.yellow('[start] Cloudflare setup was not completed. Seamlessly starting in local embedded mode...'));
+      }
+    } catch {
+      stdout(c.yellow('[start] Cloudflare setup skipped. Seamlessly starting in local embedded mode...'));
     }
     try {
       if (fs.existsSync(daemonConfigFile)) {
@@ -193,16 +198,24 @@ export async function startCommand(args: string[], context: CommandContext = {})
           : c.dim(`Browser profile mode: ${profileMode}`)
       }\n` +
       `${c.brightCyan('│')}  ${
-        hasConfig
+        hasConfig && !isLocal
           ? c.white('Listening for coding agent tasks from your phone...')
-          : c.yellow('Notice: Setup config not found yet. Run "rh setup" to pair.')
+          : c.white('Starting in local embedded mode (zero-cloud)...')
       }\n` +
       `${c.brightCyan('│')}  ${c.dim('Press Ctrl+C anytime to stop and restore normal sleep settings.')}\n` +
       c.brightCyan(`╰${hr}`),
   );
 
+  const daemonArgs = [...args];
+  if ((!hasConfig || isLocal) && !daemonArgs.includes('--local')) {
+    daemonArgs.push('--local');
+  }
+  if (isRemote && !daemonArgs.includes('--remote')) {
+    daemonArgs.push('--remote');
+  }
+
   try {
-    return await daemonCommand(args, {
+    return await daemonCommand(daemonArgs, {
       ...context,
       chromeManager,
       configDir,

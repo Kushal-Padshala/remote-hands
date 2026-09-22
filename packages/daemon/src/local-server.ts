@@ -6,11 +6,11 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { LocalTaskStore } from './local-task-store.js';
 
 export interface LocalServerOptions {
-  port?: number;
-  host?: string;
+  port?: number | undefined;
+  host?: string | undefined;
   pairingToken: string;
   store: LocalTaskStore;
-  staticDir?: string;
+  staticDir?: string | undefined;
 }
 
 export class LocalServer {

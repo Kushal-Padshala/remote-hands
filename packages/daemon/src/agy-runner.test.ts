@@ -337,8 +337,22 @@ describe('remote hands system prompt and reminder', () => {
     expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain("browser-harness <<'PY' ... PY");
   });
 
+  it('includes desktop software automation commands in DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT', () => {
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop open "<app>"');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop snapshot');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop act "<goal>"');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop click <index>');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop menu "<app>" "<menu>" "<item>"');
+  });
+
   it('includes indexed browser shortcuts in DEFAULT_REMOTE_HANDS_REMINDER', () => {
     expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh browser snapshot');
     expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh browser click <index>');
+  });
+
+  it('includes desktop shortcuts in DEFAULT_REMOTE_HANDS_REMINDER', () => {
+    expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh desktop open "<app>"');
+    expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh desktop act "<goal>"');
+    expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh desktop click <index>');
   });
 });
