@@ -139,7 +139,6 @@ export function SidebarMachines({
         void fetchChats(target);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMachineId, machines]);
 
   useEffect(() => {
@@ -152,7 +151,6 @@ export function SidebarMachines({
       });
     }, 20000);
     return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleRefresh = () => {

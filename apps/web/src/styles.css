@@ -4593,8 +4593,6 @@ main {
   }
 }
 
-/* ============ Enterprise desktop shell (Stage 1) ============ */
-/* Mobile-first defaults: sidebar hidden, header-context hidden. */
 .app-sidebar {
   display: none;
 }
@@ -5009,8 +5007,6 @@ main {
   }
 }
 
-/* ============ Stage 2: Devices / History / Pairing desktop polish ============ */
-/* All rules are desktop-only (>=1024px). Mobile rendering is untouched. */
 @media (min-width: 1024px) {
   .home-content {
     gap: 20px;
@@ -5102,7 +5098,6 @@ main {
   }
 }
 
-/* ============ Sidebar computer dropdowns with chat history ============ */
 @media (min-width: 1024px) {
   .sidebar-machine-row {
     display: flex;
@@ -5310,8 +5305,6 @@ main {
   }
 }
 
-/* ============ Stage 3: Enterprise chat polish (desktop) ============ */
-/* Mobile-first default: back label hidden. */
 .chat-nav-back-label {
   display: none;
 }
