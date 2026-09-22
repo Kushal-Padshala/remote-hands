@@ -8,6 +8,7 @@ import { LiveTaskScreen } from './screens/LiveTaskScreen.js';
 import { PairingTab } from './screens/PairingTab.js';
 import { HistoryTab } from './screens/HistoryTab.js';
 import { PairingModal } from './components/PairingModal.js';
+import { SidebarMachines } from './components/SidebarMachines.js';
 import { InstallModal } from './components/InstallModal.js';
 import { ErrorBoundary } from './components/ErrorBoundary.js';
 
@@ -355,22 +356,11 @@ export function App() {
           </button>
         </nav>
 
-        <div className="sidebar-section">
-          <div className="sidebar-section-head">
-            <span className="sidebar-section-title">Computers</span>
-            <button
-              type="button"
-              className="sidebar-section-action"
-              onClick={loadMachines}
-              title="Refresh computers"
-              aria-label="Refresh computers"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
-              </svg>
-            </button>
-          </div>
-          {machines.length === 0 ? (
+        {machines.length === 0 ? (
+          <div className="sidebar-section">
+            <div className="sidebar-section-head">
+              <span className="sidebar-section-title">Computers</span>
+            </div>
             <button
               type="button"
               className="sidebar-empty"
@@ -380,32 +370,19 @@ export function App() {
               <span className="sidebar-empty-title">No computers yet</span>
               <span className="sidebar-empty-sub">Pair your Mac to start</span>
             </button>
-          ) : (
-            <div className="sidebar-machines" role="list">
-              {machines.slice(0, 8).map((m) => {
-                const online = isOnlineMachine(m);
-                const isActive = selectedMachine?.id === m.id && currentScreen === 'live-task';
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    role="listitem"
-                    className={clsx('sidebar-machine', isActive && 'active')}
-                    onClick={() => handleSelectMachine(m)}
-                    data-testid={`sidebar-machine-${m.id}`}
-                    title={m.name || m.hostname || 'Computer'}
-                  >
-                    <span className={clsx('sidebar-machine-dot', online ? 'online' : 'offline')} aria-hidden="true" />
-                    <span className="sidebar-machine-text">
-                      <span className="sidebar-machine-name">{m.name || m.hostname || 'Computer'}</span>
-                      <span className="sidebar-machine-sub">{online ? 'Online' : 'Offline'}</span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <SidebarMachines
+            machines={machines}
+            selectedMachineId={selectedMachine?.id ?? null}
+            activeTaskId={activeTask?.id ?? null}
+            isChatMode={currentScreen === 'live-task'}
+            onOpenMachine={handleSelectMachine}
+            onOpenTask={handleSelectHistoricalTask}
+            onViewAll={() => goToTab('history')}
+            onRefreshMachines={loadMachines}
+          />
+        )}
 
         <div className="sidebar-footer">
           <button
