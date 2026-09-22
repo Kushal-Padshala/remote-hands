@@ -62,4 +62,21 @@ describe('DefaultFrameSource', () => {
     const source = new DefaultFrameSource();
     expect(() => source.dispose()).not.toThrow();
   });
+
+  it('captures desktop frame when enabled and desktopCaptureFn provided', async () => {
+    const fakeDesktopBuffer = Buffer.from('fake-desktop-jpeg-data');
+    const source = new DefaultFrameSource({
+      enableDesktopCapture: true,
+      desktopCaptureFn: async () => fakeDesktopBuffer,
+      candidatePaths: [],
+    });
+
+    const frame = await source.captureFrame();
+    expect(frame).not.toBeNull();
+    expect(frame?.source).toBe('desktop');
+    expect(frame?.jpegBase64).toContain('data:image/jpeg;base64,');
+
+    const second = await source.captureFrame();
+    expect(second).toBeNull();
+  });
 });

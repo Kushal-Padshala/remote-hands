@@ -537,6 +537,15 @@ export class LocalTaskStore implements TaskStore {
     `).run(taskId, frame.jpegBase64, frame.capturedAt);
   }
 
+  async getLatestFrame(taskId: string): Promise<{ jpegBase64: string; capturedAt: string } | null> {
+    const row = this.db.prepare('SELECT jpeg_base64, captured_at FROM frames WHERE task_id = ?').get(taskId) as any;
+    if (!row) return null;
+    return {
+      jpegBase64: row.jpeg_base64,
+      capturedAt: row.captured_at,
+    };
+  }
+
   async registerMachine(input: RegisterMachineInput): Promise<Machine> {
     const existing = this.db.prepare('SELECT * FROM machines WHERE user_id = ? AND name = ?').get(input.userId, input.name) as any;
     const nowIso = new Date().toISOString();

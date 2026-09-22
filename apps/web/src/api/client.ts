@@ -185,6 +185,18 @@ export class WebApiClient {
     return res?.approvals ?? [];
   }
 
+  async getLatestFrame(taskId: string): Promise<{ jpeg_base64: string; captured_at?: string } | null> {
+    try {
+      const res = await this.request<{ frame?: { jpeg_base64: string; captured_at?: string } }>(
+        `/tasks/${taskId}/frame`,
+        'GET',
+      );
+      return res?.frame ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   createTaskWebSocket(taskId: string): WebSocket {
     const effectiveBase = this.baseUrl || resolveDefaultBaseUrl();
     const protocol = effectiveBase.startsWith('https:') ? 'wss:' : 'ws:';

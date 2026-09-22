@@ -23,12 +23,13 @@ export async function desktopCommand(
 
   const sub = args[0];
   if (!sub) {
-    stdout('Usage: rh desktop <act|open|window|snapshot|click|type|key|menu> [args]');
+    stdout('Usage: rh desktop <act|open|window|snapshot|screenshot|click|type|key|menu> [args]');
     stdout('');
     stdout('Commands:');
     stdout('  open <app>                  Launch or activate an application');
     stdout('  window <list|focus|close>   Manage windows');
     stdout('  snapshot [--json]           Inspect UI elements of the active application');
+    stdout('  screenshot [--path|--b64]   Capture full desktop screenshot');
     stdout('  click <index|x,y>           Click an element by index or coordinate');
     stdout('  type <text>                 Type text into the active element');
     stdout('  key <combo>                 Send keystroke or shortcut (e.g. return, cmd+s)');
@@ -39,12 +40,13 @@ export async function desktopCommand(
   }
 
   if (sub === '--help' || sub === '-h' || sub === 'help') {
-    stdout('Usage: rh desktop <act|open|window|snapshot|click|type|key|menu> [args]');
+    stdout('Usage: rh desktop <act|open|window|snapshot|screenshot|click|type|key|menu> [args]');
     stdout('');
     stdout('Commands:');
     stdout('  open <app>                  Launch or activate an application');
     stdout('  window <list|focus|close>   Manage windows');
     stdout('  snapshot [--json]           Inspect UI elements of the active application');
+    stdout('  screenshot [--path|--b64]   Capture full desktop screenshot');
     stdout('  click <index|x,y>           Click an element by index or coordinate');
     stdout('  type <text>                 Type text into the active element');
     stdout('  key <combo>                 Send keystroke or shortcut (e.g. return, cmd+s)');
@@ -110,6 +112,33 @@ export async function desktopCommand(
         stdout(JSON.stringify(elements, null, 2));
       } else {
         stdout(walker.formatTable(elements));
+      }
+      return 0;
+    }
+
+    if (sub === 'screenshot') {
+      const isBase64 = args.includes('--base64') || args.includes('--b64');
+      const isJson = args.includes('--json');
+      const pathArgIdx = args.indexOf('--path');
+      const targetPath = pathArgIdx !== -1 && args[pathArgIdx + 1] ? args[pathArgIdx + 1] : undefined;
+      const buf = await driver.captureScreenshot({ destPath: targetPath });
+      if (!buf) {
+        stderr('Failed to capture desktop screenshot');
+        return 1;
+      }
+      if (isBase64) {
+        const b64 = buf.toString('base64');
+        if (isJson) {
+          stdout(JSON.stringify({ jpeg_base64: b64, size: buf.length }));
+        } else {
+          stdout(b64);
+        }
+        return 0;
+      }
+      if (targetPath) {
+        stdout(`Screenshot saved to ${targetPath} (${buf.length} bytes)`);
+      } else {
+        stdout(`Captured desktop screenshot (${buf.length} bytes)`);
       }
       return 0;
     }

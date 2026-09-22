@@ -77,7 +77,8 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
   let frameStream: ThrottledFrameStream | null = null;
   const frameSource = input.frameSource ?? new DefaultFrameSource({
     taskStartTime,
-    browserActive: false,
+    browserActive: isBrowserKind,
+    enableDesktopCapture: true,
   });
 
   if (canCaptureFrames) {
@@ -96,12 +97,10 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
       },
     });
 
-    if (isBrowserKind) {
-      if (frameSource instanceof DefaultFrameSource) {
-        frameSource.setBrowserActive(true);
-      }
-      frameStream.start(1000);
+    if (frameSource instanceof DefaultFrameSource) {
+      frameSource.setBrowserActive(isBrowserKind);
     }
+    frameStream.start(1000);
   }
 
   const abortController = new AbortController();

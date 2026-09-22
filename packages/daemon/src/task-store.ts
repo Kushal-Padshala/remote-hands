@@ -43,6 +43,7 @@ export interface TaskStore {
   getTask?(taskId: string): Promise<Task | null>;
   cancelTask?(taskId: string, reason?: string): Promise<Task>;
   pushFrame?(taskId: string, frame: { jpegBase64: string; capturedAt: string }): Promise<void>;
+  getLatestFrame?(taskId: string): Promise<{ jpegBase64: string; capturedAt: string } | null>;
   listApprovals?(taskId: string): Promise<ApprovalRow[]>;
   getPendingApproval?(taskId: string): Promise<ApprovalRow | null>;
   waitForApprovalDecision?(approvalId: string, timeoutMs?: number, signal?: AbortSignal): Promise<ApprovalRow>;

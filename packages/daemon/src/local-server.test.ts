@@ -299,4 +299,20 @@ describe('LocalServer', () => {
 
     ws.close();
   });
+
+  it('serves task latest frame over HTTP', async () => {
+    const task = await store.createTask({ goal: 'Frame HTTP test' });
+    const emptyRes = await fetch(`http://127.0.0.1:${server.port}/api/tasks/${task.id}/frame?token=${token}`);
+    expect(emptyRes.status).toBe(404);
+
+    await store.pushFrame(task.id, {
+      jpegBase64: 'base64-http-frame',
+      capturedAt: '2026-09-22T19:00:00.000Z',
+    });
+
+    const frameRes = await fetch(`http://127.0.0.1:${server.port}/api/tasks/${task.id}/frame?token=${token}`);
+    expect(frameRes.status).toBe(200);
+    const body = (await frameRes.json()) as any;
+    expect(body.frame.jpeg_base64).toBe('base64-http-frame');
+  });
 });

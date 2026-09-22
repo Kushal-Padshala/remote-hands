@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as net from 'node:net';
 import type { BrowserFrame, FrameSource } from './frame-stream.js';
+import { MacOsDriver } from './desktop/macos-driver.js';
 
 export const CANDIDATE_FRAME_PATHS = [
   '/tmp/rh_screen_frame.jpg',
@@ -33,6 +34,9 @@ export interface DefaultFrameSourceOptions {
   taskStartTime?: number | undefined;
   browserActive?: boolean | undefined;
   candidatePaths?: string[] | undefined;
+  desktopDriver?: MacOsDriver | undefined;
+  desktopCaptureFn?: (() => Promise<Buffer | null>) | undefined;
+  enableDesktopCapture?: boolean | undefined;
 }
 
 export class DefaultFrameSource implements FrameSource {
@@ -45,6 +49,9 @@ export class DefaultFrameSource implements FrameSource {
   private taskStartTime: number;
   private browserActive: boolean;
   private candidatePaths: string[];
+  private desktopDriver: MacOsDriver;
+  private desktopCaptureFn?: (() => Promise<Buffer | null>) | undefined;
+  private enableDesktopCapture: boolean;
   private initialTargetIds = new Set<string>();
   private initialUrls = new Map<string, string>();
   private initialRecorded = false;
@@ -53,6 +60,9 @@ export class DefaultFrameSource implements FrameSource {
     this.taskStartTime = options?.taskStartTime ?? Date.now();
     this.browserActive = options?.browserActive ?? false;
     this.candidatePaths = options?.candidatePaths ?? CANDIDATE_FRAME_PATHS;
+    this.desktopDriver = options?.desktopDriver ?? new MacOsDriver();
+    this.desktopCaptureFn = options?.desktopCaptureFn;
+    this.enableDesktopCapture = options?.enableDesktopCapture ?? (options?.candidatePaths === undefined);
     if (!options?.candidatePaths) {
       cleanupStaleFrameFiles(this.taskStartTime);
     }
@@ -78,6 +88,11 @@ export class DefaultFrameSource implements FrameSource {
 
     const cdpResult = await this.captureFromCdp();
     if (cdpResult !== undefined) return cdpResult;
+
+    if (this.enableDesktopCapture) {
+      const desktopResult = await this.captureFromDesktop();
+      if (desktopResult !== undefined) return desktopResult;
+    }
 
     return null;
   }
@@ -142,6 +157,7 @@ export class DefaultFrameSource implements FrameSource {
         const frame: BrowserFrame = {
           jpegBase64: base64,
           capturedAt: new Date(stat.mtimeMs).toISOString(),
+          source: 'browser',
         };
         this.lastCapturedFrame = frame;
         return frame;
@@ -345,6 +361,44 @@ export class DefaultFrameSource implements FrameSource {
       const frame: BrowserFrame = {
         jpegBase64: base64,
         capturedAt: new Date().toISOString(),
+        source: 'browser',
+      };
+      this.lastCapturedFrame = frame;
+      return frame;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async captureFromDesktop(): Promise<BrowserFrame | null | undefined> {
+    try {
+      const buf = this.desktopCaptureFn
+        ? await this.desktopCaptureFn()
+        : await this.desktopDriver.captureScreenshot();
+
+      if (!buf || buf.length === 0) return undefined;
+
+      const now = Date.now();
+      const mime = 'image/jpeg';
+      const base64 = `data:${mime};base64,${buf.toString('base64')}`;
+
+      if (base64 === this.lastCapturedHash) {
+        if (now - this.lastEmitTime >= 1500 && this.lastCapturedFrame) {
+          this.lastEmitTime = now;
+          return {
+            ...this.lastCapturedFrame,
+            capturedAt: new Date().toISOString(),
+          };
+        }
+        return null;
+      }
+
+      this.lastCapturedHash = base64;
+      this.lastEmitTime = now;
+      const frame: BrowserFrame = {
+        jpegBase64: base64,
+        capturedAt: new Date().toISOString(),
+        source: 'desktop',
       };
       this.lastCapturedFrame = frame;
       return frame;

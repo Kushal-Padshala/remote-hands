@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import * as fs from 'node:fs';
 import { MacOsDriver } from './macos-driver.js';
 
 describe('MacOsDriver', () => {
@@ -188,5 +189,26 @@ describe('MacOsDriver', () => {
     expect(execMock).toHaveBeenCalled();
     const callArgs = execMock.mock.calls[0]![1];
     expect(callArgs.join(' ')).toContain('tell application "Google Chrome" to activate');
+  });
+
+  it('captures desktop screenshot buffer using exec', async () => {
+    const tmpDest = `/tmp/test_screen_mock_${Date.now()}.jpg`;
+    const execMock = vi.fn().mockImplementation((cmd, args) => {
+      const filePath = args.find((a: string) => typeof a === 'string' && a.includes('.jpg')) ?? args[0];
+      fs.writeFileSync(filePath, Buffer.from('mock-jpeg-bytes'));
+      return { stdout: '', stderr: '', status: 0 };
+    });
+    const driver = new MacOsDriver({ exec: execMock });
+    const buf = await driver.captureScreenshot({ destPath: tmpDest });
+    expect(buf).not.toBeNull();
+    expect(buf?.toString()).toBe('mock-jpeg-bytes');
+    await fs.promises.unlink(tmpDest).catch(() => {});
+  });
+
+  it('returns null when screenshot execution fails to create file', async () => {
+    const execMock = vi.fn().mockReturnValue({ stdout: '', stderr: 'error', status: 1 });
+    const driver = new MacOsDriver({ exec: execMock });
+    const buf = await driver.captureScreenshot({ destPath: '/nonexistent/path/out.jpg' });
+    expect(buf).toBeNull();
   });
 });

@@ -192,6 +192,7 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
   const [showModelPicker, setShowModelPicker] = useState(false);
   const modelPickerRef = useRef<HTMLDivElement | null>(null);
   const [frameBase64, setFrameBase64] = useState<string | null>(null);
+  const [frameSource, setFrameSource] = useState<'browser' | 'desktop'>('desktop');
   const [showFrame, setShowFrame] = useState(true);
   const [activeApproval, setActiveApproval] = useState<ApprovalRow | null>(null);
   const [decidingApproval, setDecidingApproval] = useState(false);
@@ -280,6 +281,13 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
     if (frameExpiryTimerRef.current) {
       clearTimeout(frameExpiryTimerRef.current);
       frameExpiryTimerRef.current = null;
+    }
+    if (currentTaskId) {
+      void apiClient.getLatestFrame(currentTaskId).then((frame) => {
+        if (frame?.jpeg_base64) {
+          updateFrame(frame.jpeg_base64);
+        }
+      }).catch(() => {});
     }
   }, [currentTaskId]);
 
@@ -749,6 +757,9 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         if (msg.type === 'task.frame') {
           if (msg.task_id && currentTaskId && msg.task_id !== currentTaskId) return;
           updateFrame(msg.jpeg_base64);
+          if ((msg as any).source) {
+            setFrameSource((msg as any).source);
+          }
         } else if (msg.type === 'task.event') {
           if ((msg.event as any)?.id) {
             seenEventIds.add(String((msg.event as any).id));
@@ -1230,9 +1241,15 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         {showFrame && frameBase64 && (
           <div className="chat-inline-frame" style={{ margin: '6px 0 10px 0' }}>
             <div className="frame-meta-bar">
-              <span className="frame-profile-badge">Screen · Chrome</span>
+              <span className="frame-profile-badge">
+                {task?.kind === 'browser' || frameSource === 'browser' ? 'Screen · Chrome' : 'Screen · Desktop'}
+              </span>
             </div>
-            <FrameViewer frameBase64={frameBase64} onClose={() => setShowFrame(false)} />
+            <FrameViewer
+              frameBase64={frameBase64}
+              onClose={() => setShowFrame(false)}
+              title={task?.kind === 'browser' || frameSource === 'browser' ? 'Chrome' : 'Desktop'}
+            />
           </div>
         )}
 

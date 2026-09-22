@@ -188,6 +188,25 @@ export class LocalServer {
         return;
       }
 
+      const taskFrameMatch = apiPath.match(/^\/tasks\/([^\/]+)\/frame$/);
+      if (taskFrameMatch && method === 'GET') {
+        const taskId = taskFrameMatch[1]!;
+        const frame = typeof (this.options.store as any).getLatestFrame === 'function'
+          ? await (this.options.store as any).getLatestFrame(taskId)
+          : null;
+        if (!frame) {
+          this.sendJson(res, 404, { error: 'No frame available' });
+          return;
+        }
+        this.sendJson(res, 200, {
+          frame: {
+            jpeg_base64: frame.jpegBase64,
+            captured_at: frame.capturedAt,
+          },
+        });
+        return;
+      }
+
       const taskCancelMatch = apiPath.match(/^\/tasks\/([^\/]+)\/cancel$/);
       if (taskCancelMatch && method === 'POST') {
         const taskId = taskCancelMatch[1]!;
@@ -393,6 +412,20 @@ export class LocalServer {
         }
         this.connections.get(taskId)!.add(ws);
 
+        if (typeof (this.options.store as any).getLatestFrame === 'function') {
+          (this.options.store as any).getLatestFrame(taskId).then((latest: any) => {
+            if (latest && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'task.frame',
+                task_id: taskId,
+                jpeg_base64: latest.jpegBase64,
+                captured_at: latest.capturedAt,
+                source: 'desktop',
+              }));
+            }
+          }).catch(() => {});
+        }
+
         ws.on('message', (raw) => {
           try {
             const text = typeof raw === 'string' ? raw : raw.toString();
@@ -429,15 +462,23 @@ export class LocalServer {
 
   broadcastFrame(
     taskId: string,
-    frame: { jpegBase64?: string; jpeg_base64?: string; capturedAt?: string; captured_at?: string },
+    frame: {
+      jpegBase64?: string | undefined;
+      jpeg_base64?: string | undefined;
+      capturedAt?: string | undefined;
+      captured_at?: string | undefined;
+      source?: string | undefined;
+    },
   ): void {
     const jpeg_base64 = frame.jpeg_base64 ?? frame.jpegBase64 ?? '';
     const captured_at = frame.captured_at ?? frame.capturedAt ?? new Date().toISOString();
+    const source = (frame as any).source ?? 'desktop';
     this.broadcast(taskId, {
       type: 'task.frame',
       task_id: taskId,
       jpeg_base64,
       captured_at,
+      source,
     });
   }
 

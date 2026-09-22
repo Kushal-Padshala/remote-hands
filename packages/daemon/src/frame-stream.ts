@@ -3,6 +3,7 @@ export interface BrowserFrame {
   capturedAt: string;
   width?: number | undefined;
   height?: number | undefined;
+  source?: 'browser' | 'desktop' | undefined;
 }
 
 export interface FrameSource {

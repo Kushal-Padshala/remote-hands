@@ -173,15 +173,23 @@ describe('LocalTaskStore', () => {
     expect(afterDecisionPending).toBeNull();
   });
 
-  it('supports in-memory store and frame saving', async () => {
+  it('supports in-memory store and frame saving and retrieval', async () => {
     const memoryStore = new LocalTaskStore({ dbPath: ':memory:' });
     const task = await memoryStore.createTask({ goal: 'Memory task' });
     expect(task.id).toBeDefined();
 
+    const empty = await memoryStore.getLatestFrame(task.id);
+    expect(empty).toBeNull();
+
     await memoryStore.pushFrame(task.id, {
       jpegBase64: 'fake-frame-data',
-      capturedAt: new Date().toISOString(),
+      capturedAt: '2026-09-22T19:00:00.000Z',
     });
+
+    const latest = await memoryStore.getLatestFrame(task.id);
+    expect(latest).not.toBeNull();
+    expect(latest?.jpegBase64).toBe('fake-frame-data');
+    expect(latest?.capturedAt).toBe('2026-09-22T19:00:00.000Z');
 
     memoryStore.close();
   });

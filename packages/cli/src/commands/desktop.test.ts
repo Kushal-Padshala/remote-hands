@@ -445,4 +445,44 @@ describe('desktopCommand', () => {
     expect(code).toBe(1);
     expect(stderr).toHaveBeenCalledWith('Permission denied');
   });
+
+  it('captures screenshot and prints file status', async () => {
+    const driverMock = {
+      captureScreenshot: vi.fn().mockResolvedValue(Buffer.from('fake-screenshot-data')),
+    };
+    const stdout = vi.fn();
+    const code = await desktopCommand(['screenshot', '--path', '/tmp/custom.jpg'], {
+      stdout,
+      desktopDriver: driverMock as any,
+    });
+    expect(code).toBe(0);
+    expect(driverMock.captureScreenshot).toHaveBeenCalledWith({ destPath: '/tmp/custom.jpg' });
+    expect(stdout).toHaveBeenCalledWith(expect.stringContaining('Screenshot saved to /tmp/custom.jpg'));
+  });
+
+  it('captures screenshot and outputs base64 when requested', async () => {
+    const driverMock = {
+      captureScreenshot: vi.fn().mockResolvedValue(Buffer.from('fake-shot')),
+    };
+    const stdout = vi.fn();
+    const code = await desktopCommand(['screenshot', '--base64'], {
+      stdout,
+      desktopDriver: driverMock as any,
+    });
+    expect(code).toBe(0);
+    expect(stdout).toHaveBeenCalledWith(Buffer.from('fake-shot').toString('base64'));
+  });
+
+  it('reports failure when screenshot capture returns null', async () => {
+    const driverMock = {
+      captureScreenshot: vi.fn().mockResolvedValue(null),
+    };
+    const stderr = vi.fn();
+    const code = await desktopCommand(['screenshot'], {
+      stderr,
+      desktopDriver: driverMock as any,
+    });
+    expect(code).toBe(1);
+    expect(stderr).toHaveBeenCalledWith('Failed to capture desktop screenshot');
+  });
 });
