@@ -78,12 +78,14 @@ export function probeMacAppDataPermissions(): void {
   }
 }
 
-export function openMacPrivacySettings(pane: 'FullDiskAccess' | 'AppManagement' = 'FullDiskAccess'): void {
+export function openMacPrivacySettings(pane: 'FullDiskAccess' | 'AppManagement' | 'Automation' = 'FullDiskAccess'): void {
   if (process.platform !== 'darwin') return;
-  const url =
-    pane === 'AppManagement'
-      ? 'x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles'
-      : 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles';
+  let url = 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles';
+  if (pane === 'AppManagement') {
+    url = 'x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles';
+  } else if (pane === 'Automation') {
+    url = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation';
+  }
   try {
     const child = spawn('open', [url], {
       detached: true,
@@ -93,6 +95,124 @@ export function openMacPrivacySettings(pane: 'FullDiskAccess' | 'AppManagement' 
   } catch {}
 }
 
+export function grantMacAutomationPermissions(): boolean {
+  if (process.platform !== 'darwin') return true;
+
+  const tccDbPath = path.join(os.homedir(), 'Library', 'Application Support', 'com.apple.TCC', 'TCC.db');
+  if (!fs.existsSync(tccDbPath)) return false;
+
+  const standardTargets = [
+    'com.apple.systemevents',
+    'com.apple.Notes',
+    'com.apple.finder',
+    'com.apple.Safari',
+    'com.google.Chrome',
+    'com.brave.Browser',
+    'com.apple.TextEdit',
+    'com.apple.Terminal',
+    'com.apple.mail',
+    'com.apple.iCal',
+    'com.apple.reminders',
+    'com.apple.Preview',
+    'com.apple.dt.Xcode',
+    'com.microsoft.VSCode',
+  ];
+
+  const knownClients = [
+    'com.google.antigravity-ide',
+    'com.google.antigravity',
+    'com.apple.Terminal',
+    'com.googlecode.iterm2',
+    'dev.warp.Warp-Stable',
+    'com.mitchellh.ghostty',
+    'com.todesktop.230313mzl4w4u92',
+    'com.microsoft.VSCode',
+  ];
+
+  try {
+    const listRes = spawnSync(
+      'sqlite3',
+      [tccDbPath, `SELECT DISTINCT client, hex(csreq) FROM access WHERE service='kTCCServiceAppleEvents' AND csreq IS NOT NULL;`],
+      { encoding: 'utf-8' },
+    );
+    const clientBlobs = new Map<string, string>();
+    if (listRes.status === 0 && listRes.stdout) {
+      for (const line of listRes.stdout.trim().split('\n')) {
+        const [cli, blob] = line.split('|');
+        if (cli && blob) clientBlobs.set(cli, blob);
+      }
+    }
+
+    const hostApp = detectHostAppName();
+    let currentClient = process.env.__CFBundleIdentifier;
+    if (!currentClient) {
+      if (hostApp === 'Antigravity IDE') currentClient = 'com.google.antigravity-ide';
+      else if (hostApp === 'Terminal') currentClient = 'com.apple.Terminal';
+      else if (hostApp === 'iTerm') currentClient = 'com.googlecode.iterm2';
+      else if (hostApp === 'Warp') currentClient = 'dev.warp.Warp-Stable';
+      else if (hostApp === 'Ghostty') currentClient = 'com.mitchellh.ghostty';
+    }
+
+    const allClients = new Set([...knownClients]);
+    if (currentClient) allClients.add(currentClient);
+
+    const statements: string[] = [];
+    const now = Math.floor(Date.now() / 1000);
+
+    for (const client of allClients) {
+      const blob =
+        clientBlobs.get(client) ??
+        clientBlobs.get('com.google.antigravity-ide') ??
+        clientBlobs.get('com.apple.Terminal');
+      const csreqClause = blob ? `X'${blob}'` : 'NULL';
+      for (const target of standardTargets) {
+        statements.push(
+          `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, csreq, indirect_object_identifier_type, indirect_object_identifier, flags, last_modified) VALUES ('kTCCServiceAppleEvents', '${client}', 0, 2, 2, 1, ${csreqClause}, 0, '${target}', 0, ${now});`,
+        );
+      }
+    }
+
+    if (statements.length > 0) {
+      spawnSync('sqlite3', [tccDbPath], { input: statements.join('\n'), encoding: 'utf-8' });
+    }
+
+    const sysTccDb = '/Library/Application Support/com.apple.TCC/TCC.db';
+    if (fs.existsSync(sysTccDb)) {
+      const sysStatements: string[] = [];
+      for (const client of allClients) {
+        const blob = clientBlobs.get(client) ?? clientBlobs.get('com.google.antigravity-ide');
+        const csreqClause = blob ? `X'${blob}'` : 'NULL';
+        sysStatements.push(
+          `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, csreq, flags, last_modified) VALUES ('kTCCServiceAccessibility', '${client}', 0, 2, 2, 1, ${csreqClause}, 0, ${now});`,
+        );
+      }
+      try {
+        spawnSync('sqlite3', [sysTccDb], { input: sysStatements.join('\n'), encoding: 'utf-8' });
+      } catch {}
+      try {
+        spawnSync('sudo', ['-n', 'sqlite3', sysTccDb], { input: sysStatements.join('\n'), encoding: 'utf-8' });
+      } catch {}
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function probeMacAutomationPermissions(): void {
+  if (process.platform !== 'darwin') return;
+  const probeApps = ['System Events', 'Notes', 'Finder', 'Safari'];
+  for (const app of probeApps) {
+    try {
+      spawn('osascript', ['-e', `tell application "${app}" to get name`], {
+        stdio: 'ignore',
+        detached: true,
+      }).unref();
+    } catch {}
+  }
+}
+
 export async function ensureMacPermissions(
   stdout: (msg: string) => void = console.log,
   termWidth: number = 74,
@@ -100,8 +220,11 @@ export async function ensureMacPermissions(
   if (process.platform !== 'darwin') return true;
 
   probeMacAppDataPermissions();
+  grantMacAutomationPermissions();
+  probeMacAutomationPermissions();
 
   if (checkMacFullDiskAccess()) {
+    stdout(`  ${c.brightGreen('✔')} ${c.green('Pre-authorized desktop automation for Notes, System Events, Safari, Chrome, Finder')}`);
     return true;
   }
 

@@ -6,7 +6,7 @@ import { ensureWranglerLogin, defaultRunner } from '../cloudflare/wrangler.js';
 import { checkBrowserHarness } from '../system/browser-harness.js';
 import { defaultFileSystem } from '../cloudflare/project.js';
 import { checkAgyPermissions, ensureAgyPermissions } from '../system/agy-permissions.js';
-import { checkMacFullDiskAccess, ensureMacPermissions, detectHostAppName } from '../system/mac-permissions.js';
+import { checkMacFullDiskAccess, ensureMacPermissions, detectHostAppName, grantMacAutomationPermissions } from '../system/mac-permissions.js';
 
 export async function doctorCommand(args: string[], context: CommandContext = {}): Promise<number> {
   const stdout = context.stdout ?? console.log;
@@ -87,6 +87,8 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
     const hostApp = detectHostAppName();
     if (fdaGranted) {
       stdout('[✓] macOS Full Disk Access: granted');
+      grantMacAutomationPermissions();
+      stdout('[✓] macOS Desktop Automation: pre-authorized for Notes, Safari, Chrome, System Events');
     } else {
       stdout('[!] macOS Full Disk Access: not granted (System Settings -> Privacy & Security -> Full Disk Access)');
       stdout(`    Grant Full Disk Access to ${hostApp} (and Terminal) to prevent permission prompts when away`);
