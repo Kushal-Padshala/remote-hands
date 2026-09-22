@@ -4592,3 +4592,419 @@ main {
     font-size: 0.8125rem;
   }
 }
+
+/* ============ Enterprise desktop shell (Stage 1) ============ */
+/* Mobile-first defaults: sidebar hidden, header-context hidden. */
+.app-sidebar {
+  display: none;
+}
+
+.app-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.header-context {
+  display: none;
+}
+
+@media (min-width: 1024px) {
+  .app-shell {
+    flex-direction: row;
+    align-items: stretch;
+    max-width: none;
+    width: 100%;
+    min-height: 100dvh;
+    height: 100dvh;
+    overflow: hidden;
+    background: #0b0b0c;
+  }
+
+  .app-shell.chat-mode,
+  .app-shell:has(.chat-screen) {
+    position: static;
+    top: auto;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+    z-index: auto;
+  }
+
+  .app-sidebar {
+    display: flex;
+    flex-direction: column;
+    width: 288px;
+    min-width: 288px;
+    height: 100dvh;
+    position: sticky;
+    top: 0;
+    background: #0e0e10;
+    border-right: 1px solid #1e1e21;
+    padding: 20px 14px 14px 14px;
+    gap: 16px;
+    flex-shrink: 0;
+    overflow-y: auto;
+  }
+
+  .sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 6px 0 6px;
+  }
+
+  .sidebar-cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    background: #ededed;
+    border: 1px solid #ededed;
+    color: #0b0b0c;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .sidebar-cta:hover {
+    background: #ffffff;
+  }
+
+  .sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 0;
+    border-top: 1px solid #1a1a1d;
+    border-bottom: 1px solid #1a1a1d;
+  }
+
+  .sidebar-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    background: transparent;
+    border: none;
+    border-radius: 9px;
+    padding: 9px 10px;
+    color: #a1a1aa;
+    font-size: 0.875rem;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+
+  .sidebar-nav-item:hover {
+    background: #161618;
+    color: #ededed;
+  }
+
+  .sidebar-nav-item.active {
+    background: #1a1a1c;
+    color: #ffffff;
+  }
+
+  .sidebar-nav-label {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .sidebar-nav-count {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: #a1a1aa;
+    background: #0e0e10;
+    border: 1px solid #262628;
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sidebar-nav-item.active .sidebar-nav-count {
+    color: #ededed;
+    border-color: #333336;
+  }
+
+  .sidebar-nav-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #4caf7d;
+    flex-shrink: 0;
+  }
+
+  .sidebar-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+  }
+
+  .sidebar-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 6px;
+  }
+
+  .sidebar-section-title {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6f6f76;
+  }
+
+  .sidebar-section-action {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    background: transparent;
+    border: none;
+    color: #71717a;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .sidebar-section-action:hover {
+    background: #1a1a1c;
+    color: #ededed;
+  }
+
+  .sidebar-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    background: #131314;
+    border: 1px dashed #2e2e31;
+    border-radius: 10px;
+    padding: 12px;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+  }
+
+  .sidebar-empty:hover {
+    border-color: #3f3f46;
+  }
+
+  .sidebar-empty-title {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #ededed;
+  }
+
+  .sidebar-empty-sub {
+    font-size: 0.75rem;
+    color: #71717a;
+  }
+
+  .sidebar-machines {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow-y: auto;
+  }
+
+  .sidebar-machine {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    padding: 8px 10px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.12s ease, border-color 0.12s ease;
+  }
+
+  .sidebar-machine:hover {
+    background: #151517;
+  }
+
+  .sidebar-machine.active {
+    background: #18181a;
+    border-color: #2a2a2e;
+  }
+
+  .sidebar-machine-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .sidebar-machine-dot.online {
+    background: #4caf7d;
+    box-shadow: 0 0 0 3px rgba(76, 175, 125, 0.15);
+  }
+
+  .sidebar-machine-dot.offline {
+    background: #52525b;
+  }
+
+  .sidebar-machine-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+    line-height: 1.3;
+  }
+
+  .sidebar-machine-name {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #ededed;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sidebar-machine-sub {
+    font-size: 0.6875rem;
+    color: #71717a;
+  }
+
+  .sidebar-footer {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 12px;
+    border-top: 1px solid #1a1a1d;
+  }
+
+  .sidebar-pair-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    background: #1a1a1c;
+    border: 1px solid #2a2a2e;
+    color: #ededed;
+    border-radius: 10px;
+    padding: 9px 12px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .sidebar-pair-btn:hover {
+    background: #222224;
+    border-color: #3a3a3e;
+  }
+
+  .sidebar-footer-status {
+    display: flex;
+    justify-content: center;
+  }
+
+  .sidebar-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    color: #a1a1aa;
+  }
+
+  .sidebar-status-pill.online {
+    color: #4caf7d;
+  }
+
+  .app-content {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .app-header {
+    max-width: none;
+    width: 100%;
+    margin: 0;
+    padding: 14px 32px;
+    background: #0b0b0c;
+  }
+
+  .app-header .brand-group {
+    display: none;
+  }
+
+  .header-context {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.3;
+    min-width: 0;
+  }
+
+  .header-context-title {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: #ededed;
+  }
+
+  .header-context-sub {
+    font-size: 0.75rem;
+    color: #71717a;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .segmented-nav-wrapper {
+    display: none;
+  }
+
+  .app-main {
+    max-width: none;
+    width: 100%;
+    margin: 0;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 24px 32px 56px 32px;
+  }
+
+  .app-main.chat-mode,
+  .app-main:has(.chat-screen) {
+    padding: 0;
+    overflow: hidden;
+  }
+}
+
+@media (min-width: 1440px) {
+  .app-sidebar {
+    width: 300px;
+    min-width: 300px;
+  }
+
+  .app-header {
+    padding-left: 40px;
+    padding-right: 40px;
+  }
+
+  .app-main {
+    padding-left: 40px;
+    padding-right: 40px;
+  }
+}

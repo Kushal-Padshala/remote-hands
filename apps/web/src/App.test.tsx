@@ -68,7 +68,7 @@ describe('Web App Workflow', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('Work Laptop')).toBeDefined();
+      expect(screen.getAllByText('Work Laptop').length).toBeGreaterThan(0);
     });
 
     fireEvent.click(screen.getByTestId(`create-task-btn-${fakeMachine.id}`));
@@ -814,7 +814,7 @@ describe('Web App Workflow', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('Work Laptop')).toBeDefined();
+      expect(screen.getAllByText('Work Laptop').length).toBeGreaterThan(0);
     });
 
     const historyTabBtn = screen.getByRole('tab', { name: /History/ });
@@ -1007,7 +1007,7 @@ describe('Web App Workflow', () => {
       render(<App />);
 
       await waitFor(() => {
-        expect(screen.getByText('Work Laptop')).toBeDefined();
+        expect(screen.getAllByText('Work Laptop').length).toBeGreaterThan(0);
       });
 
       fireEvent.click(screen.getByTestId(`create-task-btn-${fakeMachine.id}`));

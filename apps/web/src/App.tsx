@@ -238,8 +238,200 @@ export function App() {
       Date.now() - new Date(m.last_seen_at).getTime() < 45000,
   ).length;
 
+  const isOnlineMachine = (m: MachineRow) =>
+    m.status === 'online' &&
+    Boolean(m.last_seen_at) &&
+    Date.now() - new Date(m.last_seen_at as string).getTime() < 45000;
+
+  const goToTab = (tab: 'devices' | 'history' | 'pairing') => {
+    setCurrentScreen('machines');
+    setActiveTab(tab);
+  };
+
+  const handleSidebarOpenWorkspace = () => {
+    const target = selectedMachine || machines.find((m) => isOnlineMachine(m)) || machines[0];
+    if (target) {
+      handleSelectMachine(target);
+    } else {
+      goToTab('pairing');
+    }
+  };
+
+  const headerContextTitle =
+    currentScreen === 'live-task'
+      ? selectedMachine?.name || activeTask
+        ? 'Workspace'
+        : 'Workspace'
+      : activeTab === 'devices'
+        ? 'Devices'
+        : activeTab === 'history'
+          ? 'History'
+          : 'Pairing';
+
+  const headerContextSub =
+    currentScreen === 'live-task'
+      ? selectedMachine?.name || machines[0]?.name || 'Remote session'
+      : activeTab === 'devices'
+        ? machines.length === 0
+          ? 'Pair a computer to get started'
+          : `${onlineCount} of ${machines.length} online`
+        : activeTab === 'history'
+          ? 'Past tasks across all devices'
+          : pairingCode
+            ? 'Session active'
+            : 'Link a new computer';
+
   return (
     <div className={`app-shell ${currentScreen === 'live-task' ? 'chat-mode' : ''}`}>
+      <aside className="app-sidebar" aria-label="Primary navigation">
+        <div className="sidebar-brand">
+          <div className="brand-icon" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="4 17 10 11 4 5" />
+              <line x1="12" y1="19" x2="20" y2="19" />
+            </svg>
+          </div>
+          <span className="brand-text">
+            <span className="brand-title">Remote Hands</span>
+            <span className="brand-sub">
+              {machines.length === 0 ? 'Not connected' : `${onlineCount} of ${machines.length} online`}
+            </span>
+          </span>
+        </div>
+
+        <button
+          type="button"
+          className="sidebar-cta"
+          onClick={handleSidebarOpenWorkspace}
+          data-testid="sidebar-open-workspace"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          <span>New chat</span>
+        </button>
+
+        <nav className="sidebar-nav">
+          <button
+            type="button"
+            className={clsx('sidebar-nav-item', currentScreen !== 'live-task' && activeTab === 'devices' && 'active')}
+            onClick={() => goToTab('devices')}
+            data-testid="sidebar-nav-devices"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+              <line x1="8" y1="21" x2="16" y2="21" />
+              <line x1="12" y1="17" x2="12" y2="21" />
+            </svg>
+            <span className="sidebar-nav-label">Devices</span>
+            {machines.length > 0 && <span className="sidebar-nav-count">{machines.length}</span>}
+          </button>
+          <button
+            type="button"
+            className={clsx('sidebar-nav-item', currentScreen !== 'live-task' && activeTab === 'history' && 'active')}
+            onClick={() => goToTab('history')}
+            data-testid="sidebar-nav-history"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 3v5h5" />
+              <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
+              <path d="M12 7v5l4 2" />
+            </svg>
+            <span className="sidebar-nav-label">History</span>
+          </button>
+          <button
+            type="button"
+            className={clsx('sidebar-nav-item', currentScreen !== 'live-task' && activeTab === 'pairing' && 'active')}
+            onClick={() => goToTab('pairing')}
+            data-testid="sidebar-nav-pairing"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            <span className="sidebar-nav-label">Pairing</span>
+            {pairingCode && <span className="sidebar-nav-dot" aria-hidden="true" />}
+          </button>
+        </nav>
+
+        <div className="sidebar-section">
+          <div className="sidebar-section-head">
+            <span className="sidebar-section-title">Computers</span>
+            <button
+              type="button"
+              className="sidebar-section-action"
+              onClick={loadMachines}
+              title="Refresh computers"
+              aria-label="Refresh computers"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+              </svg>
+            </button>
+          </div>
+          {machines.length === 0 ? (
+            <button
+              type="button"
+              className="sidebar-empty"
+              onClick={() => goToTab('pairing')}
+              data-testid="sidebar-pair-empty"
+            >
+              <span className="sidebar-empty-title">No computers yet</span>
+              <span className="sidebar-empty-sub">Pair your Mac to start</span>
+            </button>
+          ) : (
+            <div className="sidebar-machines" role="list">
+              {machines.slice(0, 8).map((m) => {
+                const online = isOnlineMachine(m);
+                const isActive = selectedMachine?.id === m.id && currentScreen === 'live-task';
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    role="listitem"
+                    className={clsx('sidebar-machine', isActive && 'active')}
+                    onClick={() => handleSelectMachine(m)}
+                    data-testid={`sidebar-machine-${m.id}`}
+                    title={m.name || m.hostname || 'Computer'}
+                  >
+                    <span className={clsx('sidebar-machine-dot', online ? 'online' : 'offline')} aria-hidden="true" />
+                    <span className="sidebar-machine-text">
+                      <span className="sidebar-machine-name">{m.name || m.hostname || 'Computer'}</span>
+                      <span className="sidebar-machine-sub">{online ? 'Online' : 'Offline'}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="sidebar-footer">
+          <button
+            type="button"
+            className="sidebar-pair-btn"
+            onClick={() => setShowPairModal(true)}
+            data-testid="sidebar-pair-btn"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+            </svg>
+            <span>Pair computer</span>
+          </button>
+          <div className="sidebar-footer-status">
+            <span className={clsx('sidebar-status-pill', onlineCount > 0 ? 'online' : 'offline')}>
+              <span className="status-dot" aria-hidden="true" />
+              {machines.length === 0 ? 'Not connected' : `${onlineCount} online`}
+            </span>
+          </div>
+        </div>
+      </aside>
+
+      <div className="app-content">
       {currentScreen !== 'live-task' && (
         <header className="app-header">
           <div className="brand-group">
@@ -255,6 +447,10 @@ export function App() {
                 {machines.length === 0 ? 'Not connected' : `${onlineCount} of ${machines.length} online`}
               </span>
             </span>
+          </div>
+          <div className="header-context" aria-hidden="false">
+            <span className="header-context-title">{headerContextTitle}</span>
+            <span className="header-context-sub">{headerContextSub}</span>
           </div>
           <div className="header-actions">
             <button
@@ -461,6 +657,7 @@ export function App() {
         onClose={() => setShowInstallModal(false)}
         deferredPrompt={deferredPrompt}
       />
+      </div>
     </div>
   );
 }
