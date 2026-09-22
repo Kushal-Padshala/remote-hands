@@ -147,6 +147,7 @@ async function runLocalDaemon(
 
   const actualPort = await localServer.start();
   const localIp = getLocalIp();
+  const localhostUrl = `http://localhost:${actualPort}/?token=${pairingToken}&api=http://localhost:${actualPort}`;
   const localUrl = `http://${localIp}:${actualPort}/?token=${pairingToken}&api=http://${localIp}:${actualPort}`;
 
   let cloudflaredProc: ChildProcess | null = null;
@@ -188,10 +189,12 @@ async function runLocalDaemon(
   options.stdout(
     '\n' +
       c.brightCyan(`╭─ ${c.bold('⚡ Remote Hands Local Server online')} ${'─'.repeat(Math.max(2, termWidth - 36))}\n`) +
-      `${c.brightCyan('│')}  ${c.brightGreen('✔')} ${c.white(`Local Server online: ${localUrl}`)}\n` +
+      `${c.brightCyan('│')}  ${c.brightGreen('✔')} ${c.white('Local Browser:   ')}${c.brightCyan(`http://localhost:${actualPort}`)}\n` +
+      `${c.brightCyan('│')}  ${c.brightGreen('✔')} ${c.white('Direct Auth URL: ')}${c.cyan(localhostUrl)}\n` +
+      `${c.brightCyan('│')}  ${c.brightGreen('📱')} ${c.white('Phone / Network: ')}${c.cyan(localUrl)}\n` +
+      (remoteUrl ? `${c.brightCyan('│')}  ${c.brightMagenta('🌐')} ${c.white('Public Tunnel:   ')}${c.magenta(`${remoteUrl}/?token=${pairingToken}&api=${remoteUrl}`)}\n` : '') +
       `${c.brightCyan('│')}  ${c.dim(`Serving PWA from: ${staticDir || 'embedded API mode'}`)}\n` +
-      (remoteUrl ? `${c.brightCyan('│')}  ${c.brightMagenta('🌐')} ${c.white(`Public Tunnel: ${remoteUrl}/?token=${pairingToken}`)}\n` : '') +
-      `${c.brightCyan('│')}  ${c.dim('Open the URL above on your phone (same Wi-Fi) to control this machine.')}\n` +
+      `${c.brightCyan('│')}  ${c.dim(`Open http://localhost:${actualPort} anytime in your browser.`)}\n` +
       c.brightCyan(`╰${hr}\n`),
   );
 
@@ -311,6 +314,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
   const stdout = context.stdout ?? console.log;
   const stderr = context.stderr ?? console.error;
   const once = args.includes('--once') || (context as any).once === true;
+  const isCloud = args.includes('--cloud') || args.includes('--cloudflare') || (context as any).cloud === true;
   const isLocal = args.includes('--local') || (context as any).local === true;
   const isRemote = args.includes('--remote') || (context as any).remote === true;
 
@@ -328,7 +332,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
     hasDaemonConfig = fs.existsSync(daemonConfigFile);
   }
 
-  if (isLocal || !hasDaemonConfig) {
+  if (!isCloud || !hasDaemonConfig) {
     return await runLocalDaemon(args, context, {
       configDir,
       isRemote,

@@ -284,6 +284,22 @@ export class LocalServer {
         return;
       }
 
+      const remoteAddr = req.socket.remoteAddress;
+      const isLoopback =
+        remoteAddr === '127.0.0.1' ||
+        remoteAddr === '::1' ||
+        remoteAddr === '::ffff:127.0.0.1' ||
+        req.headers.host?.startsWith('localhost') ||
+        req.headers.host?.startsWith('127.0.0.1');
+
+      if ((safePathname === '/' || safePathname === '/index.html') && isLoopback && !parsedUrl.searchParams.has('token')) {
+        res.writeHead(302, {
+          Location: `/?token=${this.options.pairingToken}&api=http://localhost:${this.port}`,
+        });
+        res.end();
+        return;
+      }
+
       const staticDir = path.resolve(this.options.staticDir);
       let relativePath = safePathname === '/' ? 'index.html' : safePathname;
       if (relativePath.startsWith('/')) {

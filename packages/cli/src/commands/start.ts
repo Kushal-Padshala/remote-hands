@@ -21,6 +21,7 @@ export async function startCommand(args: string[], context: CommandContext = {})
   const noClamshell = args.includes('--no-clamshell') || args.includes('--no-sleep-prevent');
   const once = args.includes('--once');
   const noAutoSetup = args.includes('--no-auto-setup') || once;
+  const isCloud = args.includes('--cloud') || args.includes('--cloudflare') || (context as any).cloud === true;
   const isLocal = args.includes('--local') || (context as any).local === true;
   const isRemote = args.includes('--remote') || (context as any).remote === true;
 
@@ -161,7 +162,7 @@ export async function startCommand(args: string[], context: CommandContext = {})
     }
   } catch {}
 
-  if (!hasConfig && !noAutoSetup && !isLocal) {
+  if (isCloud && !hasConfig && !noAutoSetup) {
     stdout(
       '\n' +
         c.yellow(`╭─ ${c.bold('⚡ Setup Required')} ${'─'.repeat(Math.max(2, termWidth - 20))}\n`) +
@@ -198,16 +199,16 @@ export async function startCommand(args: string[], context: CommandContext = {})
           : c.dim(`Browser profile mode: ${profileMode}`)
       }\n` +
       `${c.brightCyan('│')}  ${
-        hasConfig && !isLocal
-          ? c.white('Listening for coding agent tasks from your phone...')
-          : c.white('Starting in local embedded mode (zero-cloud)...')
+        isCloud && hasConfig
+          ? c.white('Listening for coding agent tasks from your phone (Cloudflare)...')
+          : c.white('Local embedded mode (zero-cloud)...')
       }\n` +
       `${c.brightCyan('│')}  ${c.dim('Press Ctrl+C anytime to stop and restore normal sleep settings.')}\n` +
       c.brightCyan(`╰${hr}`),
   );
 
   const daemonArgs = [...args];
-  if ((!hasConfig || isLocal) && !daemonArgs.includes('--local')) {
+  if (!isCloud && !daemonArgs.includes('--local')) {
     daemonArgs.push('--local');
   }
   if (isRemote && !daemonArgs.includes('--remote')) {

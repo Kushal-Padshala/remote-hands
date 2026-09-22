@@ -63,4 +63,25 @@ describe('daemonCommand local mode fallback', () => {
     expect(stdout).toHaveBeenCalledWith(expect.stringContaining('Local Server online'));
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
+
+  it('defaults to local embedded server even if daemon.json exists when --cloud is not provided', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rh-daemon-test-'));
+    fs.writeFileSync(
+      path.join(tempDir, 'daemon.json'),
+      JSON.stringify({
+        cloudflareApiUrl: 'https://example.com',
+        sessionToken: 'token-123',
+      }),
+    );
+    const stdout = vi.fn();
+    const code = await daemonCommand(['--once'], {
+      configDir: tempDir,
+      stdout,
+      fs,
+    });
+    expect(code).toBe(0);
+    expect(stdout).toHaveBeenCalledWith(expect.stringContaining('Local Server online'));
+    expect(stdout).toHaveBeenCalledWith(expect.stringContaining('Local Browser:'));
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
 });

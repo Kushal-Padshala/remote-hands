@@ -196,6 +196,16 @@ describe('LocalServer', () => {
     expect(decideJson.approval.status).toBe('approved');
   });
 
+  it('redirects loopback GET / without token to authenticated token URL', async () => {
+    const redirectRes = await fetch(`http://127.0.0.1:${server.port}/`, {
+      redirect: 'manual',
+    });
+    expect(redirectRes.status).toBe(302);
+    const location = redirectRes.headers.get('location');
+    expect(location).toContain(`token=${token}`);
+    expect(location).toContain(`api=http://localhost:${server.port}`);
+  });
+
   it('serves static files safely and prevents path traversal', async () => {
     const rootRes = await fetch(`http://127.0.0.1:${server.port}/`);
     expect(rootRes.status).toBe(200);
