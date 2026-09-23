@@ -387,4 +387,45 @@ describe('Setup Command Flow', () => {
     expect(exitCode).toBe(1);
     expect(errorLines.join('\n')).toContain('agy sign-in was not completed');
   });
+
+  it('runs zero-account local setup without checking Cloudflare credentials', async () => {
+    const executedCommands: string[] = [];
+    const outputLines: string[] = [];
+    const files: Record<string, string> = {};
+
+    const mockRunner: CommandRunner = async (cmd, args) => {
+      executedCommands.push(`${cmd} ${args.join(' ')}`);
+      if (cmd === 'which' && args[0] === 'browser-harness') {
+        return { exitCode: 0, stdout: '/bin/browser-harness', stderr: '' };
+      }
+      if (cmd === 'which' && args[0] === 'agy') {
+        return { exitCode: 0, stdout: '/usr/local/bin/agy', stderr: '' };
+      }
+      if (cmd === 'browser-harness' && args[0] === 'skill') {
+        return { exitCode: 0, stdout: '---\nname: browser-harness\n---', stderr: '' };
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    };
+
+    const mockFs: FileSystemAdapter = {
+      readFile: async (p) => files[p] ?? '',
+      writeFile: async (p, content) => {
+        files[p] = content;
+      },
+      exists: async (p) => p in files,
+    };
+
+    const exitCode = await setupCommand(['--local'], {
+      stdout: (line) => outputLines.push(line),
+      runner: mockRunner,
+      fs: mockFs,
+      projectRoot: '/project',
+      configDir: '/config',
+    });
+
+    expect(exitCode).toBe(0);
+    expect(executedCommands.some((c) => c.includes('wrangler'))).toBe(false);
+    expect(files['/config/daemon.json']).toContain('"mode": "local"');
+    expect(outputLines.join('\n')).toContain('Zero-account local setup complete!');
+  });
 });

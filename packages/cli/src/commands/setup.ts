@@ -47,6 +47,7 @@ import { writeWranglerConfig, defaultFileSystem, type FileSystemAdapter } from '
 import { ensureBrowserHarness } from '../system/browser-harness.js';
 import { ensureAgyPermissions } from '../system/agy-permissions.js';
 import { ensureMacPermissions } from '../system/mac-permissions.js';
+import { ensureCloudflaredBinary } from '../system/tunnel.js';
 import { generatePairingCode } from '@remote-hands/control-plane';
 import { generatePairingUrl } from '../pairing/qr.js';
 import { formatPairingSummary } from '../output/messages.js';
@@ -77,53 +78,18 @@ export interface CommandContext {
   localStore?: any;
 }
 
-export async function setupCommand(args: string[], context: CommandContext = {}): Promise<number> {
-  const stdout = context.stdout ?? console.log;
-  const stderr = context.stderr ?? console.error;
-  const runner = context.runner ?? defaultRunner;
-  const fs = context.fs ?? defaultFileSystem;
-  const fetchFn = context.fetchFn ?? globalThis.fetch.bind(globalThis);
-  const projectRoot = resolveProjectRoot(context.projectRoot);
-
-  const TOTAL_STEPS = 6;
-
-  stdout(renderBanner());
-
-  stdout(renderStepStart(1, TOTAL_STEPS, 'Cloudflare Authentication'));
-  let loggedIn = await ensureWranglerLogin(runner);
-  if (!loggedIn) {
-    stdout(renderStepAction('Launching Cloudflare OAuth login in your default browser...'));
-    stdout(renderStepInfo('Listening silently in the background for authorization...'));
-
-    let loginExited = false;
-    const loginPromise = loginWrangler(runner).then((ok) => {
-      loginExited = true;
-      return ok;
-    });
-
-    const pollPromise = (async () => {
-      for (let i = 0; i < 120 && !loginExited; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
-        const ok = await ensureWranglerLogin(runner);
-        if (ok) return true;
-      }
-      return false;
-    })();
-
-    await Promise.race([loginPromise, pollPromise]);
-
-    loggedIn = await ensureWranglerLogin(runner);
-    if (!loggedIn) {
-      stderr(renderStepError('Cloudflare authentication was not completed.'));
-      stderr('Please run "npx wrangler login" and then re-run "rh setup" (or "remote-hands setup").');
-      return 1;
-    }
-    stdout(renderStepSuccess('Cloudflare authentication detected'));
-  } else {
-    stdout(renderStepSuccess('Authenticated with Cloudflare via Wrangler'));
-  }
-
-  stdout(renderStepStart(2, TOTAL_STEPS, 'AI Coding Agent (agy)'));
+async function setupAgentAndPermissions(
+  args: string[],
+  context: CommandContext,
+  runner: CommandRunner,
+  fs: FileSystemAdapter,
+  projectRoot: string,
+  stdout: (msg: string) => void,
+  stderr: (msg: string) => void,
+  stepNum: number,
+  totalSteps: number,
+): Promise<number | null> {
+  stdout(renderStepStart(stepNum, totalSteps, 'AI Coding Agent (agy)'));
   const agyWhich = await runner('which', ['agy']);
   const agyInstalled = agyWhich.exitCode === 0 && agyWhich.stdout.trim().length > 0;
 
@@ -198,6 +164,100 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     stdout(renderStepAction('Verifying macOS system permissions (Screen Recording, Full Disk Access, Accessibility)...'));
     await ensureMacPermissions((msg) => stdout(msg));
   }
+
+  return null;
+}
+
+export async function setupCommand(args: string[], context: CommandContext = {}): Promise<number> {
+  const stdout = context.stdout ?? console.log;
+  const stderr = context.stderr ?? console.error;
+  const runner = context.runner ?? defaultRunner;
+  const fs = context.fs ?? defaultFileSystem;
+  const fetchFn = context.fetchFn ?? globalThis.fetch.bind(globalThis);
+  const projectRoot = resolveProjectRoot(context.projectRoot);
+
+  const isLocal = args.includes('--local') || (context as any).local === true;
+  if (isLocal) {
+    const LOCAL_STEPS = 3;
+    stdout(renderBanner());
+
+    const agyErr = await setupAgentAndPermissions(args, context, runner, fs, projectRoot, stdout, stderr, 1, LOCAL_STEPS);
+    if (agyErr !== null) return agyErr;
+
+    stdout(renderStepStart(2, LOCAL_STEPS, 'Browser Automation Engine (browser-use)'));
+    stdout(renderStepInfo('Verifying browser-harness and agent skill registration...'));
+    await ensureBrowserHarness(runner, projectRoot, (msg) => stdout(renderStepInfo(msg)), stderr, fs);
+    stdout(renderStepSuccess('browser-harness is installed and ready'));
+
+    stdout(renderStepStart(3, LOCAL_STEPS, 'Account-less Remote Tunnel (cloudflared)'));
+    if (!context.runner) {
+      await ensureCloudflaredBinary((msg) => stdout(renderStepInfo(msg)));
+    }
+    stdout(renderStepSuccess('Tunnel binary ready for zero-account remote access'));
+
+    const configDir = context.configDir ?? path.join(os.homedir(), '.remote-hands');
+    const daemonConfigFile = path.join(configDir, 'daemon.json');
+    const tokenFile = path.join(configDir, 'local-token.txt');
+    let pairingToken = crypto.randomUUID().replace(/-/g, '');
+    try {
+      if (await fs.exists(tokenFile)) {
+        pairingToken = (await fs.readFile(tokenFile)).trim() || pairingToken;
+      } else {
+        await fs.writeFile(tokenFile, pairingToken);
+      }
+    } catch {}
+    try {
+      await fs.writeFile(
+        daemonConfigFile,
+        JSON.stringify({ mode: 'local' }, null, 2),
+      );
+    } catch {}
+
+    stdout('\n' + renderStepSuccess('Zero-account local setup complete!'));
+    stdout(`Run "rh start" anytime to launch your local server and pair your phone.\n`);
+    return 0;
+  }
+
+  const TOTAL_STEPS = 6;
+
+  stdout(renderBanner());
+
+  stdout(renderStepStart(1, TOTAL_STEPS, 'Cloudflare Authentication'));
+  let loggedIn = await ensureWranglerLogin(runner);
+  if (!loggedIn) {
+    stdout(renderStepAction('Launching Cloudflare OAuth login in your default browser...'));
+    stdout(renderStepInfo('Listening silently in the background for authorization...'));
+
+    let loginExited = false;
+    const loginPromise = loginWrangler(runner).then((ok) => {
+      loginExited = true;
+      return ok;
+    });
+
+    const pollPromise = (async () => {
+      for (let i = 0; i < 120 && !loginExited; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const ok = await ensureWranglerLogin(runner);
+        if (ok) return true;
+      }
+      return false;
+    })();
+
+    await Promise.race([loginPromise, pollPromise]);
+
+    loggedIn = await ensureWranglerLogin(runner);
+    if (!loggedIn) {
+      stderr(renderStepError('Cloudflare authentication was not completed.'));
+      stderr('Please run "npx wrangler login" and then re-run "rh setup" (or "remote-hands setup").');
+      return 1;
+    }
+    stdout(renderStepSuccess('Cloudflare authentication detected'));
+  } else {
+    stdout(renderStepSuccess('Authenticated with Cloudflare via Wrangler'));
+  }
+
+  const agyErr = await setupAgentAndPermissions(args, context, runner, fs, projectRoot, stdout, stderr, 2, TOTAL_STEPS);
+  if (agyErr !== null) return agyErr;
 
   stdout(renderStepStart(3, TOTAL_STEPS, 'Browser Automation Engine (browser-use)'));
   stdout(renderStepInfo('Verifying browser-harness and agent skill registration...'));
