@@ -34,3 +34,6 @@ export * from './guidance/browser-overlay-script.js';
 export * from './guidance/browser-guidance.js';
 export * from './guidance/desktop-overlay.js';
 export * from './guidance/guidance-manager.js';
+export * from './desktop/spotlight-hud.js';
+export * from './guidance/intent-resolver.js';
+export * from './guidance/hud-coordinator.js';
