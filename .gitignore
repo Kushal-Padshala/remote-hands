@@ -13,3 +13,4 @@ coverage/
 .wrangler/
 packages/cli/apps/
 packages/cli/bin/
+packages/daemon/bin/
