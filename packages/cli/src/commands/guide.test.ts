@@ -141,4 +141,37 @@ describe('CLI guide command', () => {
     await manager3.dismiss();
     expect(fs.existsSync(tempSessionPath)).toBe(false);
   });
+
+  it('handles prompt subcommand via coordinator', async () => {
+    const mockCoordinator = {
+      triggerPrompt: vi.fn().mockResolvedValue(true),
+    };
+    const logs: string[] = [];
+    const code = await guideCommand(['prompt', '--app=Photoshop'], {
+      coordinator: mockCoordinator,
+      stdout: (msg) => logs.push(msg),
+    });
+    expect(code).toBe(0);
+    expect(mockCoordinator.triggerPrompt).toHaveBeenCalledWith('Photoshop');
+    expect(logs.some((l) => l.includes('Guidance initiated'))).toBe(true);
+  });
+
+  it('handles listen subcommand via coordinator', async () => {
+    let stopped = false;
+    const mockCoordinator = {
+      startListening: vi.fn().mockReturnValue({ stop: () => { stopped = true; } }),
+    };
+    const logs: string[] = [];
+    let listenerObj: any;
+    const code = await guideCommand(['listen'], {
+      coordinator: mockCoordinator,
+      stdout: (msg) => logs.push(msg),
+      onListenerReady: (l) => { listenerObj = l; },
+    });
+    expect(code).toBe(0);
+    expect(mockCoordinator.startListening).toHaveBeenCalled();
+    expect(listenerObj).toBeDefined();
+    listenerObj.stop();
+    expect(stopped).toBe(true);
+  });
 });

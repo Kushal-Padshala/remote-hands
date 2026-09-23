@@ -3,6 +3,8 @@ import type { CommandContext } from './setup.js';
 
 export interface GuideCommandContext extends CommandContext {
   manager?: GuidanceManager | undefined;
+  coordinator?: any | undefined;
+  onListenerReady?: (listener: { stop: () => void }) => void;
 }
 
 let sharedManager: GuidanceManager | null = null;
@@ -25,9 +27,11 @@ export async function executeGuideCommand(
   const subcommand = args[0] || 'status';
 
   if (subcommand === '--help' || subcommand === '-h' || subcommand === 'help') {
-    stdout('Usage: rh guide <show|next|dismiss|status> [options]');
+    stdout('Usage: rh guide <show|next|dismiss|status|prompt|listen> [options]');
     stdout('');
     stdout('Commands:');
+    stdout('  prompt   Open Spotlight-style floating prompt textbox on screen');
+    stdout('  listen   Run background listener for Shift+Cmd+Space hotkey');
     stdout('  show     Point spotlight and visual arrow to target element');
     stdout('  next     Advance to the next step in guidance sequence');
     stdout('  dismiss  Dismiss active guidance overlay');
@@ -40,6 +44,35 @@ export async function executeGuideCommand(
     stdout('  --index=<idx>   Snapshot index number');
     stdout('  --app=<app>     macOS application name');
     stdout('  --text=<msg>    Annotation label message');
+    return 0;
+  }
+
+  if (subcommand === 'prompt') {
+    let app: string | undefined;
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]!;
+      if (arg.startsWith('--app=')) app = arg.slice(6);
+      else if (arg === '--app' && i + 1 < args.length) app = args[++i]!;
+    }
+    const { HudCoordinator } = await import('@remote-hands/daemon');
+    const coordinator = context.coordinator ?? new HudCoordinator(undefined, undefined, resolvedManager);
+    const success = await coordinator.triggerPrompt(app);
+    if (success) {
+      stdout('✓ Guidance initiated from Spotlight HUD');
+    } else {
+      stdout('Guidance prompt cancelled');
+    }
+    return 0;
+  }
+
+  if (subcommand === 'listen') {
+    const { HudCoordinator } = await import('@remote-hands/daemon');
+    const coordinator = context.coordinator ?? new HudCoordinator(undefined, undefined, resolvedManager);
+    stdout('Listening for Shift + Cmd + Space shortcut (Press Ctrl+C to stop)...');
+    const listener = coordinator.startListening();
+    if (context.onListenerReady) {
+      context.onListenerReady(listener);
+    }
     return 0;
   }
 
@@ -108,24 +141,23 @@ export async function executeGuideCommand(
     const step: GuideStep = {
       type: isDesktop ? 'desktop' : 'browser',
       text: text || 'Click here',
-      selector: target || undefined,
+      selector: !isDesktop && target ? target : undefined,
       index,
-      app: app || undefined,
-      target: target || undefined,
+      app: isDesktop && app ? app : undefined,
+      target: isDesktop && target ? target : undefined,
     };
 
     await resolvedManager.startSession([step]);
-    stdout(`✓ Pointing arrow to ${isDesktop ? 'desktop element' : 'browser element'}: "${step.text}"`);
+    stdout(
+      `✓ Pointing arrow to ${isDesktop ? `desktop app "${app || 'Desktop'}" element` : 'browser element'}: "${step.text}"`
+    );
     return 0;
   }
 
-  stderr(`Unknown guide subcommand: ${subcommand}`);
+  stderr(`Unknown guide subcommand: ${subcommand}. Use --help for usage.`);
   return 1;
 }
 
-export async function guideCommand(
-  args: string[],
-  context: GuideCommandContext = {}
-): Promise<number> {
-  return executeGuideCommand(args, context.manager, context);
+export async function guideCommand(args: string[], context: GuideCommandContext = {}): Promise<number> {
+  return await executeGuideCommand(args, undefined, context);
 }
