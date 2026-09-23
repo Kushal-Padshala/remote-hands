@@ -343,6 +343,22 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   stdout(renderStepInfo('Publishing static PWA assets to Cloudflare edge...'));
   const webRes = await deployWebApp(runner, path.join(projectRoot, 'apps/web'));
   const webUrl = webRes.pagesUrl ?? 'https://remote-hands-web.pages.dev';
+  try {
+    await fs.writeFile(
+      daemonConfigFile,
+      JSON.stringify(
+        {
+          cloudflareApiUrl: apiUrl,
+          sessionToken: daemonSessionToken,
+          machineId: machineId,
+          machineName: os.hostname() || 'primary-laptop',
+          webAppUrl: webUrl,
+        },
+        null,
+        2,
+      ),
+    );
+  } catch {}
   stdout(renderStepSuccess(`Web app live at ${webUrl}`));
 
   const pairingUrl = generatePairingUrl(webUrl, activePairingCode, effectiveOwnerToken, apiUrl);

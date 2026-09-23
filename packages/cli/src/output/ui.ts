@@ -166,3 +166,60 @@ export async function renderPairingTui(info: PairingSummaryInfo, terminalCols?: 
 
   return lines.join('\n');
 }
+
+export interface MobileConnectTuiOptions {
+  title?: string | undefined;
+  description?: string | undefined;
+  terminalCols?: number | undefined;
+  extraLines?: string[] | undefined;
+}
+
+export async function renderMobileConnectTui(
+  mobileUrl: string,
+  options?: MobileConnectTuiOptions,
+): Promise<string> {
+  const cols =
+    options?.terminalCols ??
+    (typeof process !== 'undefined' && process.stdout && process.stdout.columns
+      ? process.stdout.columns
+      : 80);
+  const termWidth = Math.max(48, Math.min(cols, 74));
+  const hr = '─'.repeat(termWidth - 2);
+
+  let qrLines: string[] = [];
+  try {
+    const rawQr = await QRCode.toString(mobileUrl, {
+      type: 'terminal',
+      small: true,
+      margin: 1,
+    });
+    qrLines = rawQr
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) => `${c.brightCyan('│')}     ${line}`);
+  } catch {
+    qrLines = [`${c.brightCyan('│')}     ${c.yellow('(QR code generation failed, use link below)')}`];
+  }
+
+  const title = options?.title ?? 'Mobile Remote Control Active';
+  const description = options?.description ?? 'Scan this QR code with your phone camera to connect while away:';
+
+  const lines = [
+    '',
+    c.brightCyan(`╭─ 📱 ${c.bold(title)} ${'─'.repeat(Math.max(2, termWidth - visualWidth(title) - 7))}`),
+    `${c.brightCyan('│')}  ${c.white(description)}`,
+    `${c.brightCyan('│')}  ${c.dim('Works from anywhere: cellular data, different Wi-Fi, or away from desk')}`,
+    c.brightCyan(`├${hr}`),
+    c.brightCyan('│'),
+    ...qrLines,
+    c.brightCyan('│'),
+    c.brightCyan(`├${hr}`),
+    `${c.brightCyan('│')}  ${c.bold(c.white('Direct Mobile Link:'))}`,
+    `${c.brightCyan('│')}  ${c.brightGreen('👉 ')}${c.cyan(mobileUrl)}`,
+    ...(options?.extraLines ?? []).map((l) => `${c.brightCyan('│')}  ${l}`),
+    c.brightCyan(`╰${hr}`),
+    '',
+  ];
+
+  return lines.join('\n');
+}

@@ -18,7 +18,7 @@ import {
   type AgentRunner,
 } from '@remote-hands/daemon';
 import type { CommandContext } from './setup.js';
-import { c } from '../output/ui.js';
+import { c, renderMobileConnectTui } from '../output/ui.js';
 import { ensureAgyPermissions } from '../system/agy-permissions.js';
 import { ensureMacPermissions } from '../system/mac-permissions.js';
 
@@ -27,6 +27,7 @@ interface LocalDaemonConfig {
   sessionToken: string;
   machineId?: string;
   machineName?: string;
+  webAppUrl?: string;
 }
 
 function getLocalIp(): string {
@@ -198,6 +199,18 @@ async function runLocalDaemon(
       c.brightCyan(`╰${hr}\n`),
   );
 
+  const activeMobileUrl = remoteUrl ? `${remoteUrl}/?token=${pairingToken}&api=${remoteUrl}` : localUrl;
+  try {
+    const mobileTui = await renderMobileConnectTui(activeMobileUrl, {
+      title: remoteUrl ? 'Mobile Remote Access (Any Wi-Fi / Cellular)' : 'Mobile Local Access (Same Wi-Fi)',
+      description: remoteUrl
+        ? 'Scan this QR code from your phone to connect while away from computer:'
+        : 'Scan this QR code from your phone to connect on the same Wi-Fi:',
+      terminalCols: termWidth,
+    });
+    options.stdout(mobileTui);
+  } catch {}
+
   await ensureAgyPermissions(context.fs);
 
   if (process.platform === 'darwin' && !context.runner && !options.once && !args.includes('--skip-permissions')) {
@@ -314,7 +327,6 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
   const stdout = context.stdout ?? console.log;
   const stderr = context.stderr ?? console.error;
   const once = args.includes('--once') || (context as any).once === true;
-  const isCloud = args.includes('--cloud') || args.includes('--cloudflare') || (context as any).cloud === true;
   const isLocal = args.includes('--local') || (context as any).local === true;
   const isRemote = args.includes('--remote') || (context as any).remote === true;
 
@@ -331,6 +343,11 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
   } else {
     hasDaemonConfig = fs.existsSync(daemonConfigFile);
   }
+
+  const isCloud =
+    args.includes('--cloud') ||
+    args.includes('--cloudflare') ||
+    (context as any).cloud === true;
 
   if (!isCloud || !hasDaemonConfig) {
     return await runLocalDaemon(args, context, {
@@ -403,6 +420,27 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
   } catch {
     stdout(c.dim(`[daemon] Realtime relay pending. Connecting in background...`));
   }
+
+  const webAppUrl = rawConfig.webAppUrl || 'https://remote-hands-web.pages.dev';
+  if (!rawConfig.webAppUrl) {
+    rawConfig.webAppUrl = 'https://remote-hands-web.pages.dev';
+    try {
+      await fs.promises.writeFile(daemonConfigFile, JSON.stringify(rawConfig, null, 2));
+    } catch {}
+  }
+  const mobileUrl = `${webAppUrl}/?token=${rawConfig.sessionToken}&api=${rawConfig.cloudflareApiUrl}&machine=${machineId}`;
+  try {
+    const mobileTui = await renderMobileConnectTui(mobileUrl, {
+      title: 'Mobile Remote Access (Any Wi-Fi / Cellular)',
+      description: 'Scan this QR code with your phone camera to control this Mac from anywhere:',
+      terminalCols: 74,
+      extraLines: [
+        c.dim(`Machine: ${machineName} (${machineId})`),
+        c.dim(`Edge Relay: ${rawConfig.cloudflareApiUrl}`),
+      ],
+    });
+    stdout(mobileTui);
+  } catch {}
 
   let triggerClaim: (() => void) | null = null;
   const waitForNextPoll = (ms: number) =>

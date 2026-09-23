@@ -21,8 +21,22 @@ export async function startCommand(args: string[], context: CommandContext = {})
   const noClamshell = args.includes('--no-clamshell') || args.includes('--no-sleep-prevent');
   const once = args.includes('--once');
   const noAutoSetup = args.includes('--no-auto-setup') || once;
-  const isCloud = args.includes('--cloud') || args.includes('--cloudflare') || (context as any).cloud === true;
+  const configDir = context.configDir ?? path.join(os.homedir(), '.remote-hands');
+  const daemonConfigFile = path.join(configDir, 'daemon.json');
+  let hasConfig = false;
+  try {
+    if (fs.existsSync(daemonConfigFile)) {
+      hasConfig = true;
+    }
+  } catch {}
+
   const isLocal = args.includes('--local') || (context as any).local === true;
+  const isCloud =
+    !isLocal &&
+    (args.includes('--cloud') ||
+      args.includes('--cloudflare') ||
+      (context as any).cloud === true ||
+      hasConfig);
   const isRemote = args.includes('--remote') || (context as any).remote === true;
 
   const browserProfileIdx = args.findIndex((a) => a === '--browser-profile' || a.startsWith('--browser-profile='));
@@ -153,14 +167,6 @@ export async function startCommand(args: string[], context: CommandContext = {})
   process.once('SIGHUP', onSignal);
   process.once('exit', restoreSleep);
 
-  const configDir = context.configDir ?? path.join(os.homedir(), '.remote-hands');
-  const daemonConfigFile = path.join(configDir, 'daemon.json');
-  let hasConfig = false;
-  try {
-    if (fs.existsSync(daemonConfigFile)) {
-      hasConfig = true;
-    }
-  } catch {}
 
   if (isCloud && !hasConfig && !noAutoSetup) {
     stdout(
@@ -208,6 +214,9 @@ export async function startCommand(args: string[], context: CommandContext = {})
   );
 
   const daemonArgs = [...args];
+  if (isCloud && hasConfig && !daemonArgs.includes('--cloud')) {
+    daemonArgs.push('--cloud');
+  }
   if (!isCloud && !daemonArgs.includes('--local')) {
     daemonArgs.push('--local');
   }
