@@ -30,3 +30,7 @@ export {
   type MicroActionType,
   type DesktopActEngineOptions,
 } from './desktop/desktop-act.js';
+export * from './guidance/browser-overlay-script.js';
+export * from './guidance/browser-guidance.js';
+export * from './guidance/desktop-overlay.js';
+export * from './guidance/guidance-manager.js';
