@@ -20,7 +20,7 @@ export class BrowserGuidanceController {
   async show(options: GuideOverlayOptions): Promise<GuideShowResult> {
     const script = generateShowGuideScript(options);
     try {
-      const result = await (this.driver as any).executeScript(script);
+      const result = await this.driver.executeScript<{ success?: boolean; error?: string }>(script);
       if (result && typeof result === 'object' && result.success === false) {
         return { success: false, error: result.error || 'Failed to highlight target element' };
       }
@@ -33,13 +33,13 @@ export class BrowserGuidanceController {
   async dismiss(): Promise<void> {
     const script = generateDismissGuideScript();
     try {
-      await (this.driver as any).executeScript(script);
+      await this.driver.executeScript(script);
     } catch {}
   }
 
   async checkClicked(): Promise<boolean> {
     try {
-      const res = await (this.driver as any).executeScript(
+      const res = await this.driver.executeScript<boolean>(
         'window.__rhGuide ? Boolean(window.__rhGuide.wasClicked()) : false'
       );
       return Boolean(res);

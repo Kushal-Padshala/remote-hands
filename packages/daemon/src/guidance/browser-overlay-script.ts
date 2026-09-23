@@ -31,8 +31,9 @@ export const BROWSER_OVERLAY_SCRIPT = `
         this.container = document.getElementById("__rh-guide-root");
         this.svg = this.container.querySelector("svg");
         this.maskPath = this.container.querySelector(".rh-mask-path");
-        this.arrow = this.container.querySelector(".rh-guide-arrow");
+        this.arrow = this.container.querySelector(".rh-guide-arrow") || this.container.querySelector(".rh-arrow-svg");
         this.card = this.container.querySelector(".rh-guide-card");
+        this.spotlight = this.container.querySelector(".rh-target-spotlight");
         return;
       }
 
@@ -80,8 +81,7 @@ export const BROWSER_OVERLAY_SCRIPT = `
           position: absolute;
           border: 2px solid #3b82f6;
           border-radius: 6px;
-          pointer-events: auto;
-          cursor: pointer;
+          pointer-events: none;
           animation: rh-pulse 2s infinite;
           transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
         }
@@ -138,6 +138,7 @@ export const BROWSER_OVERLAY_SCRIPT = `
 
     show(options) {
       this.init();
+      this.currentOptions = options;
       this.lastClicked = false;
       const el = this.resolveTarget(options);
       if (!el) {
@@ -182,17 +183,32 @@ export const BROWSER_OVERLAY_SCRIPT = `
       this.spotlight.style.height = \`\\\${h}px\`;
 
       const cardRect = this.card.getBoundingClientRect();
+      const pos = (this.currentOptions && this.currentOptions.arrowPosition) || "auto";
+
       let cardX = x + (w / 2) - (cardRect.width / 2);
       let cardY = y - cardRect.height - 42;
       let arrowX = x + (w / 2) - 16;
       let arrowY = y - 36;
       let arrowRot = 0;
 
-      if (cardY < 10) {
+      if (pos === "bottom" || (pos === "auto" && cardY < 10)) {
         cardY = y + h + 42;
         arrowY = y + h + 8;
         arrowRot = 180;
+      } else if (pos === "right") {
+        cardX = x + w + 42;
+        cardY = y + (h / 2) - (cardRect.height / 2);
+        arrowX = x + w + 8;
+        arrowY = y + (h / 2) - 16;
+        arrowRot = 90;
+      } else if (pos === "left") {
+        cardX = x - cardRect.width - 42;
+        cardY = y + (h / 2) - (cardRect.height / 2);
+        arrowX = x - 36;
+        arrowY = y + (h / 2) - 16;
+        arrowRot = 270;
       }
+
       if (cardX < 10) cardX = 10;
       if (cardX + cardRect.width > vw - 10) cardX = vw - cardRect.width - 10;
 

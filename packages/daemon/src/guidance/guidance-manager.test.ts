@@ -1,3 +1,5 @@
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GuidanceManager, type GuideStep } from './guidance-manager.js';
 
@@ -21,7 +23,11 @@ describe('GuidanceManager', () => {
       show: vi.fn().mockResolvedValue({ success: true }),
       dismiss: vi.fn().mockResolvedValue(undefined),
     };
-    manager = new GuidanceManager(mockBrowserGuide, mockDesktopOverlay);
+    const testSessionPath = path.join(
+      os.tmpdir(),
+      `rh-test-guide-${Date.now()}-${Math.random().toString(36).slice(2)}.json`
+    );
+    manager = new GuidanceManager(mockBrowserGuide, mockDesktopOverlay, testSessionPath);
   });
 
   it('starts a multi-step guidance session and shows first step', async () => {

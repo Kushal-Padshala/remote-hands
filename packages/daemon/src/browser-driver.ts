@@ -92,7 +92,7 @@ export class BrowserDriver {
     }
   }
 
-  private async executeScript<T>(script: string): Promise<T> {
+  async executeScript<T>(script: string): Promise<T> {
     const tab = await this.getActiveTab();
     const wsUrl = tab.webSocketDebuggerUrl;
     if (!wsUrl) {
