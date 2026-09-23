@@ -21,6 +21,7 @@ import type { CommandContext } from './setup.js';
 import { c, renderMobileConnectTui } from '../output/ui.js';
 import { ensureAgyPermissions } from '../system/agy-permissions.js';
 import { ensureMacPermissions } from '../system/mac-permissions.js';
+import { startQuickTunnel } from '../system/tunnel.js';
 
 interface LocalDaemonConfig {
   cloudflareApiUrl: string;
@@ -155,25 +156,15 @@ async function runLocalDaemon(
   let remoteUrl: string | null = null;
 
   if (options.isRemote) {
-    try {
-      cloudflaredProc = spawn('cloudflared', ['tunnel', '--url', `http://127.0.0.1:${actualPort}`], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      cloudflaredProc.on('error', (err) => {
-        options.stderr(`Cloudflare tunnel failed to start: ${err.message}`);
-      });
-      const captureTunnelUrl = (data: Buffer) => {
-        const text = data.toString();
-        const match = text.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
-        if (match && !remoteUrl) {
-          remoteUrl = match[0];
-          options.stdout(`${c.brightMagenta('🌐')} Public Tunnel: ${remoteUrl}/?token=${pairingToken}&api=${remoteUrl}`);
-        }
-      };
-      cloudflaredProc.stdout?.on('data', captureTunnelUrl);
-      cloudflaredProc.stderr?.on('data', captureTunnelUrl);
-    } catch (err: any) {
-      options.stderr(`Cloudflare tunnel error: ${err.message}`);
+    const tunnel = await startQuickTunnel(actualPort, {
+      stderr: options.stderr,
+    });
+    if (tunnel) {
+      cloudflaredProc = tunnel.process;
+      remoteUrl = tunnel.url;
+      if (remoteUrl) {
+        options.stdout(`${c.brightMagenta('🌐')} Public Remote Tunnel: ${remoteUrl}/?token=${pairingToken}&api=${remoteUrl}`);
+      }
     }
   }
 

@@ -30,14 +30,14 @@ export async function startCommand(args: string[], context: CommandContext = {})
     }
   } catch {}
 
-  const isLocal = args.includes('--local') || (context as any).local === true;
   const isCloud =
-    !isLocal &&
-    (args.includes('--cloud') ||
-      args.includes('--cloudflare') ||
-      (context as any).cloud === true ||
-      hasConfig);
-  const isRemote = args.includes('--remote') || (context as any).remote === true;
+    args.includes('--cloud') ||
+    args.includes('--cloudflare') ||
+    (context as any).cloud === true;
+  const isLocal = !isCloud;
+  const isRemote =
+    !args.includes('--no-remote') &&
+    (args.includes('--remote') || (context as any).remote === true || !once);
 
   const browserProfileIdx = args.findIndex((a) => a === '--browser-profile' || a.startsWith('--browser-profile='));
   let rawProfile: string | undefined;
@@ -207,7 +207,7 @@ export async function startCommand(args: string[], context: CommandContext = {})
       `${c.brightCyan('│')}  ${
         isCloud && hasConfig
           ? c.white('Listening for coding agent tasks from your phone (Cloudflare)...')
-          : c.white('Local embedded mode (zero-cloud)...')
+          : c.white('Local embedded server with secure remote tunnel (zero-account)...')
       }\n` +
       `${c.brightCyan('│')}  ${c.dim('Press Ctrl+C anytime to stop and restore normal sleep settings.')}\n` +
       c.brightCyan(`╰${hr}`),
