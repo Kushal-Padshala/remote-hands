@@ -121,6 +121,19 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
     if (args.includes('--fix') && !context.runner && (!fdaGranted || !screenGranted || !accessGranted)) {
       await ensureMacPermissions(stdout, 74);
     }
+
+    try {
+      const pmRes = runner
+        ? await runner('pmset', ['-g'])
+        : (await import('node:child_process')).spawnSync('pmset', ['-g'], { encoding: 'utf-8' });
+      const pmOut = 'stdout' in pmRes ? String(pmRes.stdout) : '';
+      if (pmOut.includes('SleepDisabled\t\t1')) {
+        stdout('[!] macOS Sleep Prevention: SleepDisabled is ON (normal sleep is prevented)');
+        stdout('    To restore normal sleep and save battery, run: sudo pmset -a disablesleep 0');
+      } else {
+        stdout('[✓] macOS Power Management: normal sleep enabled');
+      }
+    } catch {}
   }
 
   stdout('');

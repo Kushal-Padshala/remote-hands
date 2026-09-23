@@ -83,26 +83,32 @@ export async function startCommand(args: string[], context: CommandContext = {})
   const hr = '─'.repeat(termWidth - 2);
 
   const restoreSleep = () => {
-    if (!clamshellActive) return;
-    clamshellActive = false;
     if (caffeinateProc) {
       try {
         caffeinateProc.kill('SIGKILL');
       } catch {}
       caffeinateProc = null;
     }
-    try {
-      spawnSync('sudo', ['pmset', '-a', 'disablesleep', '0'], { stdio: 'ignore' });
-      stdout(
-        '\n' +
-          c.cyan(`╭─ ${c.bold('⚡ Remote Hands Stopped')} ${'─'.repeat(Math.max(2, termWidth - 26))}\n`) +
-          `${c.cyan('│')}  ${c.brightGreen('✔')} ${c.green('Restored normal sleep behavior (pmset disablesleep = 0)')}\n` +
-          c.cyan(`╰${hr}`),
-      );
-    } catch {}
+    if (clamshellActive || (!runner && process.env.NODE_ENV !== 'test')) {
+      try {
+        const pmRes = spawnSync('pmset', ['-g'], { encoding: 'utf-8' });
+        if (pmRes.stdout && pmRes.stdout.includes('SleepDisabled\t\t1')) {
+          const res = spawnSync('sudo', ['-n', 'pmset', '-a', 'disablesleep', '0'], { stdio: 'ignore' });
+          if (res.status === 0 && clamshellActive) {
+            stdout(
+              '\n' +
+                c.cyan(`╭─ ${c.bold('⚡ Remote Hands Stopped')} ${'─'.repeat(Math.max(2, termWidth - 26))}\n`) +
+                `${c.cyan('│')}  ${c.brightGreen('✔')} ${c.green('Restored normal sleep behavior (pmset disablesleep = 0)')}\n` +
+                c.cyan(`╰${hr}`),
+            );
+          }
+        }
+      } catch {}
+      clamshellActive = false;
+    }
   };
 
-  if (!noClamshell && !runner) {
+  if (!noClamshell && !runner && process.env.NODE_ENV !== 'test') {
     if (process.platform === 'darwin') {
       const fdaGranted = checkMacFullDiskAccess();
       const hostApp = detectHostAppName();
