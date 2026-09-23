@@ -260,7 +260,22 @@ async function runLocalDaemon(
     try {
       chromeManager?.close();
     } catch {}
+    if (hudListener) {
+      try {
+        hudListener.stop();
+      } catch {}
+      hudListener = null;
+    }
   };
+
+  let hudListener: { stop: () => void } | null = null;
+  if (process.platform === 'darwin' && !options.once && !args.includes('--no-hotkey') && !context.runner) {
+    try {
+      const { HudCoordinator } = await import('@remote-hands/daemon');
+      const coordinator = new HudCoordinator();
+      hudListener = coordinator.startListening();
+    } catch {}
+  }
 
   const sigHandler = () => {
     stop().catch(() => {});
@@ -489,7 +504,22 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
     try {
       chromeManager?.close();
     } catch {}
+    if (hudListener) {
+      try {
+        hudListener.stop();
+      } catch {}
+      hudListener = null;
+    }
   };
+
+  let hudListener: { stop: () => void } | null = null;
+  if (process.platform === 'darwin' && !context.runner && !args.includes('--no-hotkey')) {
+    try {
+      const { HudCoordinator } = await import('@remote-hands/daemon');
+      const coordinator = new HudCoordinator();
+      hudListener = coordinator.startListening();
+    } catch {}
+  }
 
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);

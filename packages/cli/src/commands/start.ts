@@ -205,6 +205,11 @@ export async function startCommand(args: string[], context: CommandContext = {})
           : c.dim(`Browser profile mode: ${profileMode}`)
       }\n` +
       `${c.brightCyan('│')}  ${
+        process.platform === 'darwin'
+          ? c.white('Spotlight Guidance HUD: ') + c.bold(c.cyan('Shift+Cmd+Space'))
+          : ''
+      }\n` +
+      `${c.brightCyan('│')}  ${
         isCloud && hasConfig
           ? c.white('Listening for coding agent tasks from your phone (Cloudflare)...')
           : c.white('Local embedded server with secure remote tunnel (zero-account)...')
