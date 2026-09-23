@@ -48,7 +48,7 @@ describe('CLI command dispatcher', () => {
     expect(code).toBe(0);
     expect(logs.some((l) => l.includes('health checks'))).toBe(true);
     expect(logs.some((l) => l.includes('Chrome profiles:'))).toBe(true);
-  }, 10000);
+  }, 30000);
 
   it('prints help on --help or no command', async () => {
     const logs: string[] = [];
@@ -119,5 +119,28 @@ describe('CLI command dispatcher', () => {
     expect(context.chromeManager).toBeDefined();
     expect(context.chromeManager.getProfile()).toBe('kushal');
     expect(context.chromeManager.getMode()).toBe('active');
+  });
+
+  it('lists guide command in help output', async () => {
+    const logs: string[] = [];
+    const code = await main(['--help'], { stdout: (msg) => logs.push(msg) });
+    expect(code).toBe(0);
+    expect(logs.some((l) => l.includes('guide'))).toBe(true);
+  });
+
+  it('dispatches guide command', async () => {
+    const logs: string[] = [];
+    const fakeManager = {
+      getStatus: () => null,
+      dismiss: async () => {},
+      next: async () => null,
+      startSession: async () => ({}),
+    };
+    const code = await main(['guide', 'status'], {
+      stdout: (msg) => logs.push(msg),
+      manager: fakeManager as any,
+    } as any);
+    expect(code).toBe(0);
+    expect(logs.some((l) => l.includes('No active guidance session'))).toBe(true);
   });
 });

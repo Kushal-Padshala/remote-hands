@@ -9,6 +9,7 @@ import { browserCommand } from './commands/browser.js';
 import { profilesCommand } from './commands/profiles.js';
 import { approveCommand } from './commands/approve.js';
 import { desktopCommand } from './commands/desktop.js';
+import { guideCommand, executeGuideCommand } from './commands/guide.js';
 
 export {
   setupCommand,
@@ -21,6 +22,8 @@ export {
   profilesCommand,
   approveCommand,
   desktopCommand,
+  guideCommand,
+  executeGuideCommand,
   type CommandContext,
 };
 
@@ -39,6 +42,7 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
     stdout('  daemon   Run the local execution daemon');
     stdout('  desktop  Control native desktop applications and GUI automation');
     stdout('  browser  Run headless browser automation bridge with live screen streaming');
+    stdout('  guide    Interactive visual guidance and annotation overlays');
     stdout('  approve  Request human-in-the-loop approval on the mobile app');
     stdout('  profiles List detected Chrome browser profiles and launch commands');
     stdout('  setup    Set up Cloudflare resources and pair this computer');
@@ -62,6 +66,10 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
 
   if (command === 'browser') {
     return await browserCommand(args, context);
+  }
+
+  if (command === 'guide') {
+    return await guideCommand(args, context);
   }
 
   if (command === 'approve') {
@@ -113,6 +121,10 @@ if (isEntrypoint()) {
     });
   } else if (binaryName === 'rh-desktop') {
     desktopCommand(process.argv.slice(2)).then((code) => {
+      if (code !== 0) process.exit(code);
+    });
+  } else if (binaryName === 'rh-guide') {
+    guideCommand(process.argv.slice(2)).then((code) => {
       if (code !== 0) process.exit(code);
     });
   } else {
