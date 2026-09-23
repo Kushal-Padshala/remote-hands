@@ -355,4 +355,12 @@ describe('remote hands system prompt and reminder', () => {
     expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh desktop act "<goal>"');
     expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh desktop click <index>');
   });
+
+  it('includes rh guide commands in system prompt and reminder', () => {
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh guide show');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('--browser');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('--desktop');
+    expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh guide show');
+  });
 });
+
