@@ -78,13 +78,61 @@ export function probeMacAppDataPermissions(): void {
   }
 }
 
-export function openMacPrivacySettings(pane: 'FullDiskAccess' | 'AppManagement' | 'Automation' = 'FullDiskAccess'): void {
+export function checkMacScreenCapture(): boolean {
+  if (process.platform !== 'darwin') return true;
+  try {
+    const binPath = path.join(os.homedir(), '.remote-hands', 'bin', 'rh-screenshot');
+    if (fs.existsSync(binPath)) {
+      const res = spawnSync(binPath, ['--check'], { encoding: 'utf-8', timeout: 2000 });
+      if (res.stdout && res.stdout.includes('AUTHORIZED')) return true;
+      if (res.stdout && res.stdout.includes('DENIED')) return false;
+    }
+    const res = spawnSync('swift', ['-e', 'import CoreGraphics; exit(CGPreflightScreenCaptureAccess() ? 0 : 1)'], {
+      encoding: 'utf-8',
+      timeout: 3000,
+    });
+    return res.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+export function requestMacScreenCapture(): void {
+  if (process.platform !== 'darwin') return;
+  try {
+    spawnSync('swift', ['-e', 'import CoreGraphics; _ = CGRequestScreenCaptureAccess()'], {
+      stdio: 'ignore',
+      timeout: 3000,
+    });
+  } catch {}
+}
+
+export function checkMacAccessibility(): boolean {
+  if (process.platform !== 'darwin') return true;
+  try {
+    const res = spawnSync('swift', ['-e', 'import ApplicationServices; exit(AXIsProcessTrusted() ? 0 : 1)'], {
+      encoding: 'utf-8',
+      timeout: 3000,
+    });
+    return res.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+export function openMacPrivacySettings(
+  pane: 'FullDiskAccess' | 'AppManagement' | 'Automation' | 'ScreenCapture' | 'Accessibility' = 'FullDiskAccess',
+): void {
   if (process.platform !== 'darwin') return;
   let url = 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles';
   if (pane === 'AppManagement') {
     url = 'x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles';
   } else if (pane === 'Automation') {
     url = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation';
+  } else if (pane === 'ScreenCapture') {
+    url = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture';
+  } else if (pane === 'Accessibility') {
+    url = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
   }
   try {
     const child = spawn('open', [url], {
@@ -223,15 +271,29 @@ export async function ensureMacPermissions(
   grantMacAutomationPermissions();
   probeMacAutomationPermissions();
 
-  if (checkMacFullDiskAccess()) {
+  let screenOk = checkMacScreenCapture();
+  let fdaOk = checkMacFullDiskAccess();
+  let accessOk = checkMacAccessibility();
+
+  if (screenOk && fdaOk && accessOk) {
     stdout(`  ${c.brightGreen('✔')} ${c.green('Pre-authorized desktop automation for Notes, System Events, Safari, Chrome, Finder')}`);
+    stdout(`  ${c.brightGreen('✔')} ${c.green('Screen & System Audio Recording verified')}`);
+    stdout(`  ${c.brightGreen('✔')} ${c.green('Full Disk Access verified')}`);
+    stdout(`  ${c.brightGreen('✔')} ${c.green('Accessibility verified')}`);
     return true;
   }
 
   const hostApp = detectHostAppName();
   const hr = '─'.repeat(Math.max(20, termWidth - 2));
 
-  openMacPrivacySettings('FullDiskAccess');
+  if (!screenOk) {
+    requestMacScreenCapture();
+    openMacPrivacySettings('ScreenCapture');
+  } else if (!fdaOk) {
+    openMacPrivacySettings('FullDiskAccess');
+  } else if (!accessOk) {
+    openMacPrivacySettings('Accessibility');
+  }
 
   const targets = [hostApp];
   if (hostApp === 'Antigravity IDE') {
@@ -241,13 +303,26 @@ export async function ensureMacPermissions(
     targets.push('Terminal (if running from macOS Terminal)');
   }
 
+  const permissionItems: string[] = [];
+  if (!screenOk) {
+    permissionItems.push(`${c.bold(c.white('Screen & System Audio Recording'))}  ${c.dim('(System Settings -> Privacy & Security -> Screen & System Audio Recording)')}`);
+  }
+  if (!fdaOk) {
+    permissionItems.push(`${c.bold(c.white('Full Disk Access'))}                 ${c.dim('(System Settings -> Privacy & Security -> Full Disk Access)')}`);
+  }
+  if (!accessOk) {
+    permissionItems.push(`${c.bold(c.white('Accessibility'))}                    ${c.dim('(System Settings -> Privacy & Security -> Accessibility)')}`);
+  }
+
   stdout(
     '\n' +
-      c.cyan(`╭─ ${c.bold('🛡️  macOS Full Disk Access Required')} ${'─'.repeat(Math.max(2, termWidth - 40))}\n`) +
-      `${c.cyan('│')}  ${c.white('To run tasks while you are away (and with the lid closed), macOS requires')}\n` +
-      `${c.cyan('│')}  ${c.white('Full Disk Access for your terminal application.')}\n` +
+      c.cyan(`╭─ ${c.bold('🛡️  macOS Permissions Required')} ${'─'.repeat(Math.max(2, termWidth - 36))}\n`) +
+      `${c.cyan('│')}  ${c.white('To stream your desktop to mobile and run unattended tasks, macOS requires')}\n` +
+      `${c.cyan('│')}  ${c.white('the following permissions enabled in System Settings:')}\n` +
       `${c.cyan('│')}\n` +
-      `${c.cyan('│')}  ${c.yellow('👉 System Settings has opened to "Full Disk Access".')}\n` +
+      permissionItems.map((p, i) => `${c.cyan('│')}  ${c.yellow(`👉 ${i + 1}.`)} ${p}`).join('\n') +
+      '\n' +
+      `${c.cyan('│')}\n` +
       `${c.cyan('│')}  ${c.white('Find and toggle the switch ')} ${c.brightGreen('ON')} ${c.white('for:')}\n` +
       targets.map((t) => `${c.cyan('│')}  ${c.brightCyan('•')} ${c.bold(c.white(t))}`).join('\n') +
       '\n' +
@@ -277,7 +352,7 @@ export async function ensureMacPermissions(
 
     const onData = () => {
       cleanup();
-      resolve(checkMacFullDiskAccess());
+      resolve(checkMacScreenCapture() && checkMacFullDiskAccess());
     };
 
     if (process.stdin.isTTY) {
@@ -288,16 +363,29 @@ export async function ensureMacPermissions(
     }
 
     pollTimer = setInterval(() => {
-      if (checkMacFullDiskAccess()) {
+      if (!screenOk && checkMacScreenCapture()) {
+        screenOk = true;
+        stdout(`  ${c.brightGreen('✔')} ${c.green('Screen & System Audio Recording access verified!')}`);
+      }
+      if (!fdaOk && checkMacFullDiskAccess()) {
+        fdaOk = true;
+        stdout(`  ${c.brightGreen('✔')} ${c.green('Full Disk Access verified!')}`);
+      }
+      if (!accessOk && checkMacAccessibility()) {
+        accessOk = true;
+        stdout(`  ${c.brightGreen('✔')} ${c.green('Accessibility verified!')}`);
+      }
+
+      if (screenOk && fdaOk && accessOk) {
         cleanup();
-        stdout(`  ${c.brightGreen('✔')} ${c.green('Full Disk Access verified successfully!')}\n\n`);
+        stdout(`  ${c.brightGreen('✔')} ${c.green('All macOS permissions verified successfully!')}\n\n`);
         resolve(true);
       }
     }, 800);
 
     timeoutTimer = setTimeout(() => {
       cleanup();
-      resolve(checkMacFullDiskAccess());
+      resolve(checkMacScreenCapture() && checkMacFullDiskAccess());
     }, 45000);
   });
 }

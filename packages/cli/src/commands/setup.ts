@@ -46,6 +46,7 @@ import {
 import { writeWranglerConfig, defaultFileSystem, type FileSystemAdapter } from '../cloudflare/project.js';
 import { ensureBrowserHarness } from '../system/browser-harness.js';
 import { ensureAgyPermissions } from '../system/agy-permissions.js';
+import { ensureMacPermissions } from '../system/mac-permissions.js';
 import { generatePairingCode } from '@remote-hands/control-plane';
 import { generatePairingUrl } from '../pairing/qr.js';
 import { formatPairingSummary } from '../output/messages.js';
@@ -191,6 +192,11 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   const permissionsOk = await ensureAgyPermissions(fs, projectRoot);
   if (permissionsOk) {
     stdout(renderStepSuccess('Configured headless tool permissions and trusted workspaces for agy'));
+  }
+
+  if (process.platform === 'darwin' && !context.runner && !args.includes('--skip-permissions')) {
+    stdout(renderStepAction('Verifying macOS system permissions (Screen Recording, Full Disk Access, Accessibility)...'));
+    await ensureMacPermissions((msg) => stdout(msg));
   }
 
   stdout(renderStepStart(3, TOTAL_STEPS, 'Browser Automation Engine (browser-use)'));

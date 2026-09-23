@@ -6,7 +6,14 @@ import { ensureWranglerLogin, defaultRunner } from '../cloudflare/wrangler.js';
 import { checkBrowserHarness } from '../system/browser-harness.js';
 import { defaultFileSystem } from '../cloudflare/project.js';
 import { checkAgyPermissions, ensureAgyPermissions } from '../system/agy-permissions.js';
-import { checkMacFullDiskAccess, ensureMacPermissions, detectHostAppName, grantMacAutomationPermissions } from '../system/mac-permissions.js';
+import {
+  checkMacFullDiskAccess,
+  checkMacScreenCapture,
+  checkMacAccessibility,
+  ensureMacPermissions,
+  detectHostAppName,
+  grantMacAutomationPermissions,
+} from '../system/mac-permissions.js';
 
 export async function doctorCommand(args: string[], context: CommandContext = {}): Promise<number> {
   const stdout = context.stdout ?? console.log;
@@ -84,7 +91,17 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
 
   if (process.platform === 'darwin') {
     const fdaGranted = checkMacFullDiskAccess();
+    const screenGranted = checkMacScreenCapture();
+    const accessGranted = checkMacAccessibility();
     const hostApp = detectHostAppName();
+
+    if (screenGranted) {
+      stdout('[✓] macOS Screen & System Audio Recording: granted');
+    } else {
+      stdout('[!] macOS Screen & System Audio Recording: not granted (System Settings -> Privacy & Security -> Screen & System Audio Recording)');
+      stdout(`    Grant Screen Recording to ${hostApp} (and Terminal) for live desktop streaming`);
+    }
+
     if (fdaGranted) {
       stdout('[✓] macOS Full Disk Access: granted');
       grantMacAutomationPermissions();
@@ -92,9 +109,17 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
     } else {
       stdout('[!] macOS Full Disk Access: not granted (System Settings -> Privacy & Security -> Full Disk Access)');
       stdout(`    Grant Full Disk Access to ${hostApp} (and Terminal) to prevent permission prompts when away`);
-      if (args.includes('--fix') && !context.runner) {
-        await ensureMacPermissions(stdout, 74);
-      }
+    }
+
+    if (accessGranted) {
+      stdout('[✓] macOS Accessibility: granted');
+    } else {
+      stdout('[!] macOS Accessibility: not granted (System Settings -> Privacy & Security -> Accessibility)');
+      stdout(`    Grant Accessibility to ${hostApp} (and Terminal) for window and keyboard automation`);
+    }
+
+    if (args.includes('--fix') && !context.runner && (!fdaGranted || !screenGranted || !accessGranted)) {
+      await ensureMacPermissions(stdout, 74);
     }
   }
 
