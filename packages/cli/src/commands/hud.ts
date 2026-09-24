@@ -9,8 +9,15 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import type { CommandContext } from './setup.js';
 import { c } from '../output/ui.js';
+import { ensureAgyPermissions } from '../system/agy-permissions.js';
+import {
+  grantMacAutomationPermissions,
+  ensureMacPermissions,
+  checkMacScreenCapture,
+} from '../system/mac-permissions.js';
 
 export interface HudCommandContext extends CommandContext {
+
   coordinator?: any | undefined;
   serviceManager?: any | undefined;
   onListenerReady?: ((listener: { stop: () => void }) => void) | undefined;
@@ -38,6 +45,9 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
   const serviceManager = context.serviceManager ?? new HudServiceManager();
 
   if (subcommand === 'install') {
+    stdout('Configuring system permissions for desktop overlay assistant...');
+    await ensureAgyPermissions(context.fs);
+    grantMacAutomationPermissions();
     stdout('Installing Remote Hands Desktop Overlay background service...');
     const res = serviceManager.install();
     if (res.success) {
@@ -51,6 +61,7 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
       return 1;
     }
   }
+
 
   if (subcommand === 'uninstall') {
     const uninstalled = serviceManager.uninstall();
@@ -102,7 +113,14 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
   }
 
   if (subcommand === 'listen') {
+    await ensureAgyPermissions(context.fs);
+    grantMacAutomationPermissions();
+    if (process.platform === 'darwin' && !context.runner && !args.includes('--skip-permissions') && !checkMacScreenCapture()) {
+      await ensureMacPermissions(stdout);
+    }
+
     const coordinator = context.coordinator ?? new HudCoordinator({
+
       autoExecute: true,
       onTaskCreated: (task) => {
         stdout(`\n${c.brightGreen('⚡')} [Spotlight HUD] New task initiated: "${((task as any).goal || task.prompt).slice(0, 60)}..."`);
