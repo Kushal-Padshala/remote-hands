@@ -38,3 +38,5 @@ export * from './desktop/spotlight-hud.js';
 export * from './guidance/intent-resolver.js';
 export * from './guidance/hud-coordinator.js';
 export * from './desktop/hud-service.js';
+export * from './system/power-manager.js';
+
