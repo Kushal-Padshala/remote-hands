@@ -6,7 +6,11 @@ import {
   detectHostAppName,
   openMacPrivacySettings,
   ensureMacPermissions,
+  grantMacAutomationPermissions,
+  requestMacScreenCapture,
+  probeMacAutomationPermissions,
 } from './mac-permissions.js';
+
 
 describe('mac-permissions', () => {
   const originalPlatform = process.platform;
@@ -62,4 +66,17 @@ describe('mac-permissions', () => {
     expect(result).toBe(true);
     expect(stdout).not.toHaveBeenCalled();
   });
+
+  it('runs grantMacAutomationPermissions without throwing', () => {
+    expect(() => grantMacAutomationPermissions()).not.toThrow();
+  });
+
+  it('runs requestMacScreenCapture without throwing', () => {
+    expect(() => requestMacScreenCapture()).not.toThrow();
+  });
+
+  it('runs probeMacAutomationPermissions without throwing', () => {
+    expect(() => probeMacAutomationPermissions()).not.toThrow();
+  });
 });
+

@@ -105,6 +105,21 @@ export function requestMacScreenCapture(): void {
       timeout: 3000,
     });
   } catch {}
+  try {
+    const probeFile = path.join(os.tmpdir(), `rh_probe_${Date.now()}.png`);
+    spawnSync('screencapture', ['-x', probeFile], { timeout: 3000 });
+    if (fs.existsSync(probeFile)) {
+      try {
+        fs.unlinkSync(probeFile);
+      } catch {}
+    }
+  } catch {}
+  try {
+    const binPath = path.join(os.homedir(), '.remote-hands', 'bin', 'rh-screenshot');
+    if (fs.existsSync(binPath)) {
+      spawnSync(binPath, ['--check'], { timeout: 2000 });
+    }
+  } catch {}
 }
 
 export function checkMacAccessibility(): boolean {
@@ -155,7 +170,12 @@ export function grantMacAutomationPermissions(): boolean {
     'com.apple.finder',
     'com.apple.Safari',
     'com.google.Chrome',
+    'company.thebrowser.Browser',
     'com.brave.Browser',
+    'com.microsoft.edgemac',
+    'com.operasoftware.Opera',
+    'org.mozilla.firefox',
+    'com.google.Chrome.canary',
     'com.apple.TextEdit',
     'com.apple.Terminal',
     'com.apple.mail',
@@ -166,7 +186,7 @@ export function grantMacAutomationPermissions(): boolean {
     'com.microsoft.VSCode',
   ];
 
-  const knownClients = [
+  const knownBundleClients = [
     'com.google.antigravity-ide',
     'com.google.antigravity',
     'com.apple.Terminal',
@@ -177,10 +197,20 @@ export function grantMacAutomationPermissions(): boolean {
     'com.microsoft.VSCode',
   ];
 
+  const knownPathClients = new Set<string>();
+  if (process.execPath) knownPathClients.add(process.execPath);
+  for (const p of ['/usr/local/bin/node', '/opt/homebrew/bin/node']) {
+    if (fs.existsSync(p)) knownPathClients.add(p);
+  }
+  const rhSpotlight = path.join(os.homedir(), '.remote-hands', 'bin', 'rh-spotlight');
+  if (fs.existsSync(rhSpotlight)) knownPathClients.add(rhSpotlight);
+  const rhScreenshot = path.join(os.homedir(), '.remote-hands', 'bin', 'rh-screenshot');
+  if (fs.existsSync(rhScreenshot)) knownPathClients.add(rhScreenshot);
+
   try {
     const listRes = spawnSync(
       'sqlite3',
-      [tccDbPath, `SELECT DISTINCT client, hex(csreq) FROM access WHERE service='kTCCServiceAppleEvents' AND csreq IS NOT NULL;`],
+      [tccDbPath, `SELECT DISTINCT client, hex(csreq) FROM access WHERE csreq IS NOT NULL;`],
       { encoding: 'utf-8' },
     );
     const clientBlobs = new Map<string, string>();
@@ -201,21 +231,62 @@ export function grantMacAutomationPermissions(): boolean {
       else if (hostApp === 'Ghostty') currentClient = 'com.mitchellh.ghostty';
     }
 
-    const allClients = new Set([...knownClients]);
-    if (currentClient) allClients.add(currentClient);
+    const allBundleClients = new Set([...knownBundleClients]);
+    if (currentClient) allBundleClients.add(currentClient);
+
+    const resolveCsreq = (client: string, clientType: number): string | null => {
+      if (clientBlobs.has(client)) return clientBlobs.get(client)!;
+      if (clientType === 1 && fs.existsSync(client)) {
+        try {
+          const res = spawnSync('sh', [
+            '-c',
+            `codesign -d -r- "${client}" 2>/dev/null | awk -F 'designated => ' 'NF>1 {print $2}' | csreq -r- -b /dev/stdout 2>/dev/null | xxd -p | tr -d '\\n'`,
+          ], { encoding: 'utf-8', timeout: 3000 });
+          if (res.status === 0 && res.stdout && res.stdout.trim().length > 0) {
+            const blob = res.stdout.trim();
+            clientBlobs.set(client, blob);
+            return blob;
+          }
+        } catch {}
+      }
+      return (
+        clientBlobs.get('com.google.antigravity-ide') ??
+        clientBlobs.get('com.apple.Terminal') ??
+        null
+      );
+    };
 
     const statements: string[] = [];
     const now = Math.floor(Date.now() / 1000);
 
-    for (const client of allClients) {
-      const blob =
-        clientBlobs.get(client) ??
-        clientBlobs.get('com.google.antigravity-ide') ??
-        clientBlobs.get('com.apple.Terminal');
+    for (const client of allBundleClients) {
+      const blob = resolveCsreq(client, 0);
       const csreqClause = blob ? `X'${blob}'` : 'NULL';
       for (const target of standardTargets) {
         statements.push(
           `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, csreq, indirect_object_identifier_type, indirect_object_identifier, flags, last_modified) VALUES ('kTCCServiceAppleEvents', '${client}', 0, 2, 2, 1, ${csreqClause}, 0, '${target}', 0, ${now});`,
+        );
+      }
+    }
+
+    const folderServices = [
+      'kTCCServiceSystemPolicyDesktopFolder',
+      'kTCCServiceSystemPolicyDocumentsFolder',
+      'kTCCServiceSystemPolicyDownloadsFolder',
+      'kTCCServiceSystemPolicyAppBundles',
+    ];
+
+    for (const client of knownPathClients) {
+      const blob = resolveCsreq(client, 1);
+      const csreqClause = blob ? `X'${blob}'` : 'NULL';
+      for (const target of standardTargets) {
+        statements.push(
+          `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, csreq, indirect_object_identifier_type, indirect_object_identifier, flags, last_modified) VALUES ('kTCCServiceAppleEvents', '${client}', 1, 2, 2, 1, ${csreqClause}, 0, '${target}', 0, ${now});`,
+        );
+      }
+      for (const s of folderServices) {
+        statements.push(
+          `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, csreq, indirect_object_identifier_type, indirect_object_identifier, flags, last_modified) VALUES ('${s}', '${client}', 1, 2, 2, 1, ${csreqClause}, 0, 'UNUSED', 0, ${now});`,
         );
       }
     }
@@ -227,8 +298,8 @@ export function grantMacAutomationPermissions(): boolean {
     const sysTccDb = '/Library/Application Support/com.apple.TCC/TCC.db';
     if (fs.existsSync(sysTccDb)) {
       const sysStatements: string[] = [];
-      for (const client of allClients) {
-        const blob = clientBlobs.get(client) ?? clientBlobs.get('com.google.antigravity-ide');
+      for (const client of allBundleClients) {
+        const blob = resolveCsreq(client, 0);
         const csreqClause = blob ? `X'${blob}'` : 'NULL';
         sysStatements.push(
           `INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, csreq, flags, last_modified) VALUES ('kTCCServiceAccessibility', '${client}', 0, 2, 2, 1, ${csreqClause}, 0, ${now});`,
@@ -250,7 +321,7 @@ export function grantMacAutomationPermissions(): boolean {
 
 export function probeMacAutomationPermissions(): void {
   if (process.platform !== 'darwin') return;
-  const probeApps = ['System Events', 'Notes', 'Finder', 'Safari'];
+  const probeApps = ['System Events', 'Notes', 'Finder', 'Safari', 'Arc', 'Google Chrome'];
   for (const app of probeApps) {
     try {
       spawn('osascript', ['-e', `tell application "${app}" to get name`], {
@@ -276,7 +347,7 @@ export async function ensureMacPermissions(
   let accessOk = checkMacAccessibility();
 
   if (screenOk && fdaOk && accessOk) {
-    stdout(`  ${c.brightGreen('✔')} ${c.green('Pre-authorized desktop automation for Notes, System Events, Safari, Chrome, Finder')}`);
+    stdout(`  ${c.brightGreen('✔')} ${c.green('Pre-authorized desktop automation for Notes, System Events, Safari, Arc, Chrome, Finder')}`);
     stdout(`  ${c.brightGreen('✔')} ${c.green('Screen & System Audio Recording verified')}`);
     stdout(`  ${c.brightGreen('✔')} ${c.green('Full Disk Access verified')}`);
     stdout(`  ${c.brightGreen('✔')} ${c.green('Accessibility verified')}`);
@@ -298,6 +369,9 @@ export async function ensureMacPermissions(
   const targets = [hostApp];
   if (hostApp === 'Antigravity IDE') {
     targets.push('Antigravity');
+  }
+  if (!targets.includes('node')) {
+    targets.push('node');
   }
   if (hostApp !== 'Terminal') {
     targets.push('Terminal (if running from macOS Terminal)');
