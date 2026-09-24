@@ -10,6 +10,10 @@ export interface SpotlightPromptResult {
   app: string;
 }
 
+export type SpotlightListenerEvent = SpotlightPromptResult | { event: string; app: string; query?: string };
+
+export type HudUpdateSender = (status: string, text: string) => void;
+
 export class SpotlightHudRunner {
   private exec: ExecFunction;
   private binaryPath: string;
@@ -101,9 +105,10 @@ export class SpotlightHudRunner {
     }
 
     try {
-      const parsed = JSON.parse(res.stdout.trim());
-      if (parsed && typeof parsed.query === 'string' && typeof parsed.app === 'string') {
-        return parsed as SpotlightPromptResult;
+      const firstLine = res.stdout.trim().split('\n')[0] || '{}';
+      const parsed = JSON.parse(firstLine);
+      if (parsed && typeof parsed.query === 'string') {
+        return { query: parsed.query, app: parsed.app || activeApp || 'Desktop' };
       }
       return null;
     } catch {
@@ -111,7 +116,77 @@ export class SpotlightHudRunner {
     }
   }
 
-  startListener(onTrigger: (result: SpotlightPromptResult) => void): { stop: () => void } {
+  openInteractivePrompt(
+    activeApp: string | undefined,
+    onSubmit: (result: SpotlightPromptResult, sendUpdate: HudUpdateSender) => Promise<void> | void,
+    onCancel?: () => void,
+  ): { close: () => void } {
+    const target = this.ensureBinary();
+    if (!target) {
+      return { close: () => {} };
+    }
+    const args: string[] = ['prompt'];
+    if (activeApp) {
+      args.push(`--app=${activeApp}`);
+    }
+
+    let cmd = target;
+    let execArgs = args;
+    if (target.endsWith('.swift')) {
+      cmd = 'swift';
+      execArgs = [target, ...args];
+    }
+
+    const child = spawn(cmd, execArgs, {
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+
+    let submitted = false;
+    const sendUpdate: HudUpdateSender = (status: string, text: string) => {
+      if (!child.killed && child.stdin && child.stdin.writable) {
+        try {
+          child.stdin.write(JSON.stringify({ status, text }) + '\n');
+        } catch {}
+      }
+    };
+
+    let buffer = '';
+    child.stdout?.on('data', (chunk) => {
+      buffer += chunk.toString('utf-8');
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed.event === 'submit' || (parsed.query && !submitted)) {
+            submitted = true;
+            const res: SpotlightPromptResult = {
+              query: parsed.query,
+              app: parsed.app || activeApp || 'Desktop',
+            };
+            Promise.resolve(onSubmit(res, sendUpdate)).catch(() => {});
+          } else if (parsed.event === 'cancel') {
+            if (onCancel) onCancel();
+            try {
+              child.kill();
+            } catch {}
+          }
+        } catch {}
+      }
+    });
+
+    return {
+      close: () => {
+        try {
+          child.kill('SIGTERM');
+        } catch {}
+      },
+    };
+  }
+
+  startListener(onTrigger: (result: SpotlightListenerEvent) => void): { stop: () => void } {
     const target = this.ensureBinary();
     if (!target) {
       return { stop: () => {} };
@@ -132,7 +207,7 @@ export class SpotlightHudRunner {
       for (const line of lines) {
         try {
           const parsed = JSON.parse(line.trim());
-          if (parsed && typeof parsed.query === 'string' && typeof parsed.app === 'string') {
+          if (parsed && typeof parsed.app === 'string') {
             onTrigger(parsed as SpotlightPromptResult);
           }
         } catch {}

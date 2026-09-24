@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { HudCoordinator, isAutonomousGoal, formatContextualTaskPrompt } from './hud-coordinator.js';
+import { HudCoordinator, isAutonomousGoal, formatContextualTaskPrompt, formatHudStatus } from './hud-coordinator.js';
 
 describe('HudCoordinator', () => {
   let mockHudRunner: any;
@@ -172,5 +172,85 @@ describe('HudCoordinator', () => {
     expect(formatted).toContain('Application Type: Web Browser');
     expect(formatted).toContain('Autonomous Research:');
     expect(formatted).toContain('Full-Speed Execution:');
+  });
+
+  it('formats hud status from various agent stream events', () => {
+    expect(
+      formatHudStatus({ kind: 'tool_call', payload: { tool: 'desktop', input: { goal: 'Click Submit' } } })
+    ).toEqual({
+      status: 'EXECUTING',
+      text: 'Using desktop: Click Submit',
+    });
+
+    expect(
+      formatHudStatus({ kind: 'thinking', payload: { text: 'Drafting ad copy\nSecond line' } })
+    ).toEqual({
+      status: 'THINKING',
+      text: 'Drafting ad copy',
+    });
+
+    expect(
+      formatHudStatus({ kind: 'status', payload: { status: 'running' } })
+    ).toEqual({
+      status: 'WORKING',
+      text: 'Task status: running',
+    });
+
+    expect(
+      formatHudStatus({ kind: 'error', payload: { message: 'Network failed' } })
+    ).toEqual({
+      status: 'ERROR',
+      text: 'Network failed',
+    });
+  });
+
+  it('opens interactive prompt on hotkey and streams live updates', async () => {
+    let capturedListener: any;
+    mockHudRunner.startListener.mockImplementation((cb: any) => {
+      capturedListener = cb;
+      return { stop: vi.fn() };
+    });
+
+    let submitHandler: any;
+    mockHudRunner.openInteractivePrompt = vi.fn().mockImplementation((_app: any, onSubmit: any) => {
+      submitHandler = onSubmit;
+      return { close: vi.fn() };
+    });
+
+    const mockUpdates: Array<{ status: string; text: string }> = [];
+    const dummySender = (status: string, text: string) => {
+      mockUpdates.push({ status, text });
+    };
+
+    const mockStore = {
+      createTask: vi.fn().mockResolvedValue({ id: 'task-live-1', status: 'queued' }),
+    };
+
+    const liveCoordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: mockStore as any,
+    });
+
+    liveCoordinator.startListening();
+    expect(mockHudRunner.startListener).toHaveBeenCalled();
+
+    await capturedListener({ event: 'hotkey', app: 'Safari' });
+    expect(mockHudRunner.openInteractivePrompt).toHaveBeenCalledWith('Safari', expect.any(Function), expect.any(Function));
+
+    await submitHandler({ query: 'start advertising campaign', app: 'Safari' }, dummySender);
+    expect(mockStore.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goal: 'start advertising campaign',
+        model: 'gemini-3.8-flash',
+        effort: 'low',
+      })
+    );
+    expect(mockUpdates).toContainEqual({
+      status: 'THINKING',
+      text: 'Analyzing context and initializing agent...',
+    });
   });
 });

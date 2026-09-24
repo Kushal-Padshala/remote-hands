@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import type { Task } from '@remote-hands/shared';
-import { SpotlightHudRunner, type SpotlightPromptResult } from '../desktop/spotlight-hud.js';
+import { SpotlightHudRunner, type SpotlightPromptResult, type HudUpdateSender } from '../desktop/spotlight-hud.js';
 import { IntentResolver } from './intent-resolver.js';
 import { GuidanceManager } from './guidance-manager.js';
 import { MacOsDriver, type ActiveWindowContext } from '../desktop/macos-driver.js';
@@ -87,6 +87,73 @@ export function formatContextualTaskPrompt(query: string, context: ActiveWindowC
   return lines.join('\n');
 }
 
+export function formatHudStatus(event: any): { status: string; text: string } {
+  if (!event) return { status: 'THINKING', text: '' };
+  const kind = event.kind || event.type;
+  const payload = event.payload || event;
+
+  if (kind === 'tool_call') {
+    const tool = payload.tool || 'Action';
+    let detail = '';
+    if (payload.input) {
+      if (typeof payload.input === 'object') {
+        const inp = payload.input as any;
+        detail = inp.goal || inp.url || inp.text || inp.app || inp.command || inp.query || '';
+      } else {
+        detail = String(payload.input);
+      }
+    }
+    const cleanDetail = detail ? `: ${detail.slice(0, 80)}` : '';
+    return {
+      status: 'EXECUTING',
+      text: `Using ${tool}${cleanDetail}`,
+    };
+  }
+
+  if (kind === 'tool_result') {
+    return {
+      status: 'THINKING',
+      text: 'Processing action results...',
+    };
+  }
+
+  if (kind === 'thinking') {
+    const raw = typeof payload.text === 'string' ? payload.text.trim() : '';
+    const clean = raw.split('\n')[0]?.slice(0, 100) || 'Thinking through next step...';
+    return {
+      status: 'THINKING',
+      text: clean,
+    };
+  }
+
+  if (kind === 'agent_text') {
+    const raw = typeof payload.text === 'string' ? payload.text.trim() : '';
+    if (!raw) return { status: 'THINKING', text: '' };
+    const clean = raw.split('\n')[0]?.slice(0, 100) || '';
+    return {
+      status: 'WORKING',
+      text: clean,
+    };
+  }
+
+  if (kind === 'status') {
+    const st = payload.status || 'running';
+    return {
+      status: st === 'running' ? 'WORKING' : String(st).toUpperCase(),
+      text: `Task status: ${st}`,
+    };
+  }
+
+  if (kind === 'error') {
+    return {
+      status: 'ERROR',
+      text: payload.message || 'An error occurred',
+    };
+  }
+
+  return { status: 'WORKING', text: '' };
+}
+
 export interface HudCoordinatorOptions {
   hudRunner?: SpotlightHudRunner | undefined;
   intentResolver?: IntentResolver | undefined;
@@ -154,13 +221,16 @@ export class HudCoordinator {
     return undefined;
   }
 
-  async executeTaskStandalone(task: Task): Promise<void> {
+  async executeTaskStandalone(task: Task, sendUpdate?: HudUpdateSender): Promise<void> {
     const store = this.getStore();
     if (!store) return;
     const claimed = await store.claimNextTask('machine-local');
     if (!claimed) return;
     const running = await store.markTaskRunning(claimed.id);
     await store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
+    if (sendUpdate) {
+      sendUpdate('WORKING', 'Starting autonomous agent execution...');
+    }
 
     const runner = this.runner || new ProcessAgentRunner('agy');
     try {
@@ -168,17 +238,32 @@ export class HudCoordinator {
         if (store.appendEvent) {
           await store.appendEvent(running.id, event as any).catch(() => {});
         }
+        if (sendUpdate) {
+          const formatted = formatHudStatus(event);
+          if (formatted.text) {
+            sendUpdate(formatted.status, formatted.text);
+          }
+        }
       });
       if (res.status === 'failed') {
         await store.failTask(running.id, { error: res.summary || 'Task failed' });
+        if (sendUpdate) {
+          sendUpdate('FAILED', res.summary || 'Task failed');
+        }
       } else {
         await store.completeTask(running.id, { summary: res.summary, conversationId: res.conversationId });
+        if (sendUpdate) {
+          sendUpdate('COMPLETE', res.summary || 'Task completed successfully');
+        }
       }
       if (this.onTaskCompleted) {
         await this.onTaskCompleted(running, res.summary);
       }
     } catch (err: any) {
       await store.failTask(running.id, { error: err?.message || String(err) });
+      if (sendUpdate) {
+        sendUpdate('FAILED', err?.message || 'Task failed');
+      }
     }
   }
 
@@ -187,11 +272,14 @@ export class HudCoordinator {
     return this.initDefaultStore() || null;
   }
 
-  async handleResult(result: SpotlightPromptResult): Promise<boolean> {
+  async handleResult(result: SpotlightPromptResult, sendUpdate?: HudUpdateSender): Promise<boolean> {
     const windowContext = await this.macosDriver.getActiveWindowContext(result.app);
     const isGoal = isAutonomousGoal(result.query);
 
     if (isGoal && this.store && typeof this.store.createTask === 'function') {
+      if (sendUpdate) {
+        sendUpdate('THINKING', 'Analyzing context and initializing agent...');
+      }
       const prompt = formatContextualTaskPrompt(result.query, windowContext);
       const task = await this.store.createTask({
         prompt,
@@ -199,30 +287,63 @@ export class HudCoordinator {
         kind: windowContext.isBrowser ? 'browser' : 'mixed',
         mode: 'autonomous',
         status: 'queued',
+        model: 'gemini-3.8-flash',
+        effort: 'low',
       });
       if (this.onTaskCreated) {
         await this.onTaskCreated(task);
       }
       if (this.autoExecute) {
-        this.executeTaskStandalone(task).catch(() => {});
+        this.executeTaskStandalone(task, sendUpdate).catch(() => {});
       }
       return true;
     }
 
+    if (sendUpdate) {
+      sendUpdate('THINKING', 'Resolving visual guidance...');
+    }
     const resolution = await this.intentResolver.resolve(
       result.query,
       windowContext.app || result.app
     );
 
     if (resolution.steps.length === 0) {
+      if (sendUpdate) {
+        sendUpdate('FAILED', 'Could not determine guidance steps');
+      }
       return false;
     }
 
     await this.guidanceManager.startSession(resolution.steps);
+    if (sendUpdate) {
+      sendUpdate('COMPLETE', 'Guidance overlay active');
+    }
     return true;
   }
 
   async triggerPrompt(appOverride?: string): Promise<boolean> {
+    if (typeof this.hudRunner.openInteractivePrompt === 'function') {
+      return new Promise<boolean>((resolve) => {
+        let settled = false;
+        this.hudRunner.openInteractivePrompt(
+          appOverride,
+          async (result, sendUpdate) => {
+            if (!settled) {
+              settled = true;
+            }
+            const success = await this.handleResult(result, sendUpdate);
+            resolve(success);
+          },
+          () => {
+            if (!settled) {
+              settled = true;
+              resolve(false);
+            }
+          },
+        );
+      });
+    }
+
     const promptResult = await this.hudRunner.openPrompt(appOverride);
     if (!promptResult || !promptResult.query) {
       return false;
@@ -231,9 +352,30 @@ export class HudCoordinator {
   }
 
   startListening(): { stop: () => void } {
-    return this.hudRunner.startListener(async (result: SpotlightPromptResult) => {
+    let activePrompt: { close: () => void } | null = null;
+    return this.hudRunner.startListener(async (event: any) => {
       try {
-        await this.handleResult(result);
+        if (event && event.query) {
+          await this.handleResult(event);
+        } else if (event && event.event === 'hotkey' && typeof this.hudRunner.openInteractivePrompt === 'function') {
+          if (activePrompt) {
+            activePrompt.close();
+            activePrompt = null;
+          }
+          activePrompt = this.hudRunner.openInteractivePrompt(
+            event.app,
+            async (result, sendUpdate) => {
+              try {
+                await this.handleResult(result, sendUpdate);
+              } finally {
+                activePrompt = null;
+              }
+            },
+            () => {
+              activePrompt = null;
+            },
+          );
+        }
       } catch {}
     });
   }

@@ -467,6 +467,10 @@ export class ProcessAgentRunner implements AgentRunner {
       } catch {}
     }
 
+    if (effectiveTask.model === 'gemini-3.8-flash-high' && effectiveTask.effort === 'low') {
+      effectiveTask.model = 'gemini-3.8-flash';
+    }
+
     const args = buildAgyArgs(effectiveTask, {
       agyCommand: this.agyCommand,
       systemPrompt: this.systemPrompt,
