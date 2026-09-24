@@ -12,6 +12,8 @@ import { desktopCommand } from './commands/desktop.js';
 import { hudCommand } from './commands/hud.js';
 import { guideCommand, executeGuideCommand } from './commands/guide.js';
 
+import { permissionsCommand } from './commands/permissions.js';
+
 export {
   setupCommand,
   deployCommand,
@@ -24,6 +26,7 @@ export {
   approveCommand,
   desktopCommand,
   hudCommand,
+  permissionsCommand,
   guideCommand,
   executeGuideCommand,
   type CommandContext,
@@ -39,18 +42,19 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
     stdout('Usage: remote-hands <command> [options] (or: rh <command>)');
     stdout('');
     stdout('Commands:');
-    stdout('  start    Start daemon with lid-closed clamshell sleep prevention');
-    stdout('  pair     Display phone pairing QR code and direct link');
-    stdout('  daemon   Run the local execution daemon');
-    stdout('  desktop  Control native desktop applications and GUI automation');
-    stdout('  hud      Manage desktop overlay assistant and hotkey background service');
-    stdout('  browser  Run headless browser automation bridge with live screen streaming');
-    stdout('  guide    Interactive visual guidance and annotation overlays');
-    stdout('  approve  Request human-in-the-loop approval on the mobile app');
-    stdout('  profiles List detected Chrome browser profiles and launch commands');
-    stdout('  setup    Set up Cloudflare resources and pair this computer');
-    stdout('  deploy   Deploy backend Worker and phone PWA to Cloudflare');
-    stdout('  doctor   Check system prerequisites and connectivity');
+    stdout('  start       Start daemon with lid-closed clamshell sleep prevention');
+    stdout('  pair        Display phone pairing QR code and direct link');
+    stdout('  daemon      Run the local execution daemon');
+    stdout('  desktop     Control native desktop applications and GUI automation');
+    stdout('  hud         Manage desktop overlay assistant and hotkey background service');
+    stdout('  permissions Inspect and pre-authorize macOS and AI agent permissions');
+    stdout('  browser     Run headless browser automation bridge with live screen streaming');
+    stdout('  guide       Interactive visual guidance and annotation overlays');
+    stdout('  approve     Request human-in-the-loop approval on the mobile app');
+    stdout('  profiles    List detected Chrome browser profiles and launch commands');
+    stdout('  setup       Set up Cloudflare resources and pair this computer');
+    stdout('  deploy      Deploy backend Worker and phone PWA to Cloudflare');
+    stdout('  doctor      Check system prerequisites and connectivity');
     stdout('');
     return 0;
   }
@@ -70,6 +74,11 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
   if (command === 'hud') {
     return await hudCommand(args, context);
   }
+
+  if (command === 'permissions') {
+    return await permissionsCommand(args, context);
+  }
+
 
   if (command === 'browser') {
     return await browserCommand(args, context);

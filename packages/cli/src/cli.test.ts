@@ -167,4 +167,27 @@ describe('CLI command dispatcher', () => {
     expect(fakeServiceManager.isInstalled).toHaveBeenCalled();
     expect(logs.some((l) => l.includes('Desktop Overlay Status'))).toBe(true);
   });
+
+  it('lists permissions command in help output', async () => {
+    const logs: string[] = [];
+    const code = await main(['--help'], { stdout: (msg) => logs.push(msg) });
+    expect(code).toBe(0);
+    expect(logs.some((l) => l.includes('permissions'))).toBe(true);
+  });
+
+  it('dispatches permissions command', async () => {
+    const logs: string[] = [];
+    const mockFs: any = {
+      readFile: async () => JSON.stringify({ permissions: { allow: ['read_file'] } }),
+      writeFile: async () => {},
+      exists: async () => true,
+    };
+    const code = await main(['permissions', '--help'], {
+      stdout: (msg) => logs.push(msg),
+      fs: mockFs,
+    });
+    expect(code).toBe(0);
+    expect(logs.some((l) => l.includes('rh permissions'))).toBe(true);
+  });
 });
+
