@@ -87,7 +87,7 @@ export function formatContextualTaskPrompt(query: string, context: ActiveWindowC
   return lines.join('\n');
 }
 
-export function formatHudStatus(event: any): { status: string; text: string } {
+export function formatHudStatus(event: any): { status: string; text: string; role?: string } {
   if (!event) return { status: 'THINKING', text: '' };
   const kind = event.kind || event.type;
   const payload = event.payload || event;
@@ -107,6 +107,7 @@ export function formatHudStatus(event: any): { status: string; text: string } {
     return {
       status: 'EXECUTING',
       text: `Using ${tool}${cleanDetail}`,
+      role: 'ACTION',
     };
   }
 
@@ -114,6 +115,7 @@ export function formatHudStatus(event: any): { status: string; text: string } {
     return {
       status: 'THINKING',
       text: 'Processing action results...',
+      role: 'OUTPUT',
     };
   }
 
@@ -123,6 +125,7 @@ export function formatHudStatus(event: any): { status: string; text: string } {
     return {
       status: 'THINKING',
       text: clean,
+      role: 'THINK',
     };
   }
 
@@ -133,6 +136,7 @@ export function formatHudStatus(event: any): { status: string; text: string } {
     return {
       status: 'WORKING',
       text: clean,
+      role: 'AGENT',
     };
   }
 
@@ -141,6 +145,7 @@ export function formatHudStatus(event: any): { status: string; text: string } {
     return {
       status: st === 'running' ? 'WORKING' : String(st).toUpperCase(),
       text: `Task status: ${st}`,
+      role: 'STATUS',
     };
   }
 
@@ -148,6 +153,7 @@ export function formatHudStatus(event: any): { status: string; text: string } {
     return {
       status: 'ERROR',
       text: payload.message || 'An error occurred',
+      role: 'ERROR',
     };
   }
 
@@ -246,29 +252,35 @@ export class HudCoordinator {
           const tool = String((payload as any).tool || '').toLowerCase();
           if (tool.includes('browser')) {
             this.macosDriver.focusWindow('Google Chrome').catch(() => {});
+            if (sendUpdate) {
+              sendUpdate('FOCUS', 'Brought Google Chrome to front', 'FOCUS');
+            }
           } else if (tool.includes('desktop')) {
             const targetApp = (payload as any).input?.app;
             if (targetApp && typeof targetApp === 'string') {
               this.macosDriver.focusWindow(targetApp).catch(() => {});
+              if (sendUpdate) {
+                sendUpdate('FOCUS', `Brought ${targetApp} to front`, 'FOCUS');
+              }
             }
           }
         }
         if (sendUpdate) {
           const formatted = formatHudStatus(event);
           if (formatted.text) {
-            sendUpdate(formatted.status, formatted.text);
+            sendUpdate(formatted.status, formatted.text, formatted.role);
           }
         }
       });
       if (res.status === 'failed') {
         await store.failTask(running.id, { error: res.summary || 'Task failed' });
         if (sendUpdate) {
-          sendUpdate('FAILED', res.summary || 'Task failed');
+          sendUpdate('FAILED', res.summary || 'Task failed', 'ERROR');
         }
       } else {
         await store.completeTask(running.id, { summary: res.summary, conversationId: res.conversationId });
         if (sendUpdate) {
-          sendUpdate('COMPLETE', res.summary || 'Task completed successfully');
+          sendUpdate('COMPLETE', res.summary || 'Task completed successfully', 'DONE');
         }
       }
       if (this.onTaskCompleted) {
@@ -277,7 +289,7 @@ export class HudCoordinator {
     } catch (err: any) {
       await store.failTask(running.id, { error: err?.message || String(err) });
       if (sendUpdate) {
-        sendUpdate('FAILED', err?.message || 'Task failed');
+        sendUpdate('FAILED', err?.message || 'Task failed', 'ERROR');
       }
     }
   }

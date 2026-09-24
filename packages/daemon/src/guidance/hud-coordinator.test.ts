@@ -180,6 +180,7 @@ describe('HudCoordinator', () => {
     ).toEqual({
       status: 'EXECUTING',
       text: 'Using desktop: Click Submit',
+      role: 'ACTION',
     });
 
     expect(
@@ -187,6 +188,7 @@ describe('HudCoordinator', () => {
     ).toEqual({
       status: 'THINKING',
       text: 'Drafting ad copy',
+      role: 'THINK',
     });
 
     expect(
@@ -194,6 +196,7 @@ describe('HudCoordinator', () => {
     ).toEqual({
       status: 'WORKING',
       text: 'Task status: running',
+      role: 'STATUS',
     });
 
     expect(
@@ -201,6 +204,7 @@ describe('HudCoordinator', () => {
     ).toEqual({
       status: 'ERROR',
       text: 'Network failed',
+      role: 'ERROR',
     });
   });
 
