@@ -2,6 +2,10 @@ import AppKit
 import Foundation
 import Carbon
 
+class HudCloseButton: NSButton {
+    override var mouseDownCanMoveWindow: Bool { false }
+}
+
 class SpotlightPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -9,6 +13,11 @@ class SpotlightPanel: NSPanel {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.contains(.command), let chars = event.charactersIgnoringModifiers {
             switch chars.lowercased() {
+            case "w":
+                print("{\"event\":\"cancel\"}")
+                fflush(stdout)
+                usleep(50000)
+                exit(0)
             case "v":
                 if NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: self) {
                     return true
@@ -45,6 +54,7 @@ class SpotlightPanel: NSPanel {
     override func cancelOperation(_ sender: Any?) {
         print("{\"event\":\"cancel\"}")
         fflush(stdout)
+        usleep(50000)
         exit(0)
     }
 }
@@ -55,7 +65,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var textField: NSTextField!
     var badge: NSTextField!
     var statusPill: NSTextField!
-    var stopButton: NSButton!
+    var stopButton: HudCloseButton!
     var dividerLine: NSBox!
     var historyScrollView: NSScrollView!
     var historyTextView: NSTextView!
@@ -124,12 +134,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         badge.frame = NSRect(x: 24, y: height - 26, width: width - 80, height: 16)
         visualEffect.addSubview(badge)
 
-        stopButton = NSButton(frame: NSRect(x: width - 42, y: height - 28, width: 22, height: 20))
+        stopButton = HudCloseButton(frame: NSRect(x: width - 44, y: height - 30, width: 26, height: 24))
         stopButton.title = "✕"
-        stopButton.bezelStyle = .inline
+        stopButton.bezelStyle = .regularSquare
         stopButton.isBordered = false
-        stopButton.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        stopButton.contentTintColor = NSColor(white: 0.6, alpha: 1.0)
+        stopButton.wantsLayer = true
+        stopButton.layer?.cornerRadius = 12
+        stopButton.layer?.masksToBounds = true
+        stopButton.font = NSFont.systemFont(ofSize: 14, weight: .bold)
+        stopButton.contentTintColor = NSColor(white: 0.75, alpha: 1.0)
         stopButton.target = self
         stopButton.action = #selector(onCancelClicked)
         visualEffect.addSubview(stopButton)
@@ -163,6 +176,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     @objc func onCancelClicked() {
         print("{\"event\":\"cancel\"}")
         fflush(stdout)
+        usleep(50000)
         exit(0)
     }
 
@@ -240,7 +254,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         statusPill.alignment = .right
         statusPill.isHidden = false
 
-        stopButton.frame = NSRect(x: width - 38, y: newHeight - 32, width: 20, height: 18)
+        stopButton.frame = NSRect(x: width - 44, y: newHeight - 34, width: 26, height: 24)
+        visualEffect.addSubview(stopButton, positioned: .above, relativeTo: nil)
 
         dividerLine = NSBox(frame: NSRect(x: 20, y: newHeight - 44, width: width - 40, height: 1))
         dividerLine.boxType = .custom

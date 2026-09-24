@@ -288,4 +288,104 @@ describe('HudCoordinator', () => {
     expect(mockMacOsDriver.focusWindow).toHaveBeenCalledWith('Google Chrome');
     expect(mockMacOsDriver.focusWindow).toHaveBeenCalledWith('Notes');
   });
+
+  it('cancels running task and updates store when cancelActiveTask is invoked', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const mockRunner = {
+      run: vi.fn().mockImplementation(async (_task: any, _onEvent: any, signal: AbortSignal) => {
+        capturedSignal = signal;
+        return new Promise((resolve) => {
+          signal.addEventListener('abort', () => {
+            resolve({ status: 'done', summary: 'Task cancelled by user' });
+          });
+        });
+      }),
+    };
+
+    const mockStore = {
+      claimNextTask: vi.fn().mockResolvedValue({ id: 'task-cancel-1' }),
+      markTaskRunning: vi.fn().mockResolvedValue({ id: 'task-cancel-1' }),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      cancelTask: vi.fn().mockResolvedValue({ id: 'task-cancel-1', status: 'cancelled' }),
+      completeTask: vi.fn(),
+    };
+
+    const cancelCoordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: mockStore as any,
+      runner: mockRunner as any,
+    });
+
+    const executionPromise = cancelCoordinator.executeTaskStandalone({ id: 'task-cancel-1' } as any);
+    expect(cancelCoordinator.hasActiveTask()).toBe(true);
+
+    await new Promise((r) => setTimeout(r, 10));
+    await cancelCoordinator.cancelActiveTask('User closed overlay');
+    await executionPromise;
+
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(mockStore.cancelTask).toHaveBeenCalledWith('task-cancel-1', 'User closed overlay');
+    expect(mockStore.appendEvent).toHaveBeenCalledWith('task-cancel-1', {
+      kind: 'status',
+      payload: { status: 'cancelled' },
+    });
+    expect(mockStore.completeTask).not.toHaveBeenCalled();
+    expect(cancelCoordinator.hasActiveTask()).toBe(false);
+  });
+
+  it('cancels active execution when user closes or cancels the HUD interactive prompt', async () => {
+    let cancelCallback: any;
+    let submitCallback: any;
+    mockHudRunner.openInteractivePrompt = vi.fn().mockImplementation((_app: any, onSubmit: any, onCancel: any) => {
+      submitCallback = onSubmit;
+      cancelCallback = onCancel;
+      return { close: vi.fn() };
+    });
+
+    let capturedSignal: AbortSignal | undefined;
+    const mockRunner = {
+      run: vi.fn().mockImplementation(async (_task: any, _onEvent: any, signal: AbortSignal) => {
+        capturedSignal = signal;
+        return new Promise((resolve) => {
+          signal.addEventListener('abort', () => {
+            resolve({ status: 'done', summary: 'Task cancelled by user' });
+          });
+        });
+      }),
+    };
+
+    const mockStore = {
+      createTask: vi.fn().mockResolvedValue({ id: 'task-prompt-cancel', status: 'queued' }),
+      claimNextTask: vi.fn().mockResolvedValue({ id: 'task-prompt-cancel' }),
+      markTaskRunning: vi.fn().mockResolvedValue({ id: 'task-prompt-cancel' }),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      cancelTask: vi.fn().mockResolvedValue({ id: 'task-prompt-cancel', status: 'cancelled' }),
+      completeTask: vi.fn(),
+    };
+
+    const coordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: mockStore as any,
+      runner: mockRunner as any,
+      autoExecute: true,
+    });
+
+    const promptPromise = coordinator.triggerPrompt('Google Chrome');
+    await submitCallback({ query: 'start ad campaign on facebook', app: 'Google Chrome' }, () => {});
+
+    expect(coordinator.hasActiveTask()).toBe(true);
+
+    cancelCallback();
+    await promptPromise;
+
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(mockStore.cancelTask).toHaveBeenCalledWith('task-prompt-cancel', expect.stringContaining('Spotlight HUD'));
+    expect(coordinator.hasActiveTask()).toBe(false);
+  });
 });

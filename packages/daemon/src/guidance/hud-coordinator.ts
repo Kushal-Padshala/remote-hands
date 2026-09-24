@@ -182,6 +182,8 @@ export class HudCoordinator {
   private autoExecute: boolean;
   private onTaskCreated?: ((task: Task) => Promise<void> | void) | undefined;
   private onTaskCompleted?: ((task: Task, summary: string) => Promise<void> | void) | undefined;
+  private activeExecution?: { taskId: string; abortController: AbortController } | undefined;
+  private currentTaskId?: string | undefined;
 
   constructor(
     hudRunnerOrOptions?: SpotlightHudRunner | HudCoordinatorOptions,
@@ -227,25 +229,80 @@ export class HudCoordinator {
     return undefined;
   }
 
-  async executeTaskStandalone(task: Task, sendUpdate?: HudUpdateSender): Promise<void> {
+  async cancelActiveTask(reason = 'Task cancelled by user from HUD'): Promise<void> {
+    const currentId = this.activeExecution?.taskId || this.currentTaskId;
+    if (this.activeExecution) {
+      const { abortController } = this.activeExecution;
+      abortController.abort();
+      this.activeExecution = undefined;
+    }
+    this.currentTaskId = undefined;
+    if (currentId) {
+      const store = this.getStore();
+      if (store) {
+        if (store.cancelTask) {
+          await store.cancelTask(currentId, reason).catch(() => {});
+        } else {
+          await store.failTask(currentId, { error: reason }).catch(() => {});
+        }
+        if (store.appendEvent) {
+          await store.appendEvent(currentId, {
+            kind: 'status',
+            payload: { status: 'cancelled' },
+          }).catch(() => {});
+        }
+      }
+    }
+  }
+
+  hasActiveTask(): boolean {
+    return this.activeExecution !== undefined || this.currentTaskId !== undefined;
+  }
+
+  async executeTaskStandalone(task: Task, sendUpdate?: HudUpdateSender, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return;
     const store = this.getStore();
     if (!store) return;
-    const claimed = await store.claimNextTask('machine-local');
-    if (!claimed) return;
-    const running = await store.markTaskRunning(claimed.id);
-    await store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
-    if (sendUpdate) {
-      sendUpdate('WORKING', 'Starting autonomous agent execution...');
-    }
-    if (task.kind === 'browser' && process.platform === 'darwin') {
-      this.macosDriver.focusWindow('Google Chrome').catch(() => {});
+
+    const abortController = new AbortController();
+    this.activeExecution = { taskId: task.id, abortController };
+
+    if (signal) {
+      if (signal.aborted) {
+        abortController.abort();
+      } else {
+        signal.addEventListener('abort', () => abortController.abort(), { once: true });
+      }
     }
 
-    const runner = this.runner || new ProcessAgentRunner('agy');
+    let running: Task | undefined;
     try {
+      const claimed = await store.claimNextTask('machine-local');
+      if (!claimed || abortController.signal.aborted) {
+        if (abortController.signal.aborted && store.cancelTask) {
+          await store.cancelTask(task.id, 'Task cancelled by user').catch(() => {});
+        }
+        return;
+      }
+      running = await store.markTaskRunning(claimed.id);
+      if (this.activeExecution) {
+        this.activeExecution.taskId = running.id;
+      }
+      this.currentTaskId = running.id;
+
+      await store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
+
+      if (sendUpdate) {
+        sendUpdate('WORKING', 'Starting autonomous agent execution...');
+      }
+      if (task.kind === 'browser' && process.platform === 'darwin') {
+        this.macosDriver.focusWindow('Google Chrome').catch(() => {});
+      }
+
+      const runner = this.runner || new ProcessAgentRunner('agy');
       const res = await runner.run(running, async (event) => {
         if (store.appendEvent) {
-          await store.appendEvent(running.id, event as any).catch(() => {});
+          await store.appendEvent(running!.id, event as any).catch(() => {});
         }
         if (event && (event.kind === 'tool_call' || (event as any).type === 'tool_call') && process.platform === 'darwin') {
           const payload = event.payload || event;
@@ -271,7 +328,23 @@ export class HudCoordinator {
             sendUpdate(formatted.status, formatted.text, formatted.role);
           }
         }
-      });
+      }, abortController.signal);
+
+      if (abortController.signal.aborted) {
+        if (store.cancelTask) {
+          await store.cancelTask(running.id, 'Task cancelled by user').catch(() => {});
+        } else {
+          await store.failTask(running.id, { error: 'Task cancelled by user' });
+        }
+        if (store.appendEvent) {
+          await store.appendEvent(running.id, {
+            kind: 'status',
+            payload: { status: 'cancelled' },
+          }).catch(() => {});
+        }
+        return;
+      }
+
       if (res.status === 'failed') {
         await store.failTask(running.id, { error: res.summary || 'Task failed' });
         if (sendUpdate) {
@@ -283,13 +356,35 @@ export class HudCoordinator {
           sendUpdate('COMPLETE', res.summary || 'Task completed successfully', 'DONE');
         }
       }
-      if (this.onTaskCompleted) {
+      if (this.onTaskCompleted && !abortController.signal.aborted) {
         await this.onTaskCompleted(running, res.summary);
       }
     } catch (err: any) {
-      await store.failTask(running.id, { error: err?.message || String(err) });
+      const targetId = running?.id || task.id;
+      if (abortController.signal.aborted) {
+        if (store.cancelTask) {
+          await store.cancelTask(targetId, 'Task cancelled by user').catch(() => {});
+        } else {
+          await store.failTask(targetId, { error: 'Task cancelled by user' });
+        }
+        if (store.appendEvent) {
+          await store.appendEvent(targetId, {
+            kind: 'status',
+            payload: { status: 'cancelled' },
+          }).catch(() => {});
+        }
+        return;
+      }
+      await store.failTask(targetId, { error: err?.message || String(err) });
       if (sendUpdate) {
         sendUpdate('FAILED', err?.message || 'Task failed', 'ERROR');
+      }
+    } finally {
+      if (this.activeExecution?.taskId === task.id || (running && this.activeExecution?.taskId === running.id)) {
+        this.activeExecution = undefined;
+      }
+      if (this.currentTaskId === task.id || (running && this.currentTaskId === running.id)) {
+        this.currentTaskId = undefined;
       }
     }
   }
@@ -299,7 +394,7 @@ export class HudCoordinator {
     return this.initDefaultStore() || null;
   }
 
-  async handleResult(result: SpotlightPromptResult, sendUpdate?: HudUpdateSender): Promise<boolean> {
+  async handleResult(result: SpotlightPromptResult, sendUpdate?: HudUpdateSender, signal?: AbortSignal): Promise<boolean> {
     const windowContext = await this.macosDriver.getActiveWindowContext(result.app);
     const isGoal = isAutonomousGoal(result.query);
 
@@ -317,11 +412,12 @@ export class HudCoordinator {
         model: 'gemini-3.8-flash',
         effort: 'low',
       });
+      this.currentTaskId = task.id;
       if (this.onTaskCreated) {
         await this.onTaskCreated(task);
       }
       if (this.autoExecute) {
-        this.executeTaskStandalone(task, sendUpdate).catch(() => {});
+        this.executeTaskStandalone(task, sendUpdate, signal).catch(() => {});
       }
       return true;
     }
@@ -352,16 +448,19 @@ export class HudCoordinator {
     if (typeof this.hudRunner.openInteractivePrompt === 'function') {
       return new Promise<boolean>((resolve) => {
         let settled = false;
+        const promptAbortController = new AbortController();
         this.hudRunner.openInteractivePrompt(
           appOverride,
           async (result, sendUpdate) => {
             if (!settled) {
               settled = true;
             }
-            const success = await this.handleResult(result, sendUpdate);
+            const success = await this.handleResult(result, sendUpdate, promptAbortController.signal);
             resolve(success);
           },
           () => {
+            promptAbortController.abort();
+            this.cancelActiveTask('User cancelled from Spotlight HUD').catch(() => {});
             if (!settled) {
               settled = true;
               resolve(false);
@@ -380,30 +479,49 @@ export class HudCoordinator {
 
   startListening(): { stop: () => void } {
     let activePrompt: { close: () => void } | null = null;
-    return this.hudRunner.startListener(async (event: any) => {
+    let promptAbortController: AbortController | null = null;
+    const runnerListener = this.hudRunner.startListener(async (event: any) => {
       try {
         if (event && event.query) {
           await this.handleResult(event);
         } else if (event && event.event === 'hotkey' && typeof this.hudRunner.openInteractivePrompt === 'function') {
           if (activePrompt) {
+            promptAbortController?.abort();
+            this.cancelActiveTask('New hotkey session started').catch(() => {});
             activePrompt.close();
             activePrompt = null;
           }
+          promptAbortController = new AbortController();
+          const currentController = promptAbortController;
           activePrompt = this.hudRunner.openInteractivePrompt(
             event.app,
             async (result, sendUpdate) => {
               try {
-                await this.handleResult(result, sendUpdate);
+                await this.handleResult(result, sendUpdate, currentController.signal);
               } finally {
                 activePrompt = null;
               }
             },
             () => {
+              currentController.abort();
+              this.cancelActiveTask('User cancelled from Spotlight HUD').catch(() => {});
               activePrompt = null;
             },
           );
         }
       } catch {}
     });
+
+    return {
+      stop: () => {
+        if (activePrompt) {
+          promptAbortController?.abort();
+          this.cancelActiveTask('HUD service stopped').catch(() => {});
+          activePrompt.close();
+          activePrompt = null;
+        }
+        runnerListener.stop();
+      },
+    };
   }
 }

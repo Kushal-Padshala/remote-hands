@@ -142,7 +142,25 @@ export class SpotlightHudRunner {
     });
 
     let submitted = false;
+    let completedNaturally = false;
+    let cancelled = false;
+
+    const triggerCancel = () => {
+      if (!cancelled && !completedNaturally) {
+        cancelled = true;
+        if (onCancel) {
+          try {
+            onCancel();
+          } catch {}
+        }
+      }
+    };
+
     const sendUpdate: HudUpdateSender = (status: string, text: string, role?: string) => {
+      const upper = String(status || '').toUpperCase();
+      if (upper === 'COMPLETE' || upper === 'DONE' || upper === 'FAILED' || upper === 'ERROR') {
+        completedNaturally = true;
+      }
       if (!child.killed && child.stdin && child.stdin.writable) {
         try {
           const payload: any = { status, text };
@@ -170,7 +188,7 @@ export class SpotlightHudRunner {
             };
             Promise.resolve(onSubmit(res, sendUpdate)).catch(() => {});
           } else if (parsed.event === 'cancel') {
-            if (onCancel) onCancel();
+            triggerCancel();
             try {
               child.kill();
             } catch {}
@@ -179,8 +197,23 @@ export class SpotlightHudRunner {
       }
     });
 
+    child.on('close', () => {
+      if (buffer.trim()) {
+        try {
+          const parsed = JSON.parse(buffer.trim());
+          if (parsed.event === 'cancel') {
+            triggerCancel();
+          }
+        } catch {}
+      }
+      if (!completedNaturally) {
+        triggerCancel();
+      }
+    });
+
     return {
       close: () => {
+        triggerCancel();
         try {
           child.kill('SIGTERM');
         } catch {}

@@ -53,4 +53,11 @@ describe('SpotlightHudRunner', () => {
     expect(typeof handle.close).toBe('function');
     handle.close();
   });
+
+  it('triggers onCancel when handle.close is invoked', () => {
+    const onCancel = vi.fn();
+    const handle = runner.openInteractivePrompt('Finder', () => {}, onCancel);
+    handle.close();
+    expect(onCancel).toHaveBeenCalled();
+  });
 });
