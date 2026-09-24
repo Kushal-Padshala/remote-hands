@@ -9,6 +9,11 @@ import { MacOsDriver, type ActiveWindowContext } from '../desktop/macos-driver.j
 import { LocalTaskStore } from '../local-task-store.js';
 import type { TaskStore } from '../task-store.js';
 import { ProcessAgentRunner, type AgentRunner } from '../agy-runner.js';
+import { DynamicPowerManager } from '../system/power-manager.js';
+
+
+
+
 
 export function isAutonomousGoal(query: string): boolean {
   const q = query.toLowerCase().trim();
@@ -170,6 +175,7 @@ export interface HudCoordinatorOptions {
   autoExecute?: boolean | undefined;
   onTaskCreated?: ((task: Task) => Promise<void> | void) | undefined;
   onTaskCompleted?: ((task: Task, summary: string) => Promise<void> | void) | undefined;
+  powerManager?: DynamicPowerManager | undefined;
 }
 
 export class HudCoordinator {
@@ -184,6 +190,7 @@ export class HudCoordinator {
   private onTaskCompleted?: ((task: Task, summary: string) => Promise<void> | void) | undefined;
   private activeExecution?: { taskId: string; abortController: AbortController } | undefined;
   private currentTaskId?: string | undefined;
+  private powerManager?: DynamicPowerManager | undefined;
 
   constructor(
     hudRunnerOrOptions?: SpotlightHudRunner | HudCoordinatorOptions,
@@ -203,6 +210,7 @@ export class HudCoordinator {
       this.autoExecute = opts.autoExecute ?? false;
       this.onTaskCreated = opts.onTaskCreated;
       this.onTaskCompleted = opts.onTaskCompleted;
+      this.powerManager = opts.powerManager || new DynamicPowerManager();
       if (this.store === undefined) {
         this.store = this.initDefaultStore();
       }
@@ -213,11 +221,13 @@ export class HudCoordinator {
       this.macosDriver = macosDriver || new MacOsDriver();
       this.store = store;
       this.autoExecute = false;
+      this.powerManager = new DynamicPowerManager();
       if (!hudRunnerOrOptions && !intentResolver && !guidanceManager && !macosDriver && !store) {
         this.store = this.initDefaultStore();
       }
     }
   }
+
 
   private initDefaultStore(): TaskStore | undefined {
     try {
@@ -230,6 +240,7 @@ export class HudCoordinator {
   }
 
   async cancelActiveTask(reason = 'Task cancelled by user from HUD'): Promise<void> {
+    this.powerManager?.releaseAll();
     const currentId = this.activeExecution?.taskId || this.currentTaskId;
     if (this.activeExecution) {
       const { abortController } = this.activeExecution;
@@ -264,8 +275,10 @@ export class HudCoordinator {
     const store = this.getStore();
     if (!store) return;
 
+    this.powerManager?.startTask();
     const abortController = new AbortController();
     this.activeExecution = { taskId: task.id, abortController };
+
 
     if (signal) {
       if (signal.aborted) {
@@ -380,6 +393,7 @@ export class HudCoordinator {
         sendUpdate('FAILED', err?.message || 'Task failed', 'ERROR');
       }
     } finally {
+      this.powerManager?.endTask();
       if (this.activeExecution?.taskId === task.id || (running && this.activeExecution?.taskId === running.id)) {
         this.activeExecution = undefined;
       }
@@ -387,6 +401,7 @@ export class HudCoordinator {
         this.currentTaskId = undefined;
       }
     }
+
   }
 
   private getStore(): TaskStore | null {
@@ -514,6 +529,7 @@ export class HudCoordinator {
 
     return {
       stop: () => {
+        this.powerManager?.releaseAll();
         if (activePrompt) {
           promptAbortController?.abort();
           this.cancelActiveTask('HUD service stopped').catch(() => {});
@@ -523,5 +539,6 @@ export class HudCoordinator {
         runnerListener.stop();
       },
     };
+
   }
 }

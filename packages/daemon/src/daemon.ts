@@ -7,6 +7,7 @@ import type { BrowserFrame, FrameSource } from './frame-stream.js';
 import { ThrottledFrameStream } from './frame-stream.js';
 import { DefaultFrameSource, cleanupStaleFrameFiles } from './screen-capture.js';
 import type { ChromeManager } from './chrome-manager.js';
+import type { DynamicPowerManager } from './system/power-manager.js';
 
 export interface RunDaemonOnceInput {
   userId: string;
@@ -18,7 +19,9 @@ export interface RunDaemonOnceInput {
   frameSource?: FrameSource | undefined;
   chromeManager?: ChromeManager | undefined;
   lastHeartbeatAtRef?: { current: number } | undefined;
+  powerManager?: DynamicPowerManager | undefined;
 }
+
 
 export type RunDaemonOnceResult =
   | { claimed: false }
@@ -47,7 +50,10 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
   const claimed = await input.store.claimNextTask(machine.id);
   if (claimed === null) return { claimed: false };
 
+  input.powerManager?.startTask();
+
   const running = await input.store.markTaskRunning(claimed.id);
+
   await input.store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
 
   if (running.workspace_path) {
@@ -318,8 +324,10 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
     await input.store.failTask(running.id, { error: message });
     return { claimed: true, taskId: running.id, status: 'failed' };
   } finally {
+    input.powerManager?.endTask();
     clearInterval(cancelPoll);
     if (frameStream) {
+
       frameStream.stop();
     }
     if (typeof (frameSource as any).dispose === 'function') {
