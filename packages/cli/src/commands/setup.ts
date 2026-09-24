@@ -61,7 +61,7 @@ import {
   c,
 } from '../output/ui.js';
 
-import { HudServiceManager, type ChromeManager } from '@remote-hands/daemon';
+import { HudServiceManager, type ChromeManager, type DynamicPowerManager } from '@remote-hands/daemon';
 
 export interface CommandContext {
   stdout?: ((msg: string) => void) | undefined;
@@ -74,6 +74,7 @@ export interface CommandContext {
   configDir?: string | undefined;
   once?: boolean | undefined;
   chromeManager?: ChromeManager | undefined;
+  powerManager?: DynamicPowerManager | undefined;
   client?: any;
   frameSource?: any;
   localStore?: any;

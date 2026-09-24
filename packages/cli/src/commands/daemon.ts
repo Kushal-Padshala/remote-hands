@@ -14,6 +14,7 @@ import {
   ChromeManager,
   LocalServer,
   LocalTaskStore,
+  DynamicPowerManager,
   type ChromeProfileMode,
   type AgentRunner,
 } from '@remote-hands/daemon';
@@ -139,12 +140,17 @@ async function runLocalDaemon(
 
   const staticDir = findWebDist(context.projectRoot);
   const portToUse = parsePort(args, context);
+  const powerManager: DynamicPowerManager = (context as any).powerManager ?? new DynamicPowerManager();
+  let wakeDaemon: (() => void) | null = null;
 
   const localServer = new LocalServer({
     port: portToUse,
     pairingToken,
     store,
     staticDir,
+    onTaskCreated: () => {
+      wakeDaemon?.();
+    },
   });
 
   const actualPort = await localServer.start();
@@ -245,6 +251,7 @@ async function runLocalDaemon(
   const stop = async () => {
     if (!isRunning) return;
     isRunning = false;
+    powerManager.releaseAll();
     if (cloudflaredProc) {
       try {
         cloudflaredProc.kill('SIGTERM');
@@ -269,12 +276,12 @@ async function runLocalDaemon(
   };
 
   let hudListener: { stop: () => void } | null = null;
-  let wakeDaemon: (() => void) | null = null;
   if (process.platform === 'darwin' && !options.once && !args.includes('--no-hotkey') && !context.runner) {
     try {
       const { HudCoordinator } = await import('@remote-hands/daemon');
       const coordinator = new HudCoordinator({
         store,
+        powerManager,
         onTaskCreated: (task) => {
           options.stdout(`\n${c.brightGreen('⚡')} [Spotlight HUD] New task initiated: "${(((task as any).goal || task.prompt) as string).slice(0, 60)}..."`);
           wakeDaemon?.();
@@ -291,6 +298,7 @@ async function runLocalDaemon(
   process.once('SIGTERM', sigHandler);
 
   const lastHeartbeatAtRef = { current: 0 };
+  let idlePollMs = 1000;
   try {
     while (isRunning) {
       try {
@@ -310,6 +318,7 @@ async function runLocalDaemon(
           runner,
           chromeManager,
           lastHeartbeatAtRef,
+          powerManager,
           onFrame: (frame) => {
             localServer.broadcastFrame('primary', frame);
           },
@@ -317,6 +326,7 @@ async function runLocalDaemon(
 
         if (result.claimed) {
           options.stdout(`[Task ${result.taskId}] Completed with status: ${result.status}`);
+          idlePollMs = 1000;
           continue;
         }
       } catch {}
@@ -326,11 +336,15 @@ async function runLocalDaemon(
       }
 
       await Promise.race([
-        new Promise((r) => setTimeout(r, 1000)),
+        new Promise((r) => setTimeout(r, idlePollMs)),
         new Promise((r) => {
-          wakeDaemon = r as () => void;
+          wakeDaemon = () => {
+            idlePollMs = 1000;
+            (r as () => void)();
+          };
         }),
       ]);
+      idlePollMs = Math.min(15000, Math.round(idlePollMs * 1.5));
     }
   } finally {
     process.removeListener('SIGINT', sigHandler);
@@ -406,6 +420,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
   });
 
   const runner: AgentRunner = (context as any).agentRunner ?? new ProcessAgentRunner('agy');
+  const powerManager: DynamicPowerManager = (context as any).powerManager ?? new DynamicPowerManager();
   const runtime = getRuntimeMetadata({
     hostname: () => machineName,
     daemonVersion: '0.1.3',
@@ -460,7 +475,14 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
     stdout(mobileTui);
   } catch {}
 
+  let idlePollMs = 1000;
   let triggerClaim: (() => void) | null = null;
+  const triggerImmediateClaim = () => {
+    idlePollMs = 1000;
+    if (triggerClaim) {
+      triggerClaim();
+    }
+  };
   const waitForNextPoll = (ms: number) =>
     new Promise<void>((resolve) => {
       let timer: any = null;
@@ -475,9 +497,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
 
   if (realtime) {
     realtime.onMessage(() => {
-      if (triggerClaim) {
-        triggerClaim();
-      }
+      triggerImmediateClaim();
     });
   }
 
@@ -506,6 +526,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
   const stop = () => {
     if (!isRunning) return;
     isRunning = false;
+    powerManager.releaseAll();
     clearInterval(heartbeatInterval);
     if (triggerClaim) {
       triggerClaim();
@@ -530,11 +551,10 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
       const { HudCoordinator } = await import('@remote-hands/daemon');
       const coordinator = new HudCoordinator({
         store,
+        powerManager,
         onTaskCreated: (task) => {
           stdout(`\n${c.brightGreen('⚡')} [Spotlight HUD] New task initiated: "${(((task as any).goal || task.prompt) as string).slice(0, 60)}..."`);
-          if (triggerClaim) {
-            triggerClaim();
-          }
+          triggerImmediateClaim();
         },
       });
       hudListener = coordinator.startListening();
@@ -564,10 +584,12 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
           runner,
           chromeManager,
           lastHeartbeatAtRef,
+          powerManager,
         });
 
         if (result.claimed) {
           stdout(`[Task ${result.taskId}] Completed with status: ${result.status}`);
+          idlePollMs = 1000;
           continue;
         }
       } catch {}
@@ -576,7 +598,8 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
         break;
       }
 
-      await waitForNextPoll(1000);
+      await waitForNextPoll(idlePollMs);
+      idlePollMs = Math.min(15000, Math.round(idlePollMs * 1.5));
     }
   } finally {
     stop();

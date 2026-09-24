@@ -2,7 +2,8 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { ChromeManager, type ChromeProfileMode } from '@remote-hands/daemon';
+import { ChromeManager, DynamicPowerManager, type ChromeProfileMode } from '@remote-hands/daemon';
+
 import { setupCommand, type CommandContext } from './setup.js';
 import { daemonCommand } from './daemon.js';
 import { c } from '../output/ui.js';
@@ -82,7 +83,12 @@ export async function startCommand(args: string[], context: CommandContext = {})
   );
   const hr = '─'.repeat(termWidth - 2);
 
+  const powerManager: DynamicPowerManager = (context as any).powerManager ?? new DynamicPowerManager();
+  powerManager.cleanupOrphanedAssertions();
+  context.powerManager = powerManager;
+
   const restoreSleep = () => {
+    powerManager.releaseAll();
     if (caffeinateProc) {
       try {
         caffeinateProc.kill('SIGKILL');
@@ -108,7 +114,8 @@ export async function startCommand(args: string[], context: CommandContext = {})
     }
   };
 
-  if (!noClamshell && !runner && process.env.NODE_ENV !== 'test') {
+  const forceClamshell = args.includes('--force-clamshell') || args.includes('--permanent-sleep-prevent');
+  if (forceClamshell && !runner && process.env.NODE_ENV !== 'test') {
     if (process.platform === 'darwin') {
       const fdaGranted = checkMacFullDiskAccess();
       const hostApp = detectHostAppName();
@@ -118,7 +125,6 @@ export async function startCommand(args: string[], context: CommandContext = {})
           c.yellow(`╭─ ${c.bold('🔒 Administrator Password Required (macOS)')} ${'─'.repeat(Math.max(2, termWidth - 46))}\n`) +
           `${c.yellow('│')}  ${c.white('Please enter your Mac password to enable lid-closed sleep prevention.')}\n` +
           `${c.yellow('│')}  ${c.dim('Allows your MacBook to run agent tasks with the lid closed (pmset disablesleep=1).')}\n` +
-          `${c.yellow('│')}  ${c.dim('Run "rh start --no-clamshell" or "rh daemon" to run without password.')}\n` +
           (!fdaGranted
             ? `${c.yellow('│')}  ${c.dim(`Tip: Grant Full Disk Access to ${hostApp} to skip permission dialogs.`)}\n`
             : '') +
@@ -132,32 +138,24 @@ export async function startCommand(args: string[], context: CommandContext = {})
           clamshellActive = true;
         }
       } catch {}
-
-      try {
-        caffeinateProc = spawn('caffeinate', ['-dims'], {
-          detached: true,
-          stdio: 'ignore',
-        });
-        caffeinateProc.unref();
-      } catch {}
-    } else if (process.platform === 'win32') {
-      stdout(
-        '\n' +
-          c.yellow(`╭─ ${c.bold('⚡ Windows Power Management')} ${'─'.repeat(Math.max(2, termWidth - 30))}\n`) +
-          `${c.yellow('│')}  ${c.white('Configuring Windows power state to keep system awake during tasks.')}\n` +
-          `${c.yellow('│')}  ${c.dim('If prompted by Windows User Account Control (UAC), please approve.')}\n` +
-          c.yellow(`╰${hr}\n`),
-      );
     } else if (process.platform === 'linux') {
       stdout(
         '\n' +
           c.yellow(`╭─ ${c.bold('🔒 Administrator Password Required (Linux)')} ${'─'.repeat(Math.max(2, termWidth - 46))}\n`) +
           `${c.yellow('│')}  ${c.white('Please enter your Linux password if prompted to inhibit system suspend.')}\n` +
-          `${c.yellow('│')}  ${c.dim('Run "rh start --no-clamshell" or "rh daemon" to run without password.')}\n` +
           c.yellow(`╰${hr}\n`),
       );
     }
+  } else if (!runner && process.env.NODE_ENV !== 'test' && process.platform === 'darwin') {
+    stdout(
+      '\n' +
+        c.cyan(`╭─ ${c.bold('🍃 Eco-Sleep Thermal Mode Active')} ${'─'.repeat(Math.max(2, termWidth - 36))}\n`) +
+        `${c.cyan('│')}  ${c.brightGreen('✔')} ${c.green('Mac stays cool at 0% idle CPU with normal display sleep enabled.')}\n` +
+        `${c.cyan('│')}  ${c.brightGreen('✔')} ${c.green('Dynamic wake assertion engages instantly when an agent task arrives.')}\n` +
+        c.cyan(`╰${hr}\n`),
+    );
   }
+
 
   if (process.platform === 'darwin' && !runner && !once && !args.includes('--skip-permissions')) {
     await ensureMacPermissions(stdout, termWidth);
