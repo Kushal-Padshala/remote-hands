@@ -231,12 +231,27 @@ export class HudCoordinator {
     if (sendUpdate) {
       sendUpdate('WORKING', 'Starting autonomous agent execution...');
     }
+    if (task.kind === 'browser' && process.platform === 'darwin') {
+      this.macosDriver.focusWindow('Google Chrome').catch(() => {});
+    }
 
     const runner = this.runner || new ProcessAgentRunner('agy');
     try {
       const res = await runner.run(running, async (event) => {
         if (store.appendEvent) {
           await store.appendEvent(running.id, event as any).catch(() => {});
+        }
+        if (event && (event.kind === 'tool_call' || (event as any).type === 'tool_call') && process.platform === 'darwin') {
+          const payload = event.payload || event;
+          const tool = String((payload as any).tool || '').toLowerCase();
+          if (tool.includes('browser')) {
+            this.macosDriver.focusWindow('Google Chrome').catch(() => {});
+          } else if (tool.includes('desktop')) {
+            const targetApp = (payload as any).input?.app;
+            if (targetApp && typeof targetApp === 'string') {
+              this.macosDriver.focusWindow(targetApp).catch(() => {});
+            }
+          }
         }
         if (sendUpdate) {
           const formatted = formatHudStatus(event);

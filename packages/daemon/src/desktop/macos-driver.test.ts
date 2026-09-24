@@ -57,14 +57,24 @@ describe('MacOsDriver', () => {
     const execMock = vi.fn().mockReturnValue({ stdout: '', stderr: '', status: 0 });
     const driver = new MacOsDriver({ exec: execMock });
     await driver.focusWindow('Safari');
-    expect(execMock).toHaveBeenCalledWith('osascript', ['-e', 'tell application "Safari" to activate']);
+    expect(execMock).toHaveBeenCalledWith('osascript', [
+      '-e',
+      'tell application "Safari" to activate',
+      '-e',
+      'tell application "System Events" to set frontmost of process "Safari" to true',
+    ]);
   });
 
   it('escapes quotes and backslashes in focusWindow', async () => {
     const execMock = vi.fn().mockReturnValue({ stdout: '', stderr: '', status: 0 });
     const driver = new MacOsDriver({ exec: execMock });
     await driver.focusWindow('App\\"Quote');
-    expect(execMock).toHaveBeenCalledWith('osascript', ['-e', 'tell application "App\\\\\\"Quote" to activate']);
+    expect(execMock).toHaveBeenCalledWith('osascript', [
+      '-e',
+      'tell application "App\\\\\\"Quote" to activate',
+      '-e',
+      'tell application "System Events" to set frontmost of process "App\\\\\\"Quote" to true',
+    ]);
   });
 
   it('closes window via keystroke', async () => {

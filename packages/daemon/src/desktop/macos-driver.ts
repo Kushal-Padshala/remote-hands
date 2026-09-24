@@ -180,8 +180,13 @@ export class MacOsDriver {
   }
 
   async focusWindow(appName: string): Promise<void> {
-    const script = `tell application "${escapeAppleScript(appName)}" to activate`;
-    this.exec('osascript', ['-e', script]);
+    const escaped = escapeAppleScript(appName);
+    this.exec('osascript', [
+      '-e',
+      `tell application "${escaped}" to activate`,
+      '-e',
+      `tell application "System Events" to set frontmost of process "${escaped}" to true`,
+    ]);
   }
 
   async closeWindow(appName: string): Promise<void> {

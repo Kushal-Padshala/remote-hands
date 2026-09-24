@@ -19,6 +19,9 @@ vi.mock('@remote-hands/daemon', () => ({
   ChromeManager: class {
     ensureRunning = vi.fn().mockResolvedValue({ available: true });
   },
+  MacOsDriver: class {
+    focusWindow = vi.fn().mockResolvedValue(undefined);
+  },
 }));
 
 const mockSpawn = vi.fn();

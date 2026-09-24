@@ -253,4 +253,35 @@ describe('HudCoordinator', () => {
       text: 'Analyzing context and initializing agent...',
     });
   });
+
+  it('focuses window on browser task start and on tool call events', async () => {
+    mockMacOsDriver.focusWindow = vi.fn().mockResolvedValue(undefined);
+    const mockRunner = {
+      run: vi.fn().mockImplementation(async (_task: any, onEvent: any) => {
+        await onEvent({ kind: 'tool_call', payload: { tool: 'browser' } });
+        await onEvent({ kind: 'tool_call', payload: { tool: 'desktop', input: { app: 'Notes' } } });
+        return { status: 'success', summary: 'done' };
+      }),
+    };
+
+    const mockStore = {
+      claimNextTask: vi.fn().mockResolvedValue({ id: 'task-1' }),
+      markTaskRunning: vi.fn().mockResolvedValue({ id: 'task-1', kind: 'browser' }),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const testCoordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: mockStore as any,
+      runner: mockRunner as any,
+    });
+
+    await testCoordinator.executeTaskStandalone({ id: 'task-1', kind: 'browser' } as any);
+    expect(mockMacOsDriver.focusWindow).toHaveBeenCalledWith('Google Chrome');
+    expect(mockMacOsDriver.focusWindow).toHaveBeenCalledWith('Notes');
+  });
 });

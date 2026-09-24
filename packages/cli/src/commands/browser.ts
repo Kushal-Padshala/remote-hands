@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import { BrowserDriver, ChromeManager } from '@remote-hands/daemon';
+import { BrowserDriver, ChromeManager, MacOsDriver } from '@remote-hands/daemon';
 import type { CommandContext } from './setup.js';
 
 export function findChromeBinary(): string {
@@ -45,6 +45,16 @@ export async function ensureChromeAutomationReady(options?: { headless?: boolean
   return status.available;
 }
 
+function focusChrome(context?: CommandContext, isHeadless?: boolean): void {
+  if (isHeadless || process.platform !== 'darwin') return;
+  try {
+    const driver = (context as any)?.desktopDriver || (typeof MacOsDriver === 'function' ? new MacOsDriver() : null);
+    if (driver && typeof driver.focusWindow === 'function') {
+      driver.focusWindow('Google Chrome').catch(() => {});
+    }
+  } catch {}
+}
+
 export async function browserCommand(args: string[], context: CommandContext = {}): Promise<number> {
   const stdout = context.stdout ?? console.log;
   const stderr = context.stderr ?? console.error;
@@ -85,6 +95,7 @@ export async function browserCommand(args: string[], context: CommandContext = {
     try {
       const driver = new BrowserDriver({ cdpUrl });
       const res = await driver.clickIndex(index);
+      focusChrome(context, isHeadless);
       stdout(`Clicked [${index}] ${res.label}`);
       return 0;
     } catch (err: any) {
@@ -104,6 +115,7 @@ export async function browserCommand(args: string[], context: CommandContext = {
     try {
       const driver = new BrowserDriver({ cdpUrl });
       const res = await driver.typeIndex(index, textArg);
+      focusChrome(context, isHeadless);
       stdout(`Typed "${textArg}" into [${index}] ${res.label}`);
       return 0;
     } catch (err: any) {
@@ -127,6 +139,7 @@ export async function browserCommand(args: string[], context: CommandContext = {
     try {
       const driver = new BrowserDriver({ cdpUrl });
       const res = await driver.openUrl(urlArg);
+      focusChrome(context, isHeadless);
       stdout(`Opened ${res.url}`);
       return 0;
     } catch (err: any) {
