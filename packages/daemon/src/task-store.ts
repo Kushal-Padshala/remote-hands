@@ -41,6 +41,7 @@ export interface TaskStore {
   completeTask(taskId: string, input: CompleteTaskInput): Promise<Task>;
   failTask(taskId: string, input: FailTaskInput): Promise<Task>;
   getTask?(taskId: string): Promise<Task | null>;
+  createTask?(input: any): Promise<Task>;
   cancelTask?(taskId: string, reason?: string): Promise<Task>;
   pushFrame?(taskId: string, frame: { jpegBase64: string; capturedAt: string }): Promise<void>;
   getLatestFrame?(taskId: string): Promise<{ jpegBase64: string; capturedAt: string } | null>;

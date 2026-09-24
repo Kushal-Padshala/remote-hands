@@ -9,6 +9,13 @@ export interface WindowInfo {
   id?: number;
 }
 
+export interface ActiveWindowContext {
+  app: string;
+  title: string;
+  url: string;
+  isBrowser: boolean;
+}
+
 export interface CaptureScreenshotOptions {
   destPath?: string | undefined;
   maxWidth?: number | undefined;
@@ -93,6 +100,82 @@ export class MacOsDriver {
       return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
+    }
+  }
+
+  async getActiveWindowContext(appOverride?: string): Promise<ActiveWindowContext> {
+    const script = `
+      (() => {
+        const se = Application("System Events");
+        const procs = se.applicationProcesses.where({ frontmost: true });
+        const frontApp = procs.length > 0 ? procs[0] : null;
+        let appName = frontApp ? frontApp.name() : "Desktop";
+        ${appOverride ? `appName = ${JSON.stringify(appOverride)};` : ''}
+        let winTitle = "";
+        try {
+          const appProc = se.applicationProcesses.byName(appName);
+          if (appProc && appProc.windows.length > 0) {
+            winTitle = appProc.windows[0].name() || "";
+          }
+        } catch (_) {}
+
+        let url = "";
+        try {
+          if (/chrome/i.test(appName)) {
+            const chrome = Application("Google Chrome");
+            if (chrome.running() && chrome.windows.length > 0) {
+              url = chrome.windows[0].activeTab.url() || "";
+              if (!winTitle) winTitle = chrome.windows[0].activeTab.title() || "";
+            }
+          } else if (/safari/i.test(appName)) {
+            const safari = Application("Safari");
+            if (safari.running() && safari.documents.length > 0) {
+              url = safari.documents[0].url() || "";
+              if (!winTitle) winTitle = safari.documents[0].name() || "";
+            }
+          } else if (/arc/i.test(appName)) {
+            const arc = Application("Arc");
+            if (arc.running() && arc.windows.length > 0) {
+              url = arc.windows[0].activeTab.url() || "";
+              if (!winTitle) winTitle = arc.windows[0].activeTab.title() || "";
+            }
+          } else if (/brave/i.test(appName)) {
+            const brave = Application("Brave Browser");
+            if (brave.running() && brave.windows.length > 0) {
+              url = brave.windows[0].activeTab.url() || "";
+              if (!winTitle) winTitle = brave.windows[0].activeTab.title() || "";
+            }
+          } else if (/edge/i.test(appName)) {
+            const edge = Application("Microsoft Edge");
+            if (edge.running() && edge.windows.length > 0) {
+              url = edge.windows[0].activeTab.url() || "";
+              if (!winTitle) winTitle = edge.windows[0].activeTab.title() || "";
+            }
+          }
+        } catch (_) {}
+
+        const isBrowser = /chrome|safari|arc|brave|edge|firefox|opera|browser/i.test(appName) || Boolean(url);
+        return JSON.stringify({ app: appName, title: winTitle, url, isBrowser });
+      })()
+    `;
+    const res = this.exec('osascript', ['-l', 'JavaScript', '-e', script]);
+    try {
+      const parsed = JSON.parse(res.stdout.trim());
+      return {
+        app: parsed.app || appOverride || 'Desktop',
+        title: parsed.title || '',
+        url: parsed.url || '',
+        isBrowser: Boolean(parsed.isBrowser),
+      };
+    } catch {
+      const fallbackApp = appOverride || 'Desktop';
+      const isBrowser = /chrome|safari|arc|brave|edge|firefox|opera|browser/i.test(fallbackApp);
+      return {
+        app: fallbackApp,
+        title: '',
+        url: '',
+        isBrowser,
+      };
     }
   }
 

@@ -211,4 +211,30 @@ describe('MacOsDriver', () => {
     const buf = await driver.captureScreenshot({ destPath: '/nonexistent/path/out.jpg' });
     expect(buf).toBeNull();
   });
+
+  it('retrieves active browser window context including URL and title', async () => {
+    const mockOutput = JSON.stringify({
+      app: 'Google Chrome',
+      title: 'Real Estate Campaign Manager',
+      url: 'https://ads.example.com/campaigns/new',
+      isBrowser: true,
+    });
+    const execMock = vi.fn().mockReturnValue({ stdout: mockOutput, stderr: '', status: 0 });
+    const driver = new MacOsDriver({ exec: execMock });
+    const context = await driver.getActiveWindowContext('Google Chrome');
+    expect(context.app).toBe('Google Chrome');
+    expect(context.title).toBe('Real Estate Campaign Manager');
+    expect(context.url).toBe('https://ads.example.com/campaigns/new');
+    expect(context.isBrowser).toBe(true);
+  });
+
+  it('falls back safely when getActiveWindowContext jxa throws or fails', async () => {
+    const execMock = vi.fn().mockReturnValue({ stdout: '', stderr: 'error', status: 1 });
+    const driver = new MacOsDriver({ exec: execMock });
+    const context = await driver.getActiveWindowContext('Arc');
+    expect(context.app).toBe('Arc');
+    expect(context.title).toBe('');
+    expect(context.url).toBe('');
+    expect(context.isBrowser).toBe(true);
+  });
 });
