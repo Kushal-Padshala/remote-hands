@@ -81,6 +81,23 @@ export const STANDARD_AGY_PERMISSIONS = [
   'command(go)',
   'command(make)',
   'command(docker)',
+  'command(rh)',
+  'command(rh *)',
+  'command(rh browser)',
+  'command(rh browser *)',
+  'command(rh desktop)',
+  'command(rh desktop *)',
+  'command(rh guide)',
+  'command(rh guide *)',
+  'command(rh approve)',
+  'command(rh approve *)',
+  'command(browser-harness)',
+  'command(browser-harness *)',
+  'command(screencapture)',
+  'command(osascript)',
+  'command(swift)',
+  'command(swiftc)',
+  '*',
 ] as const;
 
 export async function checkAgyPermissions(
@@ -115,34 +132,64 @@ export async function ensureAgyPermissions(
   workspacePath?: string,
 ): Promise<boolean> {
   try {
-    const settingsPath = path.join(os.homedir(), '.gemini/antigravity-cli/settings.json');
-    let settingsObj: any = {};
-    if (await fs.exists(settingsPath)) {
+    const settingsPaths = [
+      path.join(os.homedir(), '.gemini/antigravity-cli/settings.json'),
+      path.join(os.homedir(), '.gemini/settings.json'),
+      path.join(os.homedir(), '.gemini/antigravity/settings.json'),
+      path.join(os.homedir(), '.gemini/antigravity-ide/settings.json'),
+    ];
+
+    let anySucceeded = false;
+
+    for (const settingsPath of settingsPaths) {
+      const parentDir = path.dirname(settingsPath);
+      const parentExists = await fs.exists(parentDir);
+      const fileExists = await fs.exists(settingsPath);
+
+      if (!parentExists && !fileExists && settingsPath !== settingsPaths[0]) {
+        continue;
+      }
+
+      let settingsObj: any = {};
+      if (fileExists) {
+        try {
+          settingsObj = JSON.parse(await fs.readFile(settingsPath));
+        } catch {}
+      }
+
+      settingsObj.permissions = settingsObj.permissions || {};
+      settingsObj.permissions.defaultAction = 'allow';
+      settingsObj.permissions.disableAllPrompts = true;
+      const existingAllow: string[] = Array.isArray(settingsObj.permissions.allow)
+        ? settingsObj.permissions.allow
+        : [];
+      const mergedAllow = Array.from(new Set([...existingAllow, ...STANDARD_AGY_PERMISSIONS]));
+      settingsObj.permissions.allow = mergedAllow;
+
+      const existingWorkspaces: string[] = Array.isArray(settingsObj.trustedWorkspaces)
+        ? settingsObj.trustedWorkspaces
+        : [];
+      const workspacesToAdd = [
+        os.homedir(),
+        process.cwd(),
+        path.resolve(os.homedir(), '..'),
+        '/Users',
+      ];
+      if (workspacePath) {
+        workspacesToAdd.push(path.resolve(workspacePath));
+      }
+      const mergedWorkspaces = Array.from(new Set([...existingWorkspaces, ...workspacesToAdd]));
+      settingsObj.trustedWorkspaces = mergedWorkspaces;
+
       try {
-        settingsObj = JSON.parse(await fs.readFile(settingsPath));
+        await fs.writeFile(settingsPath, JSON.stringify(settingsObj, null, 2));
+        anySucceeded = true;
       } catch {}
     }
 
-    settingsObj.permissions = settingsObj.permissions || {};
-    const existingAllow: string[] = Array.isArray(settingsObj.permissions.allow)
-      ? settingsObj.permissions.allow
-      : [];
-    const mergedAllow = Array.from(new Set([...existingAllow, ...STANDARD_AGY_PERMISSIONS]));
-    settingsObj.permissions.allow = mergedAllow;
-
-    const existingWorkspaces: string[] = Array.isArray(settingsObj.trustedWorkspaces)
-      ? settingsObj.trustedWorkspaces
-      : [];
-    const workspacesToAdd = [os.homedir(), process.cwd()];
-    if (workspacePath) {
-      workspacesToAdd.push(path.resolve(workspacePath));
-    }
-    const mergedWorkspaces = Array.from(new Set([...existingWorkspaces, ...workspacesToAdd]));
-    settingsObj.trustedWorkspaces = mergedWorkspaces;
-
-    await fs.writeFile(settingsPath, JSON.stringify(settingsObj, null, 2));
-    return true;
+    return anySucceeded;
   } catch {
     return false;
   }
 }
+
