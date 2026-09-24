@@ -427,5 +427,66 @@ describe('Setup Command Flow', () => {
     expect(executedCommands.some((c) => c.includes('wrangler'))).toBe(false);
     expect(files['/config/daemon.json']).toContain('"mode": "local"');
     expect(outputLines.join('\n')).toContain('Zero-account local setup complete!');
+    expect(outputLines.join('\n')).toContain('Desktop Overlay Assistant installed and active');
+    expect(outputLines.join('\n')).toContain('1. Desktop Use (Active now):');
+    expect(outputLines.join('\n')).toContain('2. Remote Mobile Use:');
+  });
+
+  it('installs desktop overlay assistant with injected service manager', async () => {
+    const outputLines: string[] = [];
+    const mockService = {
+      install: vi.fn().mockReturnValue({ success: true, plistPath: '/test/hud.plist' }),
+      isInstalled: vi.fn().mockReturnValue(true),
+      isRunning: vi.fn().mockReturnValue(true),
+    };
+
+    const mockRunner: CommandRunner = async () => ({ exitCode: 0, stdout: '', stderr: '' });
+    const mockFs: FileSystemAdapter = {
+      readFile: async () => '',
+      writeFile: async () => {},
+      exists: async () => true,
+    };
+
+    const exitCode = await setupCommand(['--local'], {
+      stdout: (line) => outputLines.push(line),
+      runner: mockRunner,
+      fs: mockFs,
+      hudServiceManager: mockService,
+      projectRoot: '/project',
+      configDir: '/config',
+    });
+
+    expect(exitCode).toBe(0);
+    expect(mockService.install).toHaveBeenCalled();
+    expect(outputLines.join('\n')).toContain('Desktop Overlay Assistant installed and active');
+  });
+
+  it('skips desktop overlay assistant when --no-hud flag is provided', async () => {
+    const outputLines: string[] = [];
+    const mockService = {
+      install: vi.fn(),
+      isInstalled: vi.fn().mockReturnValue(false),
+      isRunning: vi.fn().mockReturnValue(false),
+    };
+
+    const mockRunner: CommandRunner = async () => ({ exitCode: 0, stdout: '', stderr: '' });
+    const mockFs: FileSystemAdapter = {
+      readFile: async () => '',
+      writeFile: async () => {},
+      exists: async () => true,
+    };
+
+    const exitCode = await setupCommand(['--local', '--no-hud'], {
+      stdout: (line) => outputLines.push(line),
+      runner: mockRunner,
+      fs: mockFs,
+      hudServiceManager: mockService,
+      projectRoot: '/project',
+      configDir: '/config',
+    });
+
+    expect(exitCode).toBe(0);
+    expect(mockService.install).not.toHaveBeenCalled();
+    expect(outputLines.join('\n')).toContain('Desktop Overlay installation skipped');
   });
 });

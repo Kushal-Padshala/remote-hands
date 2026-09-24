@@ -9,6 +9,7 @@ import { browserCommand } from './commands/browser.js';
 import { profilesCommand } from './commands/profiles.js';
 import { approveCommand } from './commands/approve.js';
 import { desktopCommand } from './commands/desktop.js';
+import { hudCommand } from './commands/hud.js';
 import { guideCommand, executeGuideCommand } from './commands/guide.js';
 
 export {
@@ -22,6 +23,7 @@ export {
   profilesCommand,
   approveCommand,
   desktopCommand,
+  hudCommand,
   guideCommand,
   executeGuideCommand,
   type CommandContext,
@@ -41,6 +43,7 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
     stdout('  pair     Display phone pairing QR code and direct link');
     stdout('  daemon   Run the local execution daemon');
     stdout('  desktop  Control native desktop applications and GUI automation');
+    stdout('  hud      Manage desktop overlay assistant and hotkey background service');
     stdout('  browser  Run headless browser automation bridge with live screen streaming');
     stdout('  guide    Interactive visual guidance and annotation overlays');
     stdout('  approve  Request human-in-the-loop approval on the mobile app');
@@ -62,6 +65,10 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
 
   if (command === 'desktop') {
     return await desktopCommand(args, context);
+  }
+
+  if (command === 'hud') {
+    return await hudCommand(args, context);
   }
 
   if (command === 'browser') {
@@ -121,6 +128,10 @@ if (isEntrypoint()) {
     });
   } else if (binaryName === 'rh-desktop') {
     desktopCommand(process.argv.slice(2)).then((code) => {
+      if (code !== 0) process.exit(code);
+    });
+  } else if (binaryName === 'rh-hud') {
+    hudCommand(process.argv.slice(2)).then((code) => {
       if (code !== 0) process.exit(code);
     });
   } else if (binaryName === 'rh-guide') {

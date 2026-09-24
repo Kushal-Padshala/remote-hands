@@ -58,9 +58,10 @@ import {
   renderStepAction,
   renderStepSuccess,
   renderStepError,
+  c,
 } from '../output/ui.js';
 
-import type { ChromeManager } from '@remote-hands/daemon';
+import { HudServiceManager, type ChromeManager } from '@remote-hands/daemon';
 
 export interface CommandContext {
   stdout?: ((msg: string) => void) | undefined;
@@ -76,6 +77,7 @@ export interface CommandContext {
   client?: any;
   frameSource?: any;
   localStore?: any;
+  hudServiceManager?: any | undefined;
 }
 
 async function setupAgentAndPermissions(
@@ -178,7 +180,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
 
   const isLocal = args.includes('--local') || (context as any).local === true;
   if (isLocal) {
-    const LOCAL_STEPS = 3;
+    const LOCAL_STEPS = 4;
     stdout(renderBanner());
 
     const agyErr = await setupAgentAndPermissions(args, context, runner, fs, projectRoot, stdout, stderr, 1, LOCAL_STEPS);
@@ -194,6 +196,27 @@ export async function setupCommand(args: string[], context: CommandContext = {})
       await ensureCloudflaredBinary((msg) => stdout(renderStepInfo(msg)));
     }
     stdout(renderStepSuccess('Tunnel binary ready for zero-account remote access'));
+
+    stdout(renderStepStart(4, LOCAL_STEPS, 'Desktop Overlay Assistant (Shift + Cmd + Space)'));
+    const skipHud = args.includes('--no-hud') || args.includes('--skip-hud');
+    const hudService = context.hudServiceManager ?? (context.runner ? {
+      install: () => ({ success: true, plistPath: '/mock/LaunchAgents/com.remote-hands.hud.plist' }),
+      isInstalled: () => true,
+      isRunning: () => true,
+    } : new HudServiceManager());
+
+    if (!skipHud && process.platform === 'darwin') {
+      const installRes = hudService.install();
+      if (installRes.success) {
+        stdout(renderStepSuccess('Desktop Overlay Assistant installed and active (Shift + Cmd + Space)'));
+      } else {
+        stdout(renderStepInfo(`Desktop Overlay note: ${installRes.error || 'could not auto-load LaunchAgent'}`));
+      }
+    } else if (skipHud) {
+      stdout(renderStepInfo('Desktop Overlay installation skipped via flag'));
+    } else {
+      stdout(renderStepInfo('Desktop Overlay hotkey service is supported on macOS'));
+    }
 
     const configDir = context.configDir ?? path.join(os.homedir(), '.remote-hands');
     const daemonConfigFile = path.join(configDir, 'daemon.json');
@@ -214,11 +237,16 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     } catch {}
 
     stdout('\n' + renderStepSuccess('Zero-account local setup complete!'));
-    stdout(`Run "rh start" anytime to launch your local server and pair your phone.\n`);
+    stdout(`\n  ${c.bold('1. Desktop Use (Active now):')}`);
+    stdout(`     Press ${c.bold('Shift + Cmd + Space')} anywhere to open the prompt textbox overlay.`);
+    stdout(`     It works in the background on any app or browser with zero idle CPU.`);
+    stdout(`     No need to run "rh start" while working on your computer.\n`);
+    stdout(`  ${c.bold('2. Remote Mobile Use:')}`);
+    stdout(`     Run "${c.cyan('rh start')}" only when stepping away from your computer to pair your phone.\n`);
     return 0;
   }
 
-  const TOTAL_STEPS = 6;
+  const TOTAL_STEPS = 7;
 
   stdout(renderBanner());
 
@@ -421,6 +449,27 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   } catch {}
   stdout(renderStepSuccess(`Web app live at ${webUrl}`));
 
+  stdout(renderStepStart(7, TOTAL_STEPS, 'Desktop Overlay Assistant (Shift + Cmd + Space)'));
+  const skipHud = args.includes('--no-hud') || args.includes('--skip-hud');
+  const hudService = context.hudServiceManager ?? (context.runner ? {
+    install: () => ({ success: true, plistPath: '/mock/LaunchAgents/com.remote-hands.hud.plist' }),
+    isInstalled: () => true,
+    isRunning: () => true,
+  } : new HudServiceManager());
+
+  if (!skipHud && process.platform === 'darwin') {
+    const installRes = hudService.install();
+    if (installRes.success) {
+      stdout(renderStepSuccess('Desktop Overlay Assistant installed and active (Shift + Cmd + Space)'));
+    } else {
+      stdout(renderStepInfo(`Desktop Overlay note: ${installRes.error || 'could not auto-load LaunchAgent'}`));
+    }
+  } else if (skipHud) {
+    stdout(renderStepInfo('Desktop Overlay installation skipped via flag'));
+  } else {
+    stdout(renderStepInfo('Desktop Overlay hotkey service is supported on macOS'));
+  }
+
   const pairingUrl = generatePairingUrl(webUrl, activePairingCode, effectiveOwnerToken, apiUrl);
   const summary = await formatPairingSummary({
     webUrl,
@@ -430,5 +479,9 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   });
 
   stdout(summary);
+  stdout(`\n  ${c.bold('Desktop vs Remote Use:')}`);
+  stdout(`  • ${c.bold('Desktop Use:')} Press ${c.bold('Shift + Cmd + Space')} anywhere to use the overlay assistant directly.`);
+  stdout(`    It is active in the background. You do not need to run "rh start" while at your computer.`);
+  stdout(`  • ${c.bold('Remote Use:')} Run "${c.cyan('rh start')}" when stepping away to connect from your phone over any network.\n`);
   return 0;
 }

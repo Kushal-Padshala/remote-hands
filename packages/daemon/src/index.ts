@@ -37,3 +37,4 @@ export * from './guidance/guidance-manager.js';
 export * from './desktop/spotlight-hud.js';
 export * from './guidance/intent-resolver.js';
 export * from './guidance/hud-coordinator.js';
+export * from './desktop/hud-service.js';

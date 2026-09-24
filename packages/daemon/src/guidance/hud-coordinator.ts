@@ -8,6 +8,7 @@ import { GuidanceManager } from './guidance-manager.js';
 import { MacOsDriver, type ActiveWindowContext } from '../desktop/macos-driver.js';
 import { LocalTaskStore } from '../local-task-store.js';
 import type { TaskStore } from '../task-store.js';
+import { ProcessAgentRunner, type AgentRunner } from '../agy-runner.js';
 
 export function isAutonomousGoal(query: string): boolean {
   const q = query.toLowerCase().trim();
@@ -92,7 +93,10 @@ export interface HudCoordinatorOptions {
   guidanceManager?: GuidanceManager | undefined;
   macosDriver?: MacOsDriver | undefined;
   store?: TaskStore | undefined;
+  runner?: AgentRunner | undefined;
+  autoExecute?: boolean | undefined;
   onTaskCreated?: ((task: Task) => Promise<void> | void) | undefined;
+  onTaskCompleted?: ((task: Task, summary: string) => Promise<void> | void) | undefined;
 }
 
 export class HudCoordinator {
@@ -101,7 +105,10 @@ export class HudCoordinator {
   private guidanceManager: GuidanceManager;
   private macosDriver: MacOsDriver;
   private store?: TaskStore | undefined;
+  private runner?: AgentRunner | undefined;
+  private autoExecute: boolean;
   private onTaskCreated?: ((task: Task) => Promise<void> | void) | undefined;
+  private onTaskCompleted?: ((task: Task, summary: string) => Promise<void> | void) | undefined;
 
   constructor(
     hudRunnerOrOptions?: SpotlightHudRunner | HudCoordinatorOptions,
@@ -117,7 +124,10 @@ export class HudCoordinator {
       this.guidanceManager = opts.guidanceManager || new GuidanceManager();
       this.macosDriver = opts.macosDriver || new MacOsDriver();
       this.store = opts.store;
+      this.runner = opts.runner;
+      this.autoExecute = opts.autoExecute ?? false;
       this.onTaskCreated = opts.onTaskCreated;
+      this.onTaskCompleted = opts.onTaskCompleted;
       if (this.store === undefined) {
         this.store = this.initDefaultStore();
       }
@@ -127,6 +137,7 @@ export class HudCoordinator {
       this.guidanceManager = guidanceManager || new GuidanceManager();
       this.macosDriver = macosDriver || new MacOsDriver();
       this.store = store;
+      this.autoExecute = false;
       if (!hudRunnerOrOptions && !intentResolver && !guidanceManager && !macosDriver && !store) {
         this.store = this.initDefaultStore();
       }
@@ -141,6 +152,39 @@ export class HudCoordinator {
       }
     } catch {}
     return undefined;
+  }
+
+  async executeTaskStandalone(task: Task): Promise<void> {
+    const store = this.getStore();
+    if (!store) return;
+    const claimed = await store.claimNextTask('machine-local');
+    if (!claimed) return;
+    const running = await store.markTaskRunning(claimed.id);
+    await store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
+
+    const runner = this.runner || new ProcessAgentRunner('agy');
+    try {
+      const res = await runner.run(running, async (event) => {
+        if (store.appendEvent) {
+          await store.appendEvent(running.id, event as any).catch(() => {});
+        }
+      });
+      if (res.status === 'failed') {
+        await store.failTask(running.id, { error: res.summary || 'Task failed' });
+      } else {
+        await store.completeTask(running.id, { summary: res.summary, conversationId: res.conversationId });
+      }
+      if (this.onTaskCompleted) {
+        await this.onTaskCompleted(running, res.summary);
+      }
+    } catch (err: any) {
+      await store.failTask(running.id, { error: err?.message || String(err) });
+    }
+  }
+
+  private getStore(): TaskStore | null {
+    if (this.store) return this.store;
+    return this.initDefaultStore() || null;
   }
 
   async handleResult(result: SpotlightPromptResult): Promise<boolean> {
@@ -158,6 +202,9 @@ export class HudCoordinator {
       });
       if (this.onTaskCreated) {
         await this.onTaskCreated(task);
+      }
+      if (this.autoExecute) {
+        this.executeTaskStandalone(task).catch(() => {});
       }
       return true;
     }

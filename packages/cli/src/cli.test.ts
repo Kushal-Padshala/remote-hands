@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { main } from './index.js';
 
 describe('CLI command dispatcher', () => {
@@ -142,5 +142,29 @@ describe('CLI command dispatcher', () => {
     } as any);
     expect(code).toBe(0);
     expect(logs.some((l) => l.includes('No active guidance session'))).toBe(true);
+  });
+
+  it('lists hud command in help output', async () => {
+    const logs: string[] = [];
+    const code = await main(['--help'], { stdout: (msg) => logs.push(msg) });
+    expect(code).toBe(0);
+    expect(logs.some((l) => l.includes('hud'))).toBe(true);
+  });
+
+  it('dispatches hud command', async () => {
+    const logs: string[] = [];
+    const fakeServiceManager = {
+      install: vi.fn(),
+      uninstall: vi.fn(),
+      isInstalled: vi.fn().mockReturnValue(true),
+      isRunning: vi.fn().mockReturnValue(true),
+    };
+    const code = await main(['hud', 'status'], {
+      stdout: (msg) => logs.push(msg),
+      serviceManager: fakeServiceManager,
+    } as any);
+    expect(code).toBe(0);
+    expect(fakeServiceManager.isInstalled).toHaveBeenCalled();
+    expect(logs.some((l) => l.includes('Desktop Overlay Status'))).toBe(true);
   });
 });
