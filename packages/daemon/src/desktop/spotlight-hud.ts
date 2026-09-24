@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { ExecFunction } from './macos-driver.js';
 
@@ -26,39 +27,72 @@ export class SpotlightHudRunner {
   }
 
   private ensureBinary(): string | null {
-    if (fs.existsSync(this.binaryPath)) {
-      return this.binaryPath;
+    const currentDir = path.dirname(fileURLToPath(import.meta.url));
+    const userBinPath = path.join(os.homedir(), '.remote-hands', 'bin', 'rh-spotlight');
+    const candidateBinaries = [
+      this.binaryPath,
+      userBinPath,
+      path.resolve(currentDir, '..', '..', 'bin', 'rh-spotlight'),
+      path.resolve(currentDir, '..', '..', 'daemon', 'bin', 'rh-spotlight'),
+      path.resolve(currentDir, '..', 'daemon', 'bin', 'rh-spotlight'),
+      path.resolve(currentDir, '..', '..', '..', 'packages', 'daemon', 'bin', 'rh-spotlight'),
+      path.resolve(currentDir, '..', '..', '..', 'daemon', 'bin', 'rh-spotlight'),
+    ];
+    for (const b of candidateBinaries) {
+      if (fs.existsSync(b)) {
+        return b;
+      }
     }
-    if (fs.existsSync(this.swiftSourcePath)) {
+
+    const candidateSwift = [
+      this.swiftSourcePath,
+      path.resolve(currentDir, 'spotlight-hud.swift'),
+      path.resolve(currentDir, '..', 'desktop', 'spotlight-hud.swift'),
+      path.resolve(currentDir, '..', '..', 'daemon', 'src', 'desktop', 'spotlight-hud.swift'),
+      path.resolve(currentDir, '..', '..', '..', 'packages', 'daemon', 'src', 'desktop', 'spotlight-hud.swift'),
+      path.resolve(currentDir, '..', '..', '..', 'daemon', 'src', 'desktop', 'spotlight-hud.swift'),
+      path.resolve(os.homedir(), '.remote-hands', 'spotlight-hud.swift'),
+    ];
+
+    let swiftFile: string | null = null;
+    for (const s of candidateSwift) {
+      if (fs.existsSync(s)) {
+        swiftFile = s;
+        break;
+      }
+    }
+
+    if (swiftFile) {
       try {
-        fs.mkdirSync(path.dirname(this.binaryPath), { recursive: true });
-        const compile = spawnSync('swiftc', ['-O', this.swiftSourcePath, '-o', this.binaryPath], {
+        fs.mkdirSync(path.dirname(userBinPath), { recursive: true });
+        const compile = spawnSync('swiftc', ['-O', swiftFile, '-o', userBinPath], {
           encoding: 'utf-8',
         });
-        if (compile.status === 0 && fs.existsSync(this.binaryPath)) {
-          return this.binaryPath;
+        if (compile.status === 0 && fs.existsSync(userBinPath)) {
+          return userBinPath;
         }
       } catch {}
-      return this.swiftSourcePath;
+      return swiftFile;
     }
+
     return null;
   }
 
   async openPrompt(activeApp?: string): Promise<SpotlightPromptResult | null> {
     const target = this.ensureBinary();
+    if (!target) {
+      return null;
+    }
     const args: string[] = ['prompt'];
     if (activeApp) {
       args.push(`--app=${activeApp}`);
     }
 
-    let cmd = 'swift';
+    let cmd = target;
     let execArgs = args;
-    if (target && target.endsWith('.swift')) {
+    if (target.endsWith('.swift')) {
       cmd = 'swift';
       execArgs = [target, ...args];
-    } else if (target) {
-      cmd = target;
-      execArgs = args;
     }
 
     const res = this.exec(cmd, execArgs);
@@ -79,14 +113,14 @@ export class SpotlightHudRunner {
 
   startListener(onTrigger: (result: SpotlightPromptResult) => void): { stop: () => void } {
     const target = this.ensureBinary();
-    let cmd = 'swift';
+    if (!target) {
+      return { stop: () => {} };
+    }
+    let cmd = target;
     let execArgs: string[] = ['listen'];
-    if (target && target.endsWith('.swift')) {
+    if (target.endsWith('.swift')) {
       cmd = 'swift';
       execArgs = [target, 'listen'];
-    } else if (target) {
-      cmd = target;
-      execArgs = ['listen'];
     }
 
     const child = spawn(cmd, execArgs, {

@@ -15,6 +15,8 @@ export function getHudPlistPath(): string {
 }
 
 export function generateHudPlistXml(nodePath: string, cliPath: string, logDir: string): string {
+  const currentPath = process.env.PATH || '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
+  const homeDir = os.homedir();
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -28,6 +30,13 @@ export function generateHudPlistXml(nodePath: string, cliPath: string, logDir: s
         <string>hud</string>
         <string>listen</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${currentPath}</string>
+        <key>HOME</key>
+        <string>${homeDir}</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

@@ -14,6 +14,7 @@ export interface HudCommandContext extends CommandContext {
   coordinator?: any | undefined;
   serviceManager?: any | undefined;
   onListenerReady?: ((listener: { stop: () => void }) => void) | undefined;
+  blockUntilSignal?: boolean | undefined;
 }
 
 export async function hudCommand(args: string[], context: HudCommandContext = {}): Promise<number> {
@@ -121,6 +122,19 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
     if (context.onListenerReady) {
       context.onListenerReady(listener);
     }
+    if (context.once || (context.onListenerReady && context.blockUntilSignal !== true)) {
+      return 0;
+    }
+    await new Promise<void>((resolve) => {
+      const shutdown = () => {
+        try {
+          listener.stop();
+        } catch {}
+        resolve();
+      };
+      process.once('SIGINT', shutdown);
+      process.once('SIGTERM', shutdown);
+    });
     return 0;
   }
 

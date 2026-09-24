@@ -107,16 +107,27 @@ let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
 if mode == "listen" {
+    var isPromptOpen = false
     NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
-        if event.keyCode == 49 && event.modifierFlags.contains(.command) && event.modifierFlags.contains(.shift) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if event.keyCode == 49 && flags.contains(.command) && flags.contains(.shift) {
+            if isPromptOpen { return }
+            isPromptOpen = true
             let frontApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Desktop"
             let pipe = Pipe()
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
-            process.arguments = ["prompt", "--app=\(frontApp)"]
+            var execURL = URL(fileURLWithPath: CommandLine.arguments[0])
+            var execArgs = ["prompt", "--app=\(frontApp)"]
+            if CommandLine.arguments[0].hasSuffix("swift") && CommandLine.arguments.count > 1 {
+                execURL = URL(fileURLWithPath: CommandLine.arguments[0])
+                execArgs = [CommandLine.arguments[1], "prompt", "--app=\(frontApp)"]
+            }
+            process.executableURL = execURL
+            process.arguments = execArgs
             process.standardOutput = pipe
             try? process.run()
             process.waitUntilExit()
+            isPromptOpen = false
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
                !output.isEmpty {
