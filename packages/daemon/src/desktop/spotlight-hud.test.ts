@@ -46,4 +46,11 @@ describe('SpotlightHudRunner', () => {
     const result = await runner.openPrompt();
     expect(result).toBeNull();
   });
+
+  it('exposes openInteractivePrompt method returning a close handle', () => {
+    const handle = runner.openInteractivePrompt('Finder', () => {});
+    expect(handle).toBeDefined();
+    expect(typeof handle.close).toBe('function');
+    handle.close();
+  });
 });

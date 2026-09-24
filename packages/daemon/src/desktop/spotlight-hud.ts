@@ -12,7 +12,7 @@ export interface SpotlightPromptResult {
 
 export type SpotlightListenerEvent = SpotlightPromptResult | { event: string; app: string; query?: string };
 
-export type HudUpdateSender = (status: string, text: string) => void;
+export type HudUpdateSender = (status: string, text: string, role?: string) => void;
 
 export class SpotlightHudRunner {
   private exec: ExecFunction;
@@ -142,10 +142,12 @@ export class SpotlightHudRunner {
     });
 
     let submitted = false;
-    const sendUpdate: HudUpdateSender = (status: string, text: string) => {
+    const sendUpdate: HudUpdateSender = (status: string, text: string, role?: string) => {
       if (!child.killed && child.stdin && child.stdin.writable) {
         try {
-          child.stdin.write(JSON.stringify({ status, text }) + '\n');
+          const payload: any = { status, text };
+          if (role) payload.role = role;
+          child.stdin.write(JSON.stringify(payload) + '\n');
         } catch {}
       }
     };

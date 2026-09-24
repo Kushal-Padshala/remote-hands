@@ -55,8 +55,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var textField: NSTextField!
     var badge: NSTextField!
     var statusPill: NSTextField!
-    var thoughtLabel: NSTextField!
     var stopButton: NSButton!
+    var dividerLine: NSBox!
+    var historyScrollView: NSScrollView!
+    var historyTextView: NSTextView!
     var targetApp: String = "Desktop"
 
     init(targetApp: String) {
@@ -104,6 +106,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
+        panel.isMovableByWindowBackground = true
 
         visualEffect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: width, height: height))
         visualEffect.material = .hudWindow
@@ -146,18 +149,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         statusPill = NSTextField(labelWithString: "● THINKING")
         statusPill.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
         statusPill.textColor = NSColor.systemCyan
-        statusPill.frame = NSRect(x: 24, y: 88, width: 300, height: 20)
+        statusPill.frame = NSRect(x: width - 175, y: height - 32, width: 130, height: 18)
+        statusPill.alignment = .right
         statusPill.isHidden = true
         visualEffect.addSubview(statusPill)
-
-        thoughtLabel = NSTextField(wrappingLabelWithString: "Analyzing task context...")
-        thoughtLabel.font = NSFont.systemFont(ofSize: 13, weight: .regular)
-        thoughtLabel.textColor = NSColor(white: 0.88, alpha: 1.0)
-        thoughtLabel.frame = NSRect(x: 24, y: 18, width: width - 48, height: 62)
-        thoughtLabel.maximumNumberOfLines = 3
-        thoughtLabel.cell?.truncatesLastVisibleLine = true
-        thoughtLabel.isHidden = true
-        visualEffect.addSubview(thoughtLabel)
 
         panel.contentView = visualEffect
         panel.makeKeyAndOrderFront(nil)
@@ -192,9 +187,40 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         return false
     }
 
+    func appendHistory(role: String, text: String, color: NSColor, icon: String) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        let timestamp = formatter.string(from: Date())
+
+        let fullString = NSMutableAttributedString()
+
+        let timeAttr: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+            .foregroundColor: NSColor(white: 0.45, alpha: 1.0)
+        ]
+        fullString.append(NSAttributedString(string: "[\(timestamp)] ", attributes: timeAttr))
+
+        let roleAttr: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .bold),
+            .foregroundColor: color
+        ]
+        fullString.append(NSAttributedString(string: "\(icon) \(role.uppercased()): ", attributes: roleAttr))
+
+        let textAttr: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .regular),
+            .foregroundColor: NSColor(white: 0.94, alpha: 1.0)
+        ]
+        fullString.append(NSAttributedString(string: "\(text)\n\n", attributes: textAttr))
+
+        if let storage = historyTextView?.textStorage {
+            storage.append(fullString)
+            historyTextView?.scrollToEndOfDocument(nil)
+        }
+    }
+
     func transitionToProgress(query: String) {
         textField.isHidden = true
-        let newHeight: CGFloat = 144
+        let newHeight: CGFloat = 340
         guard let screen = panel.screen ?? NSScreen.main else { return }
         let width: CGFloat = 680
         let x = (screen.frame.width - width) / 2
@@ -206,17 +232,48 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         badge.stringValue = query
         badge.font = NSFont.systemFont(ofSize: 13, weight: .bold)
         badge.textColor = .white
-        badge.frame = NSRect(x: 24, y: newHeight - 28, width: width - 80, height: 18)
-        stopButton.frame = NSRect(x: width - 42, y: newHeight - 28, width: 22, height: 20)
+        badge.frame = NSRect(x: 24, y: newHeight - 32, width: width - 210, height: 18)
 
-        statusPill.frame = NSRect(x: 24, y: newHeight - 54, width: 300, height: 18)
+        statusPill.frame = NSRect(x: width - 175, y: newHeight - 32, width: 130, height: 18)
         statusPill.stringValue = "● THINKING"
         statusPill.textColor = .systemCyan
+        statusPill.alignment = .right
         statusPill.isHidden = false
 
-        thoughtLabel.frame = NSRect(x: 24, y: 16, width: width - 48, height: 58)
-        thoughtLabel.stringValue = "Analyzing context and preparing steps..."
-        thoughtLabel.isHidden = false
+        stopButton.frame = NSRect(x: width - 38, y: newHeight - 32, width: 20, height: 18)
+
+        dividerLine = NSBox(frame: NSRect(x: 20, y: newHeight - 44, width: width - 40, height: 1))
+        dividerLine.boxType = .custom
+        dividerLine.borderWidth = 0
+        dividerLine.fillColor = NSColor(white: 1.0, alpha: 0.12)
+        visualEffect.addSubview(dividerLine)
+
+        let scrollFrame = NSRect(x: 20, y: 16, width: width - 40, height: newHeight - 66)
+        historyScrollView = NSScrollView(frame: scrollFrame)
+        historyScrollView.drawsBackground = false
+        historyScrollView.hasVerticalScroller = true
+        historyScrollView.hasHorizontalScroller = false
+        historyScrollView.autohidesScrollers = true
+        historyScrollView.borderType = .noBorder
+
+        let contentSize = historyScrollView.contentSize
+        historyTextView = NSTextView(frame: NSRect(origin: .zero, size: contentSize))
+        historyTextView.minSize = NSSize(width: 0.0, height: contentSize.height)
+        historyTextView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        historyTextView.isVerticallyResizable = true
+        historyTextView.isHorizontallyResizable = false
+        historyTextView.autoresizingMask = [.width]
+        historyTextView.textContainer?.containerSize = NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
+        historyTextView.textContainer?.widthTracksTextView = true
+        historyTextView.drawsBackground = false
+        historyTextView.backgroundColor = .clear
+        historyTextView.isEditable = false
+        historyTextView.isSelectable = true
+        historyScrollView.documentView = historyTextView
+        visualEffect.addSubview(historyScrollView)
+
+        appendHistory(role: "GOAL", text: query, color: .white, icon: "💬")
+        appendHistory(role: "SYSTEM", text: "Task initialized. Preparing execution environment...", color: NSColor(white: 0.6, alpha: 1.0), icon: "⚡")
 
         FileHandle.standardInput.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
@@ -233,27 +290,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                       let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else { continue }
                 DispatchQueue.main.async {
                     guard let self = self else { return }
-                    if let status = dict["status"] as? String {
-                        let upper = status.uppercased()
-                        if upper == "COMPLETE" || upper == "DONE" {
-                            self.statusPill.stringValue = "✔ COMPLETE"
-                            self.statusPill.textColor = .systemGreen
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
-                                exit(0)
-                            }
-                        } else if upper == "FAILED" || upper == "ERROR" {
-                            self.statusPill.stringValue = "⚠ FAILED"
-                            self.statusPill.textColor = .systemYellow
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
-                                exit(0)
-                            }
-                        } else {
-                            self.statusPill.stringValue = "● " + upper
-                            self.statusPill.textColor = .systemCyan
+                    let status = (dict["status"] as? String)?.uppercased() ?? "WORKING"
+                    let text = dict["text"] as? String ?? ""
+                    let role = dict["role"] as? String
+
+                    if status == "COMPLETE" || status == "DONE" {
+                        self.statusPill.stringValue = "✔ COMPLETE"
+                        self.statusPill.textColor = .systemGreen
+                        self.appendHistory(role: role ?? "DONE", text: text.isEmpty ? "Task completed successfully." : text, color: .systemGreen, icon: "✔")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                            exit(0)
                         }
-                    }
-                    if let thought = dict["text"] as? String, !thought.isEmpty {
-                        self.thoughtLabel.stringValue = thought
+                    } else if status == "FAILED" || status == "ERROR" {
+                        self.statusPill.stringValue = "⚠ FAILED"
+                        self.statusPill.textColor = .systemYellow
+                        self.appendHistory(role: role ?? "ERROR", text: text.isEmpty ? "Task failed." : text, color: .systemRed, icon: "⚠")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
+                            exit(0)
+                        }
+                    } else {
+                        self.statusPill.stringValue = "● " + status
+                        self.statusPill.textColor = .systemCyan
+                        if !text.isEmpty {
+                            var color = NSColor.systemCyan
+                            var icon = "🧠"
+                            let r = role ?? status
+                            if status == "EXECUTING" || status == "ACTION" {
+                                color = NSColor(red: 1.0, green: 0.78, blue: 0.28, alpha: 1.0)
+                                icon = "⚡"
+                            } else if status == "FOCUS" {
+                                color = NSColor(red: 0.6, green: 0.6, blue: 1.0, alpha: 1.0)
+                                icon = "🎯"
+                            } else if status == "OUTPUT" {
+                                color = NSColor(red: 0.4, green: 0.85, blue: 0.5, alpha: 1.0)
+                                icon = "✔"
+                            }
+                            self.appendHistory(role: r, text: text, color: color, icon: icon)
+                        }
                     }
                 }
             }
