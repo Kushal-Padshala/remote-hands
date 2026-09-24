@@ -12,7 +12,9 @@ export interface LocalServerOptions {
   pairingToken: string;
   store: LocalTaskStore;
   staticDir?: string | undefined;
+  onTaskCreated?: ((task: any) => void) | undefined;
 }
+
 
 export class LocalServer {
   private server: http.Server;
@@ -160,8 +162,10 @@ export class LocalServer {
               payload: { status: task.status, task_id: task.id },
             },
           });
+          this.options.onTaskCreated?.(task);
           this.sendJson(res, 201, { task });
           return;
+
         } catch (err: any) {
           this.sendJson(res, 400, { error: err?.message || 'Invalid task payload' });
           return;

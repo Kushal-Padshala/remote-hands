@@ -315,4 +315,35 @@ describe('LocalServer', () => {
     const body = (await frameRes.json()) as any;
     expect(body.frame.jpeg_base64).toBe('base64-http-frame');
   });
+
+  it('triggers onTaskCreated callback when a task is created via POST /api/tasks', async () => {
+    let notifiedTask: any = null;
+    const testServer = new LocalServer({
+      port: 0,
+      pairingToken: token,
+      store,
+      onTaskCreated: (task) => {
+        notifiedTask = task;
+      },
+    });
+    await testServer.start();
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${testServer.port}/api/tasks`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ prompt: 'Callback test prompt', goal: 'Callback goal' }),
+      });
+      expect(res.status).toBe(201);
+      expect(notifiedTask).not.toBeNull();
+      expect(notifiedTask.prompt).toBe('Callback test prompt');
+    } finally {
+      await testServer.stop();
+    }
+
+  });
 });
+
