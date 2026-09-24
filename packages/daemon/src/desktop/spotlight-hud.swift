@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Carbon
 
 class SpotlightPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -91,6 +92,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 }
 
+var isPromptOpen = false
+
+func triggerPrompt() {
+    if isPromptOpen { return }
+    isPromptOpen = true
+    let frontApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Desktop"
+    let pipe = Pipe()
+    let process = Process()
+    var execURL = URL(fileURLWithPath: CommandLine.arguments[0])
+    var execArgs = ["prompt", "--app=\(frontApp)"]
+    if CommandLine.arguments[0].hasSuffix("swift") && CommandLine.arguments.count > 1 {
+        execURL = URL(fileURLWithPath: CommandLine.arguments[0])
+        execArgs = [CommandLine.arguments[1], "prompt", "--app=\(frontApp)"]
+    }
+    process.executableURL = execURL
+    process.arguments = execArgs
+    process.standardOutput = pipe
+    try? process.run()
+    process.waitUntilExit()
+    isPromptOpen = false
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !output.isEmpty {
+        print(output)
+        fflush(stdout)
+    }
+}
+
 let args = CommandLine.arguments
 var mode = "prompt"
 var appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Desktop"
@@ -107,32 +136,38 @@ let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
 if mode == "listen" {
-    var isPromptOpen = false
+    var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+    var hotKeyRef: EventHotKeyRef?
+    let hotKeyID = EventHotKeyID(signature: OSType(0x5248444B), id: 1)
+
+    InstallEventHandler(
+        GetApplicationEventTarget(),
+        { (_, _, _) -> OSStatus in
+            DispatchQueue.global(qos: .userInteractive).async {
+                triggerPrompt()
+            }
+            return noErr
+        },
+        1,
+        &eventType,
+        nil,
+        nil
+    )
+
+    RegisterEventHotKey(
+        UInt32(kVK_Space),
+        UInt32(cmdKey | shiftKey),
+        hotKeyID,
+        GetApplicationEventTarget(),
+        0,
+        &hotKeyRef
+    )
+
     NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if event.keyCode == 49 && flags.contains(.command) && flags.contains(.shift) {
-            if isPromptOpen { return }
-            isPromptOpen = true
-            let frontApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Desktop"
-            let pipe = Pipe()
-            let process = Process()
-            var execURL = URL(fileURLWithPath: CommandLine.arguments[0])
-            var execArgs = ["prompt", "--app=\(frontApp)"]
-            if CommandLine.arguments[0].hasSuffix("swift") && CommandLine.arguments.count > 1 {
-                execURL = URL(fileURLWithPath: CommandLine.arguments[0])
-                execArgs = [CommandLine.arguments[1], "prompt", "--app=\(frontApp)"]
-            }
-            process.executableURL = execURL
-            process.arguments = execArgs
-            process.standardOutput = pipe
-            try? process.run()
-            process.waitUntilExit()
-            isPromptOpen = false
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !output.isEmpty {
-                print(output)
-                fflush(stdout)
+            DispatchQueue.global(qos: .userInteractive).async {
+                triggerPrompt()
             }
         }
     }
