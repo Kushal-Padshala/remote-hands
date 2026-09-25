@@ -121,7 +121,7 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
         }
       }
     } catch {}
-  }, 1000);
+  }, 250);
 
   try {
     let currentTask: Task = running;

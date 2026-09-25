@@ -62,10 +62,8 @@ PY
 
 - For indexed browser operations, use `rh browser snapshot`, `rh browser click <index>`, and `rh browser type <index> <text>`.
 - Invoke as `browser-harness`. Use heredocs for multi-line commands.
-- Helpers are pre-imported. `run.py` calls `ensure_daemon()` before `exec`.
-- First navigation for a task is `new_tab(url)`, not `goto_url(url)`. The daemon
-  preserves the attached tab across separate CLI invocations, so do not call
-  `new_tab()` again in every script.
+- Work in-place on the existing active tab. Do NOT call `new_tab(url)` or create new tabs or windows unless explicitly instructed by the user. Use `goto_url(url)` on the current tab or interact with the existing page. The daemon
+  preserves the attached tab across separate CLI invocations.
 - Keep one working tab per task/site. Before opening another, inspect
   `current_tab()` and `list_tabs()` and use `switch_tab()` to reuse a matching
   tab. Do not leave duplicate tabs on the same URL or close tabs you did not

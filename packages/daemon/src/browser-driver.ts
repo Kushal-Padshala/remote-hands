@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import {
   DOM_SNAPSHOT_SCRIPT,
   parseSnapshotOutput,
@@ -45,6 +46,37 @@ export class BrowserDriver {
     if (tabs.length === 0) {
       throw new Error('No open Chrome tabs found on CDP port');
     }
+
+    if (process.platform === 'darwin') {
+      try {
+        const script = `
+          (() => {
+            const chrome = Application("Google Chrome");
+            if (chrome.running() && chrome.windows.length > 0) {
+              const tab = chrome.windows[0].activeTab;
+              return JSON.stringify({ url: tab.url() || "", title: tab.title() || "" });
+            }
+            return "{}";
+          })()
+        `;
+        const res = spawnSync('osascript', ['-l', 'JavaScript', '-e', script], {
+          encoding: 'utf-8',
+          timeout: 1000,
+        });
+        const active = JSON.parse(res.stdout?.trim() || '{}');
+        if (active.url) {
+          const matchedByUrl = tabs.find((t) => t.url === active.url);
+          if (matchedByUrl) return matchedByUrl;
+        }
+        if (active.title) {
+          const matchedByTitle = tabs.find(
+            (t) => t.title === active.title || t.title.startsWith(active.title) || active.title.startsWith(t.title),
+          );
+          if (matchedByTitle) return matchedByTitle;
+        }
+      } catch {}
+    }
+
     return tabs[0]!;
   }
 

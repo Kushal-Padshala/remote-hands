@@ -317,24 +317,6 @@ export class HudCoordinator {
         if (store.appendEvent) {
           await store.appendEvent(running!.id, event as any).catch(() => {});
         }
-        if (event && (event.kind === 'tool_call' || (event as any).type === 'tool_call') && process.platform === 'darwin') {
-          const payload = event.payload || event;
-          const tool = String((payload as any).tool || '').toLowerCase();
-          if (tool.includes('browser')) {
-            this.macosDriver.focusWindow('Google Chrome').catch(() => {});
-            if (sendUpdate) {
-              sendUpdate('FOCUS', 'Brought Google Chrome to front', 'FOCUS');
-            }
-          } else if (tool.includes('desktop')) {
-            const targetApp = (payload as any).input?.app;
-            if (targetApp && typeof targetApp === 'string') {
-              this.macosDriver.focusWindow(targetApp).catch(() => {});
-              if (sendUpdate) {
-                sendUpdate('FOCUS', `Brought ${targetApp} to front`, 'FOCUS');
-              }
-            }
-          }
-        }
         if (sendUpdate) {
           const formatted = formatHudStatus(event);
           if (formatted.text) {

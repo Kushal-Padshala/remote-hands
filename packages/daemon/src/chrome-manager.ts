@@ -317,10 +317,7 @@ export class ChromeManager {
   }
 
   buildLaunchArgs(url?: string): string[] {
-    let profileDir = this.getProfileDirectory();
-    if (this.mode === 'active' && !this.customProfileDir && ChromeManager.isSystemChromeRunning()) {
-      profileDir = path.join(os.homedir(), '.remote-hands/chrome-profile');
-    }
+    const profileDir = this.getProfileDirectory();
 
     const args = [
       `--remote-debugging-port=${this.port}`,
@@ -331,6 +328,9 @@ export class ChromeManager {
       '--disable-backgrounding-occluded-windows',
       '--disable-renderer-backgrounding',
     ];
+    if (this.mode === 'active') {
+      args.push('--restore-last-session');
+    }
     if (this.resolvedProfile?.directory) {
       args.push(`--profile-directory=${this.resolvedProfile.directory}`);
     }
@@ -350,16 +350,18 @@ export class ChromeManager {
       return current;
     }
 
-    let profileDir = this.getProfileDirectory();
     if (this.mode === 'active' && !this.customProfileDir && ChromeManager.isSystemChromeRunning()) {
-      profileDir = path.join(os.homedir(), '.remote-hands/chrome-profile');
-      ChromeManager.syncProfileAuthState(
-        ChromeManager.getDefaultUserDataDir(),
-        this.resolvedProfile?.directory || 'Default',
-        profileDir,
-      );
+      if (process.platform === 'darwin') {
+        const { spawnSync } = await import('node:child_process');
+        spawnSync('osascript', ['-e', 'tell application "Google Chrome" to quit']);
+        for (let i = 0; i < 15; i++) {
+          await new Promise((r) => setTimeout(r, 200));
+          if (!ChromeManager.isSystemChromeRunning()) break;
+        }
+      }
     }
 
+    const profileDir = this.getProfileDirectory();
     fs.mkdirSync(profileDir, { recursive: true });
 
     const args = this.buildLaunchArgs(initialUrl);
