@@ -278,17 +278,20 @@ async function runLocalDaemon(
   let hudListener: { stop: () => void } | null = null;
   if (process.platform === 'darwin' && !options.once && !args.includes('--no-hotkey') && !context.runner) {
     try {
-      const { HudCoordinator } = await import('@remote-hands/daemon');
-      const coordinator = new HudCoordinator({
-        store,
-        powerManager,
-        autoExecute: true,
-        onTaskCreated: (task) => {
-          options.stdout(`\n${c.brightGreen('⚡')} [Spotlight HUD] New task initiated: "${(((task as any).goal || task.prompt) as string).slice(0, 60)}..."`);
-          wakeDaemon?.();
-        },
-      });
-      hudListener = coordinator.startListening();
+      const { HudCoordinator, HudServiceManager } = await import('@remote-hands/daemon');
+      const serviceManager = new HudServiceManager();
+      if (!serviceManager.isRunning()) {
+        const coordinator = new HudCoordinator({
+          store,
+          powerManager,
+          autoExecute: true,
+          onTaskCreated: (task) => {
+            options.stdout(`\n${c.brightGreen('⚡')} [Spotlight HUD] New task initiated: "${(((task as any).goal || task.prompt) as string).slice(0, 60)}..."`);
+            wakeDaemon?.();
+          },
+        });
+        hudListener = coordinator.startListening();
+      }
     } catch {}
   }
 

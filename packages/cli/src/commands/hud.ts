@@ -144,7 +144,9 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
       return 0;
     }
     await new Promise<void>((resolve) => {
+      const keepAlive = setInterval(() => {}, 60000);
       const shutdown = () => {
+        clearInterval(keepAlive);
         try {
           listener.stop();
         } catch {}

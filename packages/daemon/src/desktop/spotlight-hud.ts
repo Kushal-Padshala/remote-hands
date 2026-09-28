@@ -44,6 +44,12 @@ export class SpotlightHudRunner {
     ];
     for (const b of candidateBinaries) {
       if (fs.existsSync(b)) {
+        if (process.platform === 'darwin') {
+          const verify = spawnSync('codesign', ['-v', b], { encoding: 'utf-8' });
+          if (verify.status !== 0) {
+            spawnSync('codesign', ['-s', '-', '--force', b], { encoding: 'utf-8' });
+          }
+        }
         return b;
       }
     }
@@ -73,6 +79,9 @@ export class SpotlightHudRunner {
           encoding: 'utf-8',
         });
         if (compile.status === 0 && fs.existsSync(userBinPath)) {
+          if (process.platform === 'darwin') {
+            spawnSync('codesign', ['-s', '-', '--force', userBinPath], { encoding: 'utf-8' });
+          }
           return userBinPath;
         }
       } catch {}
@@ -233,27 +242,50 @@ export class SpotlightHudRunner {
       execArgs = [target, 'listen'];
     }
 
-    const child = spawn(cmd, execArgs, {
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
+    let stopped = false;
+    let child: any = null;
+    let restartTimer: NodeJS.Timeout | null = null;
 
-    child.stdout.on('data', (chunk) => {
-      const lines = chunk.toString('utf-8').split('\n').filter(Boolean);
-      for (const line of lines) {
-        try {
-          const parsed = JSON.parse(line.trim());
-          if (parsed && typeof parsed.app === 'string') {
-            onTrigger(parsed as SpotlightPromptResult);
+    const spawnChild = () => {
+      if (stopped) return;
+      try {
+        child = spawn(cmd, execArgs, {
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
+        child.on('error', () => {});
+        child.stdout?.on('data', (chunk: Buffer) => {
+          const lines = chunk.toString('utf-8').split('\n').filter(Boolean);
+          for (const line of lines) {
+            try {
+              const parsed = JSON.parse(line.trim());
+              if (parsed && typeof parsed.app === 'string') {
+                onTrigger(parsed as SpotlightPromptResult);
+              }
+            } catch {}
           }
-        } catch {}
-      }
-    });
+        });
+        child.on('exit', () => {
+          if (!stopped) {
+            restartTimer = setTimeout(spawnChild, 1000);
+          }
+        });
+      } catch {}
+    };
+
+    spawnChild();
 
     return {
       stop: () => {
-        try {
-          child.kill('SIGTERM');
-        } catch {}
+        stopped = true;
+        if (restartTimer) {
+          clearTimeout(restartTimer);
+          restartTimer = null;
+        }
+        if (child) {
+          try {
+            child.kill('SIGTERM');
+          } catch {}
+        }
       },
     };
   }
