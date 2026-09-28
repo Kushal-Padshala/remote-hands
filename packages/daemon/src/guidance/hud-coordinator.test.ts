@@ -484,4 +484,81 @@ describe('HudCoordinator', () => {
 
     expect(createdTasks[1].conversation_id).toBe('conv-hud-99');
   });
+
+  it('allows stopping active process and executing follow-up instructions in the same chat session', async () => {
+    let submitCallback: any;
+    let stopCallback: any;
+    mockHudRunner.openInteractivePrompt = vi.fn().mockImplementation((_app: any, onSubmit: any, _onCancel: any, onStop: any) => {
+      submitCallback = onSubmit;
+      stopCallback = onStop;
+      return { close: vi.fn() };
+    });
+
+    const createdTasks: any[] = [];
+    const mockStore = {
+      createTask: vi.fn().mockImplementation(async (input: any) => {
+        const t = { id: `task-chain-${createdTasks.length + 1}`, ...input };
+        createdTasks.push(t);
+        return t;
+      }),
+      claimNextTask: vi.fn().mockImplementation(async () => createdTasks[createdTasks.length - 1]),
+      markTaskRunning: vi.fn().mockImplementation(async (id: string) => ({ id, status: 'running' })),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+      cancelTask: vi.fn().mockResolvedValue({ status: 'cancelled' }),
+    };
+
+    let firstAborted = false;
+    const mockRunner = {
+      run: vi.fn()
+        .mockImplementationOnce((_task: any, _onEvent: any, signal?: AbortSignal) => {
+          return new Promise((resolve) => {
+            signal?.addEventListener('abort', () => {
+              firstAborted = true;
+              resolve({ status: 'done', summary: 'Cancelled', conversationId: 'conv-chain-1' });
+            });
+          });
+        })
+        .mockImplementationOnce((_task: any, _onEvent: any, signal?: AbortSignal) => {
+          return Promise.resolve({
+            status: 'done',
+            summary: 'Downloaded files successfully',
+            conversationId: 'conv-chain-1',
+          });
+        }),
+    };
+
+    const coordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: mockStore as any,
+      runner: mockRunner as any,
+      autoExecute: true,
+    });
+
+    coordinator.startListening();
+    const hotkeyCb = mockHudRunner.startListener.mock.calls[0]![0];
+    await hotkeyCb({ event: 'hotkey', app: 'Google Chrome' });
+
+    const updateSender = vi.fn();
+    await submitCallback({ query: 'open brightspace and start lab 3', app: 'Google Chrome' }, updateSender);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(coordinator.hasActiveTask()).toBe(true);
+
+    await stopCallback(updateSender);
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(firstAborted).toBe(true);
+    expect(coordinator.hasActiveTask()).toBe(false);
+    expect(updateSender).toHaveBeenCalledWith('STOPPED', expect.any(String), 'STATUS');
+
+    await submitCallback({ query: 'download CS 350 lab 3 handouts instead', app: 'Google Chrome' }, updateSender);
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(createdTasks.length).toBe(2);
+    expect(createdTasks[1].goal).toBe('download CS 350 lab 3 handouts instead');
+    expect(updateSender).toHaveBeenCalledWith('COMPLETE', 'Downloaded files successfully', 'DONE');
+  });
 });

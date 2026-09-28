@@ -569,7 +569,7 @@ export class ProcessAgentRunner implements AgentRunner {
 
       const events: EventInput[] = [];
       let summary = '';
-      let conversationId: string | null = null;
+      let conversationId: string | null = task.conversation_id || null;
       let buffer = '';
       let hasFatalError = false;
       let lastErrorMessage = '';
@@ -585,6 +585,8 @@ export class ProcessAgentRunner implements AgentRunner {
         }
         if (parsed.kind === 'result') {
           summary = (parsed.payload as any).summary || summary;
+          conversationId = (parsed.payload as any).conversation_id || conversationId;
+        } else if ((parsed.payload as any)?.conversation_id) {
           conversationId = (parsed.payload as any).conversation_id || conversationId;
         }
         if (onEvent) {

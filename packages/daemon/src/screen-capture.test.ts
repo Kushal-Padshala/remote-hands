@@ -40,11 +40,11 @@ describe('DefaultFrameSource', () => {
 
   it('cleans up stale candidate files older than cutoff time', async () => {
     const testPath = '/tmp/rh_screen_frame.png';
-    await fs.promises.writeFile(testPath, Buffer.from('stale-frame-content'));
-
     try {
+      await fs.promises.unlink(testPath).catch(() => {});
+      fs.writeFileSync(testPath, Buffer.from('stale-frame-content'));
       const past = Date.now() - 2000;
-      await fs.promises.utimes(testPath, past / 1000, past / 1000);
+      fs.utimesSync(testPath, past / 1000, past / 1000);
 
       cleanupStaleFrameFiles(Date.now() - 500);
       expect(fs.existsSync(testPath)).toBe(false);

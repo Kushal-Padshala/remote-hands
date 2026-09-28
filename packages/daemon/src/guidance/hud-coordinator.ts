@@ -477,27 +477,24 @@ export class HudCoordinator {
     if (typeof this.hudRunner.openInteractivePrompt === 'function') {
       return new Promise<boolean>((resolve) => {
         let settled = false;
-        const promptAbortController = new AbortController();
         this.hudRunner.openInteractivePrompt(
           appOverride,
           async (result, sendUpdate) => {
-            const success = await this.handleResult(result, sendUpdate, promptAbortController.signal);
+            const success = await this.handleResult(result, sendUpdate);
             if (!settled) {
               settled = true;
               resolve(success);
             }
           },
           () => {
-            promptAbortController.abort();
             this.cancelActiveTask('User cancelled from Spotlight HUD').catch(() => {});
             if (!settled) {
               settled = true;
               resolve(false);
             }
           },
-          () => {
-            promptAbortController.abort();
-            this.stopActiveTask('User stopped task from Spotlight HUD').catch(() => {});
+          (sendUpdate) => {
+            this.stopActiveTask('User stopped task from Spotlight HUD', sendUpdate).catch(() => {});
           },
         );
       });
@@ -512,36 +509,30 @@ export class HudCoordinator {
 
   startListening(): { stop: () => void } {
     let activePrompt: { close: () => void } | null = null;
-    let promptAbortController: AbortController | null = null;
     const runnerListener = this.hudRunner.startListener(async (event: any) => {
       try {
         if (event && event.query) {
           await this.handleResult(event);
         } else if (event && event.event === 'hotkey' && typeof this.hudRunner.openInteractivePrompt === 'function') {
           if (activePrompt) {
-            promptAbortController?.abort();
             this.cancelActiveTask('New hotkey session started').catch(() => {});
             activePrompt.close();
             activePrompt = null;
           }
           this.currentConversationId = undefined;
-          promptAbortController = new AbortController();
-          const currentController = promptAbortController;
           activePrompt = this.hudRunner.openInteractivePrompt(
             event.app,
             async (result, sendUpdate) => {
               try {
-                await this.handleResult(result, sendUpdate, currentController.signal);
+                await this.handleResult(result, sendUpdate);
               } catch {}
             },
             () => {
-              currentController.abort();
               this.cancelActiveTask('User cancelled from Spotlight HUD').catch(() => {});
               activePrompt = null;
             },
-            () => {
-              currentController.abort();
-              this.stopActiveTask('User stopped task from Spotlight HUD').catch(() => {});
+            (sendUpdate) => {
+              this.stopActiveTask('User stopped task from Spotlight HUD', sendUpdate).catch(() => {});
             },
           );
         }
@@ -552,7 +543,6 @@ export class HudCoordinator {
       stop: () => {
         this.powerManager?.releaseAll();
         if (activePrompt) {
-          promptAbortController?.abort();
           this.cancelActiveTask('HUD service stopped').catch(() => {});
           activePrompt.close();
           activePrompt = null;

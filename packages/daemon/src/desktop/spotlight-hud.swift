@@ -399,11 +399,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                         self.appendHistory(role: role ?? "DONE", text: text.isEmpty ? "Task completed successfully." : text, color: .systemGreen, icon: "✔")
                         self.panel.makeFirstResponder(self.textField)
                     } else if status == "STOPPED" || status == "CANCELLED" {
+                        if self.isWorking {
+                            self.appendHistory(role: role ?? "STATUS", text: text.isEmpty ? "Task stopped." : text, color: .systemOrange, icon: "⏹")
+                        }
                         self.isWorking = false
                         self.statusPill.stringValue = "⏹ STOPPED"
                         self.statusPill.textColor = .systemOrange
                         self.stopButton.isHidden = true
-                        self.appendHistory(role: role ?? "STATUS", text: text.isEmpty ? "Task stopped." : text, color: .systemOrange, icon: "⏹")
                         self.panel.makeFirstResponder(self.textField)
                     } else if status == "FAILED" || status == "ERROR" {
                         self.isWorking = false

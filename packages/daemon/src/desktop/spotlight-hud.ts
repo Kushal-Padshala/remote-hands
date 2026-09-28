@@ -129,7 +129,7 @@ export class SpotlightHudRunner {
     activeApp: string | undefined,
     onSubmit: (result: SpotlightPromptResult, sendUpdate: HudUpdateSender) => Promise<void> | void,
     onCancel?: () => void,
-    onStop?: () => void,
+    onStop?: (sendUpdate?: HudUpdateSender) => void,
   ): { close: () => void } {
     const target = this.ensureBinary();
     if (!target) {
@@ -195,7 +195,7 @@ export class SpotlightHudRunner {
           } else if (parsed.event === 'stop') {
             if (onStop) {
               try {
-                onStop();
+                onStop(sendUpdate);
               } catch {}
             }
           } else if (parsed.event === 'cancel') {
