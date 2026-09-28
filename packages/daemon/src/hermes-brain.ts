@@ -381,9 +381,9 @@ export class HermesBrain {
 
   async prepareTaskContext(task: {
     prompt: string;
-    workspace_path?: string | null;
-    effort?: string | null;
-    attachments?: ContextAttachment[] | null;
+    workspace_path?: string | null | undefined;
+    effort?: string | null | undefined;
+    attachments?: ContextAttachment[] | null | undefined;
   }): Promise<HermesContext> {
     await this.ensureInitialized();
     const resolvedPath = task.workspace_path || (await this.resolveWorkspace(task.prompt));
