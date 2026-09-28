@@ -89,6 +89,7 @@ export function formatContextualTaskPrompt(query: string, context: ActiveWindowC
   lines.push('1. Active Context Awareness: The user triggered this task while actively in this window. Target and interact with this application directly.');
   lines.push('2. Autonomous Research: If this task requires research (such as rental property marketing strategies, campaign setup requirements, ad platform configurations, or client redirection mechanisms), perform targeted web research and synthesize the needed steps immediately.');
   lines.push('3. Full-Speed Execution: Do not stall on exploratory discovery commands. Jump straight into executing the steps at full speed.');
+  lines.push('4. Skill Reference: Apply the `remote-hands-operator` skill for blazing-fast in-place browser tab reuse, native window control, and zero-discovery execution.');
   return lines.join('\n');
 }
 
