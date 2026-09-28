@@ -203,4 +203,25 @@ describe('HermesBrain Memory Operations', () => {
     expect(ctx.augmentedPrompt).toContain('Modal Scroll Lock');
     expect(ctx.augmentedPrompt).toContain('Recent Relevant Activity:');
   });
+
+  it('augments prompt with user attached targets', async () => {
+    const brain = new HermesBrain(tmpDir);
+    const ctx = await brain.prepareTaskContext({
+      prompt: 'post to x',
+      attachments: [
+        {
+          type: 'browser_tab',
+          id: 'tab-1',
+          browser: 'Google Chrome',
+          profile: 'Personal',
+          title: 'X Composer',
+          url: 'https://x.com/compose/post',
+        },
+      ],
+    });
+
+    expect(ctx.augmentedPrompt).toContain('User Attached Targets:');
+    expect(ctx.augmentedPrompt).toContain('X Composer');
+    expect(ctx.augmentedPrompt).toContain('https://x.com/compose/post');
+  });
 });

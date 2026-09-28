@@ -1,7 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
-import type { Task } from '@remote-hands/shared';
+import type { ContextAttachment, Task } from '@remote-hands/shared';
 import { SpotlightHudRunner, type SpotlightPromptResult, type HudUpdateSender } from '../desktop/spotlight-hud.js';
 import { IntentResolver } from './intent-resolver.js';
 import { GuidanceManager } from './guidance-manager.js';
@@ -75,7 +74,11 @@ export function isAutonomousGoal(query: string): boolean {
   return actionKeywords.some((verb) => q.includes(verb)) || q.split(/\s+/).length >= 4;
 }
 
-export function formatContextualTaskPrompt(query: string, context: ActiveWindowContext): string {
+export function formatContextualTaskPrompt(
+  query: string,
+  context: ActiveWindowContext,
+  attachments?: ContextAttachment[],
+): string {
   const lines: string[] = [];
   lines.push(`Goal: ${query}`);
   lines.push('');
@@ -84,6 +87,23 @@ export function formatContextualTaskPrompt(query: string, context: ActiveWindowC
   if (context.title) lines.push(`- Window Title: ${context.title}`);
   if (context.url) lines.push(`- Active URL: ${context.url}`);
   lines.push(`- Application Type: ${context.isBrowser ? 'Web Browser' : 'Native Desktop Software'}`);
+
+  if (attachments && attachments.length > 0) {
+    lines.push('');
+    lines.push('User Attached Context:');
+    for (const att of attachments) {
+      if (att.type === 'browser_tab') {
+        const prof = att.profile ? ` [Profile: ${att.profile}]` : '';
+        lines.push(`- Browser Tab (${att.browser}${prof}): "${att.title}" -> ${att.url}${att.tabIndex !== undefined ? ` (index: ${att.tabIndex})` : ''}`);
+      } else if (att.type === 'app_window') {
+        lines.push(`- App Window (${att.app}): "${att.title || att.app}"`);
+      } else if (att.type === 'local_file') {
+        lines.push(`- Local File: "${att.name}" (${att.path})`);
+      }
+    }
+    lines.push('Target Mandate: The user explicitly attached these tabs, windows, and files. Operate directly on them. Never search for profiles, open redundant duplicate tabs, or scan directories.');
+  }
+
   lines.push('');
   lines.push('Execution Mandate:');
   lines.push('1. Active Context Awareness: The user triggered this task while actively in this window. Target and interact with this application directly.');

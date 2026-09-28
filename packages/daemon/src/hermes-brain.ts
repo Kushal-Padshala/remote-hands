@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import type { ContextAttachment } from '@remote-hands/shared';
 
 export interface HermesProjectEntry {
   name: string;
@@ -382,6 +383,7 @@ export class HermesBrain {
     prompt: string;
     workspace_path?: string | null;
     effort?: string | null;
+    attachments?: ContextAttachment[] | null;
   }): Promise<HermesContext> {
     await this.ensureInitialized();
     const resolvedPath = task.workspace_path || (await this.resolveWorkspace(task.prompt));
@@ -394,6 +396,22 @@ export class HermesBrain {
       if (archMap) {
         snippets.push(archMap);
       }
+    }
+
+    if (task.attachments && task.attachments.length > 0) {
+      const targetLines = task.attachments.map((att) => {
+        if (att.type === 'browser_tab') {
+          const prof = att.profile ? ` (${att.profile})` : '';
+          return `- Target Tab: [${att.browser}${prof}] "${att.title}" -> ${att.url}${att.tabIndex !== undefined ? ` (index: ${att.tabIndex})` : ''}`;
+        }
+        if (att.type === 'app_window') {
+          return `- Target App: [${att.app}] "${att.title || att.app}"`;
+        }
+        return `- Target File: "${att.name}" (${att.path})`;
+      });
+      snippets.push(
+        `User Attached Targets:\n${targetLines.join('\n')}\nMandate: The user has attached these specific targets. Jump directly to them using \`rh browser focus\`, \`rh desktop window focus\`, or reading the file without exploratory scans.`,
+      );
     }
 
     const recipes = await this.extractLearnedRecipes();

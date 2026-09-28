@@ -175,6 +175,39 @@ describe('HudCoordinator', () => {
     expect(formatted).toContain('Full-Speed Execution:');
   });
 
+  it('formats rich contextual task prompt with user attached context', () => {
+    const formatted = formatContextualTaskPrompt(
+      'launch marketing campaign',
+      {
+        app: 'Arc',
+        isBrowser: true,
+      },
+      [
+        {
+          type: 'browser_tab',
+          id: 'tab-1',
+          browser: 'Google Chrome',
+          profile: 'Personal',
+          title: 'Property Listing 101',
+          url: 'https://example.com/prop/101',
+          tabIndex: 2,
+        },
+        {
+          type: 'local_file',
+          id: 'file-1',
+          name: 'ad-banner.png',
+          path: '/mock/ad-banner.png',
+        },
+      ],
+    );
+
+    expect(formatted).toContain('User Attached Context:');
+    expect(formatted).toContain('Property Listing 101');
+    expect(formatted).toContain('https://example.com/prop/101');
+    expect(formatted).toContain('ad-banner.png');
+    expect(formatted).toContain('Target Mandate:');
+  });
+
   it('formats hud status from various agent stream events', () => {
     expect(
       formatHudStatus({ kind: 'tool_call', payload: { tool: 'desktop', input: { goal: 'Click Submit' } } })
