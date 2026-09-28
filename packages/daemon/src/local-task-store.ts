@@ -6,6 +6,7 @@ import type {
   ActionKind,
   ApprovalDecision,
   ApprovalRow,
+  ContextAttachment,
   EventKind,
   Machine,
   RiskLevel,
@@ -42,6 +43,7 @@ export interface CreateTaskInput {
   model?: string | null | undefined;
   effort?: string | null | undefined;
   status?: TaskStatus | undefined;
+  attachments?: ContextAttachment[] | undefined;
 }
 
 export interface LocalTask extends Task {
@@ -124,7 +126,8 @@ export class LocalTaskStore implements TaskStore {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         started_at TEXT,
-        finished_at TEXT
+        finished_at TEXT,
+        attachments TEXT
       );
       CREATE TABLE IF NOT EXISTS events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,6 +162,9 @@ export class LocalTaskStore implements TaskStore {
         captured_at TEXT NOT NULL
       );
     `);
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN attachments TEXT;');
+    } catch {}
   }
 
   close(): void {
@@ -177,11 +183,12 @@ export class LocalTaskStore implements TaskStore {
     const effort = input.effort ?? null;
     const status = input.status ?? 'queued';
     const nowIso = new Date().toISOString();
+    const attachments = input.attachments ? JSON.stringify(input.attachments) : null;
 
     this.db.prepare(`
-      INSERT INTO tasks (id, user_id, machine_id, prompt, kind, workspace_path, model, effort, mode, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, userId, machineId, prompt, kind, workspacePath, model, effort, mode, status, nowIso, nowIso);
+      INSERT INTO tasks (id, user_id, machine_id, prompt, kind, workspace_path, model, effort, mode, status, created_at, updated_at, attachments)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, userId, machineId, prompt, kind, workspacePath, model, effort, mode, status, nowIso, nowIso, attachments);
 
     const task = await this.getTask(id);
     return task!;
@@ -666,6 +673,11 @@ export class LocalTaskStore implements TaskStore {
     }
     if (row.result_summary !== null && row.result_summary !== undefined) {
       task.summary = row.result_summary;
+    }
+    if (row.attachments) {
+      try {
+        task.attachments = JSON.parse(row.attachments);
+      } catch {}
     }
     return task;
   }

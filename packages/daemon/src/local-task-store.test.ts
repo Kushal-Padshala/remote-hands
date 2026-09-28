@@ -32,6 +32,31 @@ describe('LocalTaskStore', () => {
     expect(fetched?.id).toBe(task.id);
   });
 
+  it('persists and retrieves task attachments', async () => {
+    const task = await store.createTask({
+      goal: 'Test attachments',
+      attachments: [
+        {
+          type: 'browser_tab',
+          id: 'tab-1',
+          browser: 'chrome',
+          profile: 'Personal',
+          title: 'Property Listing',
+          url: 'https://example.com/prop',
+          tabIndex: 1,
+        },
+      ],
+    });
+
+    expect(task.attachments?.length).toBe(1);
+    expect(task.attachments?.[0].title).toBe('Property Listing');
+
+    const fetched = await store.getTask(task.id);
+    expect(fetched?.attachments?.length).toBe(1);
+    expect(fetched?.attachments?.[0].type).toBe('browser_tab');
+    expect(fetched?.attachments?.[0].url).toBe('https://example.com/prop');
+  });
+
   it('claims next queued task and updates status', async () => {
     const task = await store.createTask({
       goal: 'Task to claim',

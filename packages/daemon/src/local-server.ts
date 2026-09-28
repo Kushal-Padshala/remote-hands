@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { LocalTaskStore } from './local-task-store.js';
+import { ContextService } from './context/context-service.js';
 
 export interface LocalServerOptions {
   port?: number | undefined;
@@ -13,6 +14,7 @@ export interface LocalServerOptions {
   store: LocalTaskStore;
   staticDir?: string | undefined;
   onTaskCreated?: ((task: any) => void) | undefined;
+  contextService?: ContextService | undefined;
 }
 
 
@@ -130,6 +132,14 @@ export class LocalServer {
         return;
       }
 
+      if (apiPath === '/context/targets' && method === 'GET') {
+        const query = parsedUrl.searchParams.get('query') || '';
+        const contextService = this.options.contextService || new ContextService();
+        const targets = query ? await contextService.filterTargets(query) : await contextService.getHierarchy();
+        this.sendJson(res, 200, targets);
+        return;
+      }
+
       if (apiPath === '/tasks' && method === 'GET') {
         const status = parsedUrl.searchParams.get('status') as any;
         const tasks = await (this.options.store.listTasks ? this.options.store.listTasks({ status }) : []);
@@ -153,6 +163,7 @@ export class LocalServer {
             mode: body.mode,
             model: body.model,
             effort: body.effort,
+            attachments: body.attachments,
           });
           this.broadcast(task.id, {
             type: 'task.event',
