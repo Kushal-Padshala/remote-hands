@@ -9,6 +9,7 @@ export * from './config.js';
 export * from './daemon.js';
 export * from './frame-stream.js';
 export * from './hermes-brain.js';
+export * from './context/context-service.js';
 export * from './local-server.js';
 export * from './local-task-store.js';
 export * from './memory-task-store.js';
