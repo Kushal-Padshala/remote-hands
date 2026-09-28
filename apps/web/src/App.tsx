@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { MachineRow, TaskRow, TaskKind, TaskMode } from '@remote-hands/shared';
+import type { ContextAttachment, MachineRow, TaskRow, TaskKind, TaskMode } from '@remote-hands/shared';
 import clsx from 'clsx';
 import { apiClient } from './api/client.js';
 import { MachinesScreen } from './screens/MachinesScreen.js';
@@ -213,6 +213,7 @@ export function App() {
     mode: TaskMode,
     model?: string,
     effort?: string,
+    attachments?: ContextAttachment[],
   ) => {
     if (!selectedMachine) return;
     setSubmittingTask(true);
@@ -224,6 +225,7 @@ export function App() {
         mode,
         model,
         effort,
+        attachments,
       });
       setActiveTask(task);
       setCurrentScreen('live-task');

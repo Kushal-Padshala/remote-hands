@@ -5,6 +5,8 @@ import {
   type ApprovalRow,
   type TaskKind,
   type TaskMode,
+  type ContextAttachment,
+  type ContextHierarchy,
 } from '@remote-hands/shared';
 
 function resolveDefaultBaseUrl(providedUrl?: string): string {
@@ -143,9 +145,15 @@ export class WebApiClient {
     workspace_path?: string | null | undefined;
     model?: string | null | undefined;
     effort?: string | null | undefined;
+    attachments?: ContextAttachment[] | undefined;
   }): Promise<TaskRow> {
     const res = await this.request<{ task: TaskRow }>('/tasks', 'POST', params);
     return res.task;
+  }
+
+  async getContextTargets(query?: string): Promise<ContextHierarchy> {
+    const qs = query ? `?query=${encodeURIComponent(query)}` : '';
+    return this.request<ContextHierarchy>(`/context/targets${qs}`, 'GET');
   }
 
   async getTask(taskId: string): Promise<TaskRow> {

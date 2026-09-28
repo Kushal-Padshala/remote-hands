@@ -1,7 +1,9 @@
 import { useState, useRef } from 'react';
-import type { MachineRow, TaskKind, TaskMode } from '@remote-hands/shared';
+import type { ContextAttachment, MachineRow, TaskKind, TaskMode } from '@remote-hands/shared';
 import { SafeThinkingOrb as ThinkingOrb } from '../components/SafeThinkingOrb.js';
 import { useVoiceInput } from '../hooks/useVoiceInput.js';
+import { AtMentionDropdown } from '../components/AtMentionDropdown.js';
+import { AttachmentChips } from '../components/AttachmentChips.js';
 import {
   SUPPORTED_MODELS,
   EFFORT_OPTIONS,
@@ -14,7 +16,14 @@ import {
 
 export interface NewTaskScreenProps {
   machine: MachineRow;
-  onCreateTask: (prompt: string, kind: TaskKind, mode: TaskMode, model?: string, effort?: string) => Promise<void>;
+  onCreateTask: (
+    prompt: string,
+    kind: TaskKind,
+    mode: TaskMode,
+    model?: string,
+    effort?: string,
+    attachments?: ContextAttachment[],
+  ) => Promise<void>;
   onCancel: () => void;
   loading: boolean;
 }
@@ -47,6 +56,8 @@ export function NewTaskScreen({ machine, onCreateTask, onCancel, loading }: NewT
     }
     return DEFAULT_EFFORT;
   });
+  const [attachments, setAttachments] = useState<ContextAttachment[]>([]);
+  const [isAtMentionOpen, setIsAtMentionOpen] = useState(false);
   const voiceBasePromptRef = useRef('');
 
   const isClaude = isClaudeModel(model);
@@ -105,7 +116,11 @@ export function NewTaskScreen({ machine, onCreateTask, onCancel, loading }: NewT
       stopVoiceListening();
     }
     if (!prompt.trim() || loading) return;
-    onCreateTask(prompt.trim(), kind, mode, model, isClaude ? undefined : effort);
+    if (attachments.length > 0) {
+      onCreateTask(prompt.trim(), kind, mode, model, isClaude ? undefined : effort, attachments);
+    } else {
+      onCreateTask(prompt.trim(), kind, mode, model, isClaude ? undefined : effort);
+    }
   };
 
   return (
@@ -159,16 +174,37 @@ export function NewTaskScreen({ machine, onCreateTask, onCancel, loading }: NewT
               )}
             </button>
           </div>
-          <textarea
-            className="textarea"
-            data-testid="task-prompt-input"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g., Navigate to my WordPress admin, add a privacy policy page with standard GDPR template and publish it."
-            rows={5}
-            required
-            autoFocus
+          <AttachmentChips
+            attachments={attachments}
+            onRemove={(id) => setAttachments((prev) => prev.filter((a) => a.id !== id))}
           />
+          <div style={{ position: 'relative' }}>
+            <AtMentionDropdown
+              isOpen={isAtMentionOpen}
+              fetchTargetsUrl="/api/context/targets"
+              onSelectAttachments={(newAtts) => {
+                setAttachments((prev) => [...prev, ...newAtts]);
+                setPrompt((p) => p.replace(/@\S*$/, '').trimEnd());
+              }}
+              onClose={() => setIsAtMentionOpen(false)}
+            />
+            <textarea
+              className="textarea"
+              data-testid="task-prompt-input"
+              value={prompt}
+              onChange={(e) => {
+                const val = e.target.value;
+                setPrompt(val);
+                if (val.endsWith('@') || val.includes('@')) {
+                  setIsAtMentionOpen(true);
+                }
+              }}
+              placeholder="e.g., Navigate to my WordPress admin, add a privacy policy page with standard GDPR template and publish it. Type @ to attach tabs or files."
+              rows={5}
+              required
+              autoFocus
+            />
+          </div>
         </div>
 
         <div className="segmented-group">

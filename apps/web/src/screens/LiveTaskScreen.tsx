@@ -5,6 +5,7 @@ import {
   type ApprovalRow,
   type MachineRow,
   type TaskKind,
+  type ContextAttachment,
 } from '@remote-hands/shared';
 import { apiClient } from '../api/client.js';
 import { FrameViewer } from '../components/FrameViewer.js';
@@ -13,6 +14,8 @@ import { StepsDropdown, type ChatStep } from '../components/StepsDropdown.js';
 import { MarkdownView } from '../components/MarkdownView.js';
 import { SafeThinkingOrb as ThinkingOrb } from '../components/SafeThinkingOrb.js';
 import { VoiceButton } from '../components/VoiceButton.js';
+import { AtMentionDropdown } from '../components/AtMentionDropdown.js';
+import { AttachmentChips } from '../components/AttachmentChips.js';
 import { useVoiceInput } from '../hooks/useVoiceInput.js';
 import {
   SUPPORTED_MODELS,
@@ -202,6 +205,8 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
 
   const [isWorking, setIsWorking] = useState<boolean>(isTaskActive(task));
   const [chatInput, setChatInput] = useState('');
+  const [attachments, setAttachments] = useState<ContextAttachment[]>([]);
+  const [isAtMentionOpen, setIsAtMentionOpen] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const frameExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -863,7 +868,9 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
         workspace_path: task?.workspace_path ?? undefined,
         model: selectedModel,
         effort: isClaudeModel(selectedModel) ? undefined : selectedEffort,
+        attachments: attachments.length > 0 ? attachments : undefined,
       });
+      setAttachments([]);
       setFrameBase64(null);
       setCurrentTaskId(nextTask.id);
       if (nextTask.conversation_id) {
@@ -1302,16 +1309,35 @@ export function LiveTaskScreen({ task, machine, machineName, onBack, webSocketFa
           </div>
         )}
 
-        <div className="chat-composer-card">
+        <AttachmentChips
+          attachments={attachments}
+          onRemove={(id) => setAttachments((prev) => prev.filter((a) => a.id !== id))}
+        />
+        <div className="chat-composer-card" style={{ position: 'relative' }}>
+          <AtMentionDropdown
+            isOpen={isAtMentionOpen}
+            fetchTargetsUrl="/api/context/targets"
+            onSelectAttachments={(newAtts) => {
+              setAttachments((prev) => [...prev, ...newAtts]);
+              setChatInput((p) => p.replace(/@\S*$/, '').trimEnd());
+            }}
+            onClose={() => setIsAtMentionOpen(false)}
+          />
           <textarea
             ref={textareaRef}
             rows={1}
             className="chat-input-field"
             data-testid="task-prompt-input"
             aria-label={`Message agy on ${resolvedMachineName}`}
-            placeholder={`Message agy on ${resolvedMachineName}...`}
+            placeholder={`Message agy on ${resolvedMachineName}... (type @ to attach)`}
             value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setChatInput(val);
+              if (val.endsWith('@') || val.includes('@')) {
+                setIsAtMentionOpen(true);
+              }
+            }}
             onKeyDown={handleKeyDown}
             onFocus={handleFocus}
             disabled={sendingMessage}
