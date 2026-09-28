@@ -69,4 +69,39 @@ describe('SpotlightHudRunner', () => {
     handle.close();
     expect(onCancel).toHaveBeenCalled();
   });
+
+  it('parses attachments in prompt response from swift hud', async () => {
+    mockExec.mockReturnValue({
+      stdout: JSON.stringify({
+        query: 'check the ad campaign',
+        app: 'Arc',
+        attachments: [
+          {
+            type: 'browser_tab',
+            id: 'tab-1',
+            browser: 'Arc',
+            title: 'Meta Ads Manager',
+            url: 'https://adsmanager.facebook.com',
+          },
+        ],
+      }),
+      stderr: '',
+      status: 0,
+    });
+
+    const result = await runner.openPrompt('Arc');
+    expect(result).toEqual({
+      query: 'check the ad campaign',
+      app: 'Arc',
+      attachments: [
+        {
+          type: 'browser_tab',
+          id: 'tab-1',
+          browser: 'Arc',
+          title: 'Meta Ads Manager',
+          url: 'https://adsmanager.facebook.com',
+        },
+      ],
+    });
+  });
 });

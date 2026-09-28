@@ -13,6 +13,10 @@ class SpotlightPanel: NSPanel {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.keyCode == 53 {
             if let delegate = NSApp.delegate as? AppDelegate {
+                if delegate.contextPanel?.isVisible == true {
+                    delegate.hideContextPanel()
+                    return true
+                }
                 if delegate.isWorking {
                     delegate.onStopClicked()
                 } else {
@@ -68,6 +72,10 @@ class SpotlightPanel: NSPanel {
 
     override func cancelOperation(_ sender: Any?) {
         if let delegate = NSApp.delegate as? AppDelegate {
+            if delegate.contextPanel?.isVisible == true {
+                delegate.hideContextPanel()
+                return
+            }
             if delegate.isWorking {
                 delegate.onStopClicked()
             } else {
@@ -77,11 +85,12 @@ class SpotlightPanel: NSPanel {
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
     var panel: SpotlightPanel!
     var visualEffect: NSVisualEffectView!
     var textField: NSTextField!
     var badge: NSTextField!
+    var attachmentChipsLabel: NSTextField!
     var statusPill: NSTextField!
     var stopButton: HudActionButton!
     var closeButton: HudActionButton!
@@ -93,14 +102,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var isWorking: Bool = false
     var isExpanded: Bool = false
 
-    init(targetApp: String) {
+    var initialContext: [String: Any]?
+    var contextPanel: NSPanel?
+    var contextScrollView: NSScrollView?
+    var contextTableView: NSTableView?
+    var contextItems: [[String: Any]] = []
+    var filteredContextItems: [[String: Any]] = []
+    var selectedAttachments: [[String: Any]] = []
+
+    init(targetApp: String, initialContext: [String: Any]? = nil) {
         self.targetApp = targetApp
+        self.initialContext = initialContext
         super.init()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
         setupUI()
+        if let ctx = initialContext {
+            loadHierarchy(ctx)
+        } else {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                if let h = self?.fetchContextHierarchy() {
+                    DispatchQueue.main.async {
+                        self?.loadHierarchy(h)
+                    }
+                }
+            }
+        }
     }
 
     func setupMainMenu() {
@@ -154,8 +183,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         badge = NSTextField(labelWithString: targetApp.uppercased())
         badge.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
         badge.textColor = NSColor(red: 0.23, green: 0.51, blue: 0.96, alpha: 1.0)
-        badge.frame = NSRect(x: 24, y: height - 26, width: width - 80, height: 16)
+        badge.frame = NSRect(x: 24, y: height - 26, width: 130, height: 16)
         visualEffect.addSubview(badge)
+
+        attachmentChipsLabel = NSTextField(labelWithString: "")
+        attachmentChipsLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        attachmentChipsLabel.textColor = NSColor(red: 0.35, green: 0.75, blue: 1.0, alpha: 1.0)
+        attachmentChipsLabel.frame = NSRect(x: 160, y: height - 26, width: width - 300, height: 16)
+        attachmentChipsLabel.lineBreakMode = .byTruncatingTail
+        attachmentChipsLabel.isHidden = true
+        visualEffect.addSubview(attachmentChipsLabel)
 
         closeButton = HudActionButton(frame: NSRect(x: width - 44, y: height - 30, width: 26, height: 24))
         closeButton.title = "✕"
@@ -199,7 +236,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         textField.focusRingType = .none
         textField.font = NSFont.systemFont(ofSize: 18, weight: .medium)
         textField.textColor = .white
-        textField.placeholderString = "Ask anything or type a goal... (e.g. check open tabs, create campaign)"
+        textField.placeholderString = "Ask anything or type @ to attach context..."
         textField.isEditable = true
         textField.isSelectable = true
         textField.delegate = self
@@ -209,6 +246,312 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         panel.makeFirstResponder(textField)
+    }
+
+    func fetchContextHierarchy() -> [String: Any]? {
+        let p = Process()
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = FileHandle.nullDevice
+
+        let searchPaths = [
+            "/usr/local/bin/rh",
+            "/opt/homebrew/bin/rh",
+            NSHomeDirectory() + "/.remote-hands/bin/rh",
+            FileManager.default.currentDirectoryPath + "/packages/cli/bin/rh.js",
+        ]
+        var execPath = "/usr/bin/env"
+        var execArgs = ["rh", "context", "list", "--json"]
+
+        for path in searchPaths {
+            if FileManager.default.fileExists(atPath: path) {
+                if path.hasSuffix(".js") {
+                    execPath = "/usr/bin/env"
+                    execArgs = ["node", path, "context", "list", "--json"]
+                } else {
+                    execPath = path
+                    execArgs = ["context", "list", "--json"]
+                }
+                break
+            }
+        }
+
+        p.executableURL = URL(fileURLWithPath: execPath)
+        p.arguments = execArgs
+
+        do {
+            try p.run()
+            p.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                return json
+            }
+        } catch {}
+        return nil
+    }
+
+    func loadHierarchy(_ h: [String: Any]) {
+        var items: [[String: Any]] = []
+
+        if let browsers = h["browsers"] as? [[String: Any]] {
+            for b in browsers {
+                let bName = b["name"] as? String ?? "Browser"
+                if let profiles = b["profiles"] as? [[String: Any]] {
+                    for p in profiles {
+                        let pName = p["name"] as? String ?? "Default"
+                        if let tabs = p["tabs"] as? [[String: Any]] {
+                            for t in tabs {
+                                let title = t["title"] as? String ?? ""
+                                let url = t["url"] as? String ?? ""
+                                let id = t["id"] as? String ?? UUID().uuidString
+                                let tabIndex = t["tabIndex"] as? Int
+                                var att: [String: Any] = [
+                                    "type": "browser_tab",
+                                    "id": id,
+                                    "browser": bName,
+                                    "profile": pName,
+                                    "title": title,
+                                    "url": url,
+                                    "label": "🌐 \(bName) [\(pName)]: \(title)"
+                                ]
+                                if let idx = tabIndex {
+                                    att["tabIndex"] = idx
+                                }
+                                items.append(att)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let apps = h["apps"] as? [[String: Any]] {
+            for a in apps {
+                let aName = a["name"] as? String ?? ""
+                let aId = a["id"] as? String ?? aName
+                let windows = a["windows"] as? [[String: Any]] ?? []
+                let wTitle = windows.first?["title"] as? String ?? aName
+                items.append([
+                    "type": "app_window",
+                    "id": "app-\(aId)",
+                    "app": aName,
+                    "title": wTitle,
+                    "label": "💻 \(aName) (\(wTitle))"
+                ])
+            }
+        }
+
+        if let files = h["files"] as? [[String: Any]] {
+            for f in files {
+                let fName = f["name"] as? String ?? ""
+                let fPath = f["path"] as? String ?? ""
+                let fId = f["id"] as? String ?? fName
+                let isDir = f["isDir"] as? Bool ?? false
+                items.append([
+                    "type": "local_file",
+                    "id": fId,
+                    "name": fName,
+                    "path": fPath,
+                    "isDir": isDir,
+                    "label": "📄 \(fName)"
+                ])
+            }
+        }
+
+        if items.isEmpty {
+            for app in NSWorkspace.shared.runningApplications {
+                if app.activationPolicy == .regular, let name = app.localizedName {
+                    items.append([
+                        "type": "app_window",
+                        "id": "app-\(app.bundleIdentifier ?? name)",
+                        "app": name,
+                        "title": name,
+                        "label": "💻 \(name)"
+                    ])
+                }
+            }
+        }
+
+        self.contextItems = items
+    }
+
+    func showContextPanel(query: String) {
+        if contextItems.isEmpty {
+            if let h = fetchContextHierarchy() {
+                loadHierarchy(h)
+            }
+        }
+
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if q.isEmpty {
+            filteredContextItems = contextItems
+        } else {
+            filteredContextItems = contextItems.filter {
+                let label = ($0["label"] as? String ?? "").lowercased()
+                let title = ($0["title"] as? String ?? "").lowercased()
+                let name = ($0["name"] as? String ?? "").lowercased()
+                let url = ($0["url"] as? String ?? "").lowercased()
+                return label.contains(q) || title.contains(q) || name.contains(q) || url.contains(q)
+            }
+        }
+
+        let rowCount = max(1, min(6, filteredContextItems.count))
+        let targetHeight: CGFloat = CGFloat(rowCount * 32 + 16)
+        let panelFrame = panel.frame
+        let popoverRect = NSRect(x: panelFrame.origin.x, y: panelFrame.origin.y - targetHeight - 4, width: panelFrame.width, height: targetHeight)
+
+        if contextPanel == nil {
+            let p = NSPanel(
+                contentRect: popoverRect,
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            p.level = .floating
+            p.isOpaque = false
+            p.backgroundColor = .clear
+            p.hasShadow = true
+
+            let effect = NSVisualEffectView(frame: NSRect(origin: .zero, size: popoverRect.size))
+            effect.material = .hudWindow
+            effect.blendingMode = .behindWindow
+            effect.state = .active
+            effect.wantsLayer = true
+            effect.layer?.cornerRadius = 14
+            effect.layer?.masksToBounds = true
+            effect.layer?.borderWidth = 1
+            effect.layer?.borderColor = NSColor(white: 1.0, alpha: 0.15).cgColor
+
+            let scroll = NSScrollView(frame: NSRect(x: 8, y: 8, width: popoverRect.width - 16, height: targetHeight - 16))
+            scroll.drawsBackground = false
+            scroll.hasVerticalScroller = true
+            scroll.autohidesScrollers = true
+            scroll.borderType = .noBorder
+
+            let table = NSTableView(frame: scroll.bounds)
+            table.headerView = nil
+            table.backgroundColor = .clear
+            table.selectionHighlightStyle = .regular
+            table.target = self
+            table.action = #selector(onTableRowClicked)
+
+            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("contextCol"))
+            column.width = popoverRect.width - 32
+            table.addTableColumn(column)
+
+            table.dataSource = self
+            table.delegate = self
+
+            scroll.documentView = table
+
+            effect.addSubview(scroll)
+            p.contentView = effect
+
+            self.contextPanel = p
+            self.contextScrollView = scroll
+            self.contextTableView = table
+        } else {
+            contextPanel?.setFrame(popoverRect, display: true)
+            contextScrollView?.frame = NSRect(x: 8, y: 8, width: popoverRect.width - 16, height: targetHeight - 16)
+        }
+
+        contextTableView?.reloadData()
+        if !filteredContextItems.isEmpty {
+            contextTableView?.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        }
+        contextPanel?.orderFront(nil)
+        panel.addChildWindow(contextPanel!, ordered: .above)
+    }
+
+    func hideContextPanel() {
+        if let cp = contextPanel, cp.isVisible {
+            panel.removeChildWindow(cp)
+            cp.orderOut(nil)
+        }
+    }
+
+    func attachItem(_ item: [String: Any]) {
+        var cleanItem = item
+        cleanItem.removeValue(forKey: "label")
+        selectedAttachments.append(cleanItem)
+
+        let cur = textField.stringValue
+        if let atIdx = cur.lastIndex(of: "@") {
+            textField.stringValue = String(cur[..<atIdx]).trimmingCharacters(in: .whitespaces)
+        }
+
+        updateChipsDisplay()
+        hideContextPanel()
+    }
+
+    func updateChipsDisplay() {
+        if selectedAttachments.isEmpty {
+            attachmentChipsLabel.stringValue = ""
+            attachmentChipsLabel.isHidden = true
+        } else {
+            let labels = selectedAttachments.compactMap { att -> String? in
+                let type = att["type"] as? String ?? ""
+                if type == "browser_tab" {
+                    let b = att["browser"] as? String ?? "Web"
+                    let t = att["title"] as? String ?? "Tab"
+                    return "[\(b): \(t)]"
+                } else if type == "app_window" {
+                    let a = att["app"] as? String ?? "App"
+                    return "[\(a)]"
+                } else if type == "local_file" {
+                    let n = att["name"] as? String ?? "File"
+                    return "[\(n)]"
+                }
+                return nil
+            }
+            attachmentChipsLabel.stringValue = "📎 " + labels.joined(separator: " ")
+            attachmentChipsLabel.isHidden = false
+        }
+    }
+
+    @objc func onTableRowClicked() {
+        let row = contextTableView?.clickedRow ?? -1
+        if row >= 0 && row < filteredContextItems.count {
+            attachItem(filteredContextItems[row])
+        }
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        return filteredContextItems.count
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard row < filteredContextItems.count else { return nil }
+        let item = filteredContextItems[row]
+        let label = item["label"] as? String ?? ""
+
+        let cellId = NSUserInterfaceItemIdentifier("ContextCell")
+        var tf = tableView.makeView(withIdentifier: cellId, owner: self) as? NSTextField
+        if tf == nil {
+            tf = NSTextField(labelWithString: "")
+            tf?.identifier = cellId
+            tf?.isBordered = false
+            tf?.drawsBackground = false
+            tf?.font = NSFont.systemFont(ofSize: 13, weight: .regular)
+            tf?.textColor = .white
+            tf?.lineBreakMode = .byTruncatingTail
+        }
+        tf?.stringValue = label
+        return tf
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        return 28
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        let current = textField.stringValue
+        if let atIndex = current.lastIndex(of: "@") {
+            let afterAt = String(current[current.index(after: atIndex)...])
+            showContextPanel(query: afterAt)
+        } else {
+            hideContextPanel()
+        }
     }
 
     @objc func onStopClicked() {
@@ -232,15 +575,49 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if contextPanel?.isVisible == true {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) || commandSelector == #selector(NSResponder.insertTab(_:)) {
+                let sel = contextTableView?.selectedRow ?? 0
+                if sel >= 0 && sel < filteredContextItems.count {
+                    attachItem(filteredContextItems[sel])
+                    return true
+                }
+            } else if commandSelector == #selector(NSResponder.moveDown(_:)) {
+                if let tv = contextTableView {
+                    let next = min(tv.selectedRow + 1, filteredContextItems.count - 1)
+                    if next >= 0 {
+                        tv.selectRowIndexes(IndexSet(integer: next), byExtendingSelection: false)
+                        tv.scrollRowToVisible(next)
+                    }
+                }
+                return true
+            } else if commandSelector == #selector(NSResponder.moveUp(_:)) {
+                if let tv = contextTableView {
+                    let prev = max(tv.selectedRow - 1, 0)
+                    tv.selectRowIndexes(IndexSet(integer: prev), byExtendingSelection: false)
+                    tv.scrollRowToVisible(prev)
+                }
+                return true
+            } else if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                hideContextPanel()
+                return true
+            }
+        }
+
         if commandSelector == #selector(NSResponder.insertNewline(_:)) {
             let text = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty {
                 textField.stringValue = ""
-                let dict: [String: String] = ["event": "submit", "query": text, "app": targetApp]
+                var dict: [String: Any] = ["event": "submit", "query": text, "app": targetApp]
+                if !selectedAttachments.isEmpty {
+                    dict["attachments"] = selectedAttachments
+                }
                 if let data = try? JSONSerialization.data(withJSONObject: dict),
                    let json = String(data: data, encoding: .utf8) {
                     print(json)
                     fflush(stdout)
+                    selectedAttachments = []
+                    updateChipsDisplay()
                     if !isExpanded {
                         transitionToProgress(query: text)
                     } else {
@@ -311,7 +688,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         badge.stringValue = targetApp.uppercased()
         badge.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
         badge.textColor = NSColor(red: 0.23, green: 0.51, blue: 0.96, alpha: 1.0)
-        badge.frame = NSRect(x: 20, y: newHeight - 32, width: 200, height: 18)
+        badge.frame = NSRect(x: 20, y: newHeight - 32, width: 130, height: 18)
+
+        attachmentChipsLabel.frame = NSRect(x: 160, y: newHeight - 32, width: width - 440, height: 18)
 
         statusPill.frame = NSRect(x: width - 265, y: newHeight - 32, width: 125, height: 18)
         statusPill.stringValue = "● WORKING"
@@ -445,12 +824,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 let args = CommandLine.arguments
 var mode = "prompt"
 var appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Desktop"
+var initialContext: [String: Any]? = nil
 
 for arg in args {
     if arg == "listen" {
         mode = "listen"
     } else if arg.starts(with: "--app=") {
         appName = String(arg.dropFirst(6))
+    } else if arg.starts(with: "--context=") {
+        let jsonStr = String(arg.dropFirst(10))
+        if let data = jsonStr.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            initialContext = obj
+        }
     }
 }
 
@@ -502,7 +888,7 @@ if mode == "listen" {
     }
     app.run()
 } else {
-    let delegate = AppDelegate(targetApp: appName)
+    let delegate = AppDelegate(targetApp: appName, initialContext: initialContext)
     app.delegate = delegate
     app.run()
 }

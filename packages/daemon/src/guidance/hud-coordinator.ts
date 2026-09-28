@@ -451,7 +451,7 @@ export class HudCoordinator {
       if (sendUpdate) {
         sendUpdate('THINKING', 'Analyzing context and initializing agent...');
       }
-      const prompt = formatContextualTaskPrompt(result.query, windowContext);
+      const prompt = formatContextualTaskPrompt(result.query, windowContext, result.attachments);
       const task = await this.store.createTask({
         prompt,
         goal: result.query,
@@ -461,6 +461,7 @@ export class HudCoordinator {
         model: 'gemini-3.8-flash',
         effort: 'low',
         conversation_id: this.currentConversationId ?? null,
+        attachments: result.attachments,
       });
       this.currentTaskId = task.id;
       if (this.onTaskCreated) {

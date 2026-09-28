@@ -4,10 +4,12 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { ExecFunction } from './macos-driver.js';
+import type { ContextAttachment } from '@remote-hands/shared';
 
 export interface SpotlightPromptResult {
   query: string;
   app: string;
+  attachments?: ContextAttachment[];
 }
 
 export type SpotlightListenerEvent = SpotlightPromptResult | { event: string; app: string; query?: string };
@@ -117,7 +119,11 @@ export class SpotlightHudRunner {
       const firstLine = res.stdout.trim().split('\n')[0] || '{}';
       const parsed = JSON.parse(firstLine);
       if (parsed && typeof parsed.query === 'string') {
-        return { query: parsed.query, app: parsed.app || activeApp || 'Desktop' };
+        return {
+          query: parsed.query,
+          app: parsed.app || activeApp || 'Desktop',
+          attachments: Array.isArray(parsed.attachments) ? parsed.attachments : undefined,
+        };
       }
       return null;
     } catch {
@@ -190,6 +196,7 @@ export class SpotlightHudRunner {
             const res: SpotlightPromptResult = {
               query: parsed.query,
               app: parsed.app || activeApp || 'Desktop',
+              attachments: Array.isArray(parsed.attachments) ? parsed.attachments : undefined,
             };
             Promise.resolve(onSubmit(res, sendUpdate)).catch(() => {});
           } else if (parsed.event === 'stop') {
