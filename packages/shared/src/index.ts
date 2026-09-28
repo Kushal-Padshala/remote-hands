@@ -5,6 +5,7 @@ export * from './approval.js';
 export * from './realtime.js';
 export * from './api.js';
 export * from './security.js';
+export * from './context-attachment.js';
 export type { Database } from './database.generated.js';
 
 

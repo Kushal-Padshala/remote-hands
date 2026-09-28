@@ -10,6 +10,8 @@ export type TaskKind = (typeof TASK_KINDS)[number];
 export const TASK_MODES = ['default', 'accept-edits', 'plan'] as const;
 export type TaskMode = (typeof TASK_MODES)[number];
 
+import type { ContextAttachment } from './context-attachment.js';
+
 export interface Task {
   id: string;
   user_id: string;
@@ -28,6 +30,7 @@ export interface Task {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  attachments?: ContextAttachment[] | undefined;
 }
 
 const TERMINAL: ReadonlySet<TaskStatus> = new Set(['done', 'failed', 'cancelled']);

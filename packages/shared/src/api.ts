@@ -60,6 +60,8 @@ export const machineListResponseSchema = z.object({
 });
 export type MachineListResponse = z.infer<typeof machineListResponseSchema>;
 
+import { contextAttachmentSchema } from './context-attachment.js';
+
 export const createTaskRequestSchema = z.object({
   machine_id: z.string().uuid(),
   prompt: z.string().min(1).max(20000),
@@ -70,6 +72,7 @@ export const createTaskRequestSchema = z.object({
   effort: z.string().optional(),
   conversation_id: z.string().optional(),
   parent_task_id: z.string().uuid().optional(),
+  attachments: z.array(contextAttachmentSchema).optional(),
 });
 
 export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>;
@@ -92,6 +95,7 @@ export const taskRowSchema = z.object({
   created_at: z.string(),
   started_at: z.string().nullable(),
   finished_at: z.string().nullable(),
+  attachments: z.array(contextAttachmentSchema).optional(),
 });
 export type TaskRow = z.infer<typeof taskRowSchema>;
 
