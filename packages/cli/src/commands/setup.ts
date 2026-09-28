@@ -45,6 +45,7 @@ import {
 } from '../cloudflare/wrangler.js';
 import { writeWranglerConfig, defaultFileSystem, type FileSystemAdapter } from '../cloudflare/project.js';
 import { ensureBrowserHarness } from '../system/browser-harness.js';
+import { ensureRemoteHandsOperatorSkill } from '../system/operator-skill.js';
 import { ensureAgyPermissions } from '../system/agy-permissions.js';
 import { ensureMacPermissions } from '../system/mac-permissions.js';
 import { ensureCloudflaredBinary } from '../system/tunnel.js';
@@ -190,7 +191,8 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     stdout(renderStepStart(2, LOCAL_STEPS, 'Browser Automation Engine (browser-use)'));
     stdout(renderStepInfo('Verifying browser-harness and agent skill registration...'));
     await ensureBrowserHarness(runner, projectRoot, (msg) => stdout(renderStepInfo(msg)), stderr, fs);
-    stdout(renderStepSuccess('browser-harness is installed and ready'));
+    await ensureRemoteHandsOperatorSkill(fs, projectRoot);
+    stdout(renderStepSuccess('browser-harness and remote-hands-operator skills are ready'));
 
     stdout(renderStepStart(3, LOCAL_STEPS, 'Account-less Remote Tunnel (cloudflared)'));
     if (!context.runner) {
@@ -291,7 +293,8 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   stdout(renderStepStart(3, TOTAL_STEPS, 'Browser Automation Engine (browser-use)'));
   stdout(renderStepInfo('Verifying browser-harness and agent skill registration...'));
   await ensureBrowserHarness(runner, projectRoot, (msg) => stdout(renderStepInfo(msg)), stderr, fs);
-  stdout(renderStepSuccess('browser-harness is installed and ready'));
+  await ensureRemoteHandsOperatorSkill(fs, projectRoot);
+  stdout(renderStepSuccess('browser-harness and remote-hands-operator skills are ready'));
 
   stdout(renderStepStart(4, TOTAL_STEPS, 'Serverless Database (Cloudflare D1)'));
   stdout(renderStepInfo('Provisioning D1 SQLite database (remote-hands-db)...'));

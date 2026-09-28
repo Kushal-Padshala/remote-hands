@@ -2,6 +2,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { FileSystemAdapter } from '../cloudflare/project.js';
 import { defaultFileSystem } from '../cloudflare/project.js';
+import { ensureRemoteHandsOperatorSkill } from './operator-skill.js';
 
 export const STANDARD_AGY_PERMISSIONS = [
   'read_file',
@@ -186,6 +187,10 @@ export async function ensureAgyPermissions(
         anySucceeded = true;
       } catch {}
     }
+
+    try {
+      await ensureRemoteHandsOperatorSkill(fs, workspacePath);
+    } catch {}
 
     return anySucceeded;
   } catch {
