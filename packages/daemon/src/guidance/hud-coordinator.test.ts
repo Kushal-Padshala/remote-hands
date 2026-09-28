@@ -26,6 +26,7 @@ describe('HudCoordinator', () => {
         url: 'https://realestate.example.com',
         isBrowser: true,
       }),
+      focusWindow: vi.fn().mockResolvedValue(undefined),
     };
     coordinator = new HudCoordinator(
       mockHudRunner,
@@ -242,7 +243,7 @@ describe('HudCoordinator', () => {
     expect(mockHudRunner.startListener).toHaveBeenCalled();
 
     await capturedListener({ event: 'hotkey', app: 'Safari' });
-    expect(mockHudRunner.openInteractivePrompt).toHaveBeenCalledWith('Safari', expect.any(Function), expect.any(Function));
+    expect(mockHudRunner.openInteractivePrompt).toHaveBeenCalledWith('Safari', expect.any(Function), expect.any(Function), expect.any(Function));
 
     await submitHandler({ query: 'start advertising campaign', app: 'Safari' }, dummySender);
     expect(mockStore.createTask).toHaveBeenCalledWith(
@@ -388,5 +389,99 @@ describe('HudCoordinator', () => {
     expect(capturedSignal?.aborted).toBe(true);
     expect(mockStore.cancelTask).toHaveBeenCalledWith('task-prompt-cancel', expect.stringContaining('Spotlight HUD'));
     expect(coordinator.hasActiveTask()).toBe(false);
+  });
+
+  it('stops running task via stopActiveTask without clearing conversation continuity', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const mockRunner = {
+      run: vi.fn().mockImplementation(async (_task: any, _onEvent: any, signal: AbortSignal) => {
+        capturedSignal = signal;
+        return new Promise((resolve) => {
+          signal.addEventListener('abort', () => {
+            resolve({ status: 'done', summary: 'Task stopped' });
+          });
+        });
+      }),
+    };
+
+    const mockStore = {
+      claimNextTask: vi.fn().mockResolvedValue({ id: 'task-stop-1' }),
+      markTaskRunning: vi.fn().mockResolvedValue({ id: 'task-stop-1' }),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      cancelTask: vi.fn().mockResolvedValue({ id: 'task-stop-1', status: 'cancelled' }),
+      completeTask: vi.fn(),
+    };
+
+    const stopCoordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: mockStore as any,
+      runner: mockRunner as any,
+    });
+
+    const executionPromise = stopCoordinator.executeTaskStandalone({ id: 'task-stop-1' } as any);
+    expect(stopCoordinator.hasActiveTask()).toBe(true);
+
+    await new Promise((r) => setTimeout(r, 10));
+    const updateSender = vi.fn();
+    await stopCoordinator.stopActiveTask('User pressed stop', updateSender);
+    await executionPromise;
+
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(mockStore.cancelTask).toHaveBeenCalledWith('task-stop-1', 'User pressed stop');
+    expect(updateSender).toHaveBeenCalledWith('STOPPED', 'User pressed stop', 'STATUS');
+    expect(stopCoordinator.hasActiveTask()).toBe(false);
+  });
+
+  it('preserves conversation_id across follow-up prompts in the same HUD session', async () => {
+    let submitCallback: any;
+    mockHudRunner.openInteractivePrompt = vi.fn().mockImplementation((_app: any, onSubmit: any) => {
+      submitCallback = onSubmit;
+      return { close: vi.fn() };
+    });
+
+    const createdTasks: any[] = [];
+    const mockStore = {
+      createTask: vi.fn().mockImplementation(async (input: any) => {
+        const t = { id: `task-${createdTasks.length + 1}`, ...input };
+        createdTasks.push(t);
+        return t;
+      }),
+      markTaskRunning: vi.fn().mockImplementation(async (id: string) => ({ id, status: 'running' })),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const mockRunner = {
+      run: vi.fn()
+        .mockResolvedValueOnce({ status: 'done', summary: 'Found 3 items', conversationId: 'conv-hud-99' })
+        .mockResolvedValueOnce({ status: 'done', summary: 'Added to cart', conversationId: 'conv-hud-99' }),
+    };
+
+    const coordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: mockStore as any,
+      runner: mockRunner as any,
+      autoExecute: true,
+    });
+
+    coordinator.startListening();
+    const hotkeyCb = mockHudRunner.startListener.mock.calls[0]![0];
+    await hotkeyCb({ event: 'hotkey', app: 'Google Chrome' });
+
+    await submitCallback({ query: 'search laptops on amazon', app: 'Google Chrome' }, () => {});
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(createdTasks[0].conversation_id).toBeNull();
+
+    await submitCallback({ query: 'click the first result and add to cart', app: 'Google Chrome' }, () => {});
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(createdTasks[1].conversation_id).toBe('conv-hud-99');
   });
 });

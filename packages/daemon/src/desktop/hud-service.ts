@@ -83,7 +83,18 @@ export class HudServiceManager {
       fs.mkdirSync(logDir, { recursive: true });
       fs.mkdirSync(path.dirname(this.plistPath), { recursive: true });
 
-      const xml = generateHudPlistXml(nodePath, resolvedCli, logDir);
+      const safeCliDir = path.join(os.homedir(), '.remote-hands', 'cli');
+      fs.mkdirSync(safeCliDir, { recursive: true });
+      const safeCliPath = path.join(safeCliDir, 'index.js');
+      let targetCliPath = resolvedCli;
+      if (fs.existsSync(resolvedCli)) {
+        try {
+          fs.copyFileSync(resolvedCli, safeCliPath);
+          targetCliPath = safeCliPath;
+        } catch {}
+      }
+
+      const xml = generateHudPlistXml(nodePath, targetCliPath, logDir);
       fs.writeFileSync(this.plistPath, xml, 'utf-8');
 
       this.exec('launchctl', ['unload', this.plistPath]);

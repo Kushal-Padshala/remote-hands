@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import Carbon
 
-class HudCloseButton: NSButton {
+class HudActionButton: NSButton {
     override var mouseDownCanMoveWindow: Bool { false }
 }
 
@@ -11,13 +11,28 @@ class SpotlightPanel: NSPanel {
     override var canBecomeMain: Bool { true }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.keyCode == 53 {
+            if let delegate = NSApp.delegate as? AppDelegate {
+                if delegate.isWorking {
+                    delegate.onStopClicked()
+                } else {
+                    delegate.onCancelClicked()
+                }
+                return true
+            }
+        }
         if event.modifierFlags.contains(.command), let chars = event.charactersIgnoringModifiers {
             switch chars.lowercased() {
+            case ".":
+                if let delegate = NSApp.delegate as? AppDelegate {
+                    delegate.onStopClicked()
+                    return true
+                }
             case "w":
-                print("{\"event\":\"cancel\"}")
-                fflush(stdout)
-                usleep(50000)
-                exit(0)
+                if let delegate = NSApp.delegate as? AppDelegate {
+                    delegate.onCancelClicked()
+                    return true
+                }
             case "v":
                 if NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: self) {
                     return true
@@ -52,10 +67,13 @@ class SpotlightPanel: NSPanel {
     }
 
     override func cancelOperation(_ sender: Any?) {
-        print("{\"event\":\"cancel\"}")
-        fflush(stdout)
-        usleep(50000)
-        exit(0)
+        if let delegate = NSApp.delegate as? AppDelegate {
+            if delegate.isWorking {
+                delegate.onStopClicked()
+            } else {
+                delegate.onCancelClicked()
+            }
+        }
     }
 }
 
@@ -65,11 +83,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var textField: NSTextField!
     var badge: NSTextField!
     var statusPill: NSTextField!
-    var stopButton: HudCloseButton!
-    var dividerLine: NSBox!
+    var stopButton: HudActionButton!
+    var closeButton: HudActionButton!
+    var topDividerLine: NSBox!
+    var bottomDividerLine: NSBox!
     var historyScrollView: NSScrollView!
     var historyTextView: NSTextView!
     var targetApp: String = "Desktop"
+    var isWorking: Bool = false
+    var isExpanded: Bool = false
 
     init(targetApp: String) {
         self.targetApp = targetApp
@@ -134,18 +156,41 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         badge.frame = NSRect(x: 24, y: height - 26, width: width - 80, height: 16)
         visualEffect.addSubview(badge)
 
-        stopButton = HudCloseButton(frame: NSRect(x: width - 44, y: height - 30, width: 26, height: 24))
-        stopButton.title = "✕"
+        closeButton = HudActionButton(frame: NSRect(x: width - 44, y: height - 30, width: 26, height: 24))
+        closeButton.title = "✕"
+        closeButton.bezelStyle = .regularSquare
+        closeButton.isBordered = false
+        closeButton.wantsLayer = true
+        closeButton.layer?.cornerRadius = 12
+        closeButton.layer?.masksToBounds = true
+        closeButton.font = NSFont.systemFont(ofSize: 14, weight: .bold)
+        closeButton.contentTintColor = NSColor(white: 0.75, alpha: 1.0)
+        closeButton.target = self
+        closeButton.action = #selector(onCancelClicked)
+        visualEffect.addSubview(closeButton)
+
+        stopButton = HudActionButton(frame: NSRect(x: width - 130, y: height - 32, width: 78, height: 24))
+        stopButton.title = "⏹ Stop"
         stopButton.bezelStyle = .regularSquare
         stopButton.isBordered = false
         stopButton.wantsLayer = true
         stopButton.layer?.cornerRadius = 12
         stopButton.layer?.masksToBounds = true
-        stopButton.font = NSFont.systemFont(ofSize: 14, weight: .bold)
-        stopButton.contentTintColor = NSColor(white: 0.75, alpha: 1.0)
+        stopButton.layer?.backgroundColor = NSColor(red: 0.85, green: 0.25, blue: 0.25, alpha: 0.25).cgColor
+        stopButton.font = NSFont.systemFont(ofSize: 11, weight: .bold)
+        stopButton.contentTintColor = NSColor(red: 1.0, green: 0.45, blue: 0.45, alpha: 1.0)
         stopButton.target = self
-        stopButton.action = #selector(onCancelClicked)
+        stopButton.action = #selector(onStopClicked)
+        stopButton.isHidden = true
         visualEffect.addSubview(stopButton)
+
+        statusPill = NSTextField(labelWithString: "● THINKING")
+        statusPill.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
+        statusPill.textColor = NSColor.systemCyan
+        statusPill.frame = NSRect(x: width - 265, y: height - 32, width: 125, height: 18)
+        statusPill.alignment = .right
+        statusPill.isHidden = true
+        visualEffect.addSubview(statusPill)
 
         textField = NSTextField(frame: NSRect(x: 22, y: 14, width: width - 44, height: 40))
         textField.isBordered = false
@@ -153,24 +198,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         textField.focusRingType = .none
         textField.font = NSFont.systemFont(ofSize: 18, weight: .medium)
         textField.textColor = .white
-        textField.placeholderString = "Ask anything or type a goal... (e.g. create a rental ad campaign)"
+        textField.placeholderString = "Ask anything or type a goal... (e.g. check open tabs, create campaign)"
         textField.isEditable = true
         textField.isSelectable = true
         textField.delegate = self
         visualEffect.addSubview(textField)
 
-        statusPill = NSTextField(labelWithString: "● THINKING")
-        statusPill.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
-        statusPill.textColor = NSColor.systemCyan
-        statusPill.frame = NSRect(x: width - 175, y: height - 32, width: 130, height: 18)
-        statusPill.alignment = .right
-        statusPill.isHidden = true
-        visualEffect.addSubview(statusPill)
-
         panel.contentView = visualEffect
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         panel.makeFirstResponder(textField)
+    }
+
+    @objc func onStopClicked() {
+        isWorking = false
+        print("{\"event\":\"stop\"}")
+        fflush(stdout)
+        statusPill.stringValue = "⏹ STOPPED"
+        statusPill.textColor = .systemOrange
+        stopButton.isHidden = true
+        appendHistory(role: "SYSTEM", text: "Task stopped by user.", color: .systemOrange, icon: "⏹")
+        if let tf = textField {
+            panel.makeFirstResponder(tf)
+        }
     }
 
     @objc func onCancelClicked() {
@@ -184,18 +234,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         if commandSelector == #selector(NSResponder.insertNewline(_:)) {
             let text = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty {
+                textField.stringValue = ""
                 let dict: [String: String] = ["event": "submit", "query": text, "app": targetApp]
                 if let data = try? JSONSerialization.data(withJSONObject: dict),
                    let json = String(data: data, encoding: .utf8) {
                     print(json)
                     fflush(stdout)
-                    transitionToProgress(query: text)
+                    if !isExpanded {
+                        transitionToProgress(query: text)
+                    } else {
+                        appendHistory(role: "YOU", text: text, color: NSColor(red: 0.35, green: 0.75, blue: 1.0, alpha: 1.0), icon: "💬")
+                        isWorking = true
+                        statusPill.stringValue = "● WORKING"
+                        statusPill.textColor = .systemCyan
+                        stopButton.isHidden = false
+                    }
                     return true
                 }
             }
             return true
         } else if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-            onCancelClicked()
+            if isWorking {
+                onStopClicked()
+            } else {
+                onCancelClicked()
+            }
             return true
         }
         return false
@@ -233,8 +296,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     func transitionToProgress(query: String) {
-        textField.isHidden = true
-        let newHeight: CGFloat = 340
+        isExpanded = true
+        isWorking = true
+        let newHeight: CGFloat = 440
         guard let screen = panel.screen ?? NSScreen.main else { return }
         let width: CGFloat = 680
         let x = (screen.frame.width - width) / 2
@@ -243,27 +307,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         panel.setFrame(NSRect(x: x, y: y, width: width, height: newHeight), display: true, animate: true)
         visualEffect.frame = NSRect(x: 0, y: 0, width: width, height: newHeight)
 
-        badge.stringValue = query
-        badge.font = NSFont.systemFont(ofSize: 13, weight: .bold)
-        badge.textColor = .white
-        badge.frame = NSRect(x: 24, y: newHeight - 32, width: width - 210, height: 18)
+        badge.stringValue = targetApp.uppercased()
+        badge.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
+        badge.textColor = NSColor(red: 0.23, green: 0.51, blue: 0.96, alpha: 1.0)
+        badge.frame = NSRect(x: 20, y: newHeight - 32, width: 200, height: 18)
 
-        statusPill.frame = NSRect(x: width - 175, y: newHeight - 32, width: 130, height: 18)
-        statusPill.stringValue = "● THINKING"
+        statusPill.frame = NSRect(x: width - 265, y: newHeight - 32, width: 125, height: 18)
+        statusPill.stringValue = "● WORKING"
         statusPill.textColor = .systemCyan
         statusPill.alignment = .right
         statusPill.isHidden = false
 
-        stopButton.frame = NSRect(x: width - 44, y: newHeight - 34, width: 26, height: 24)
+        stopButton.frame = NSRect(x: width - 130, y: newHeight - 34, width: 78, height: 24)
+        stopButton.isHidden = false
         visualEffect.addSubview(stopButton, positioned: .above, relativeTo: nil)
 
-        dividerLine = NSBox(frame: NSRect(x: 20, y: newHeight - 44, width: width - 40, height: 1))
-        dividerLine.boxType = .custom
-        dividerLine.borderWidth = 0
-        dividerLine.fillColor = NSColor(white: 1.0, alpha: 0.12)
-        visualEffect.addSubview(dividerLine)
+        closeButton.frame = NSRect(x: width - 44, y: newHeight - 34, width: 26, height: 24)
+        visualEffect.addSubview(closeButton, positioned: .above, relativeTo: nil)
 
-        let scrollFrame = NSRect(x: 20, y: 16, width: width - 40, height: newHeight - 66)
+        topDividerLine = NSBox(frame: NSRect(x: 20, y: newHeight - 44, width: width - 40, height: 1))
+        topDividerLine.boxType = .custom
+        topDividerLine.borderWidth = 0
+        topDividerLine.fillColor = NSColor(white: 1.0, alpha: 0.12)
+        visualEffect.addSubview(topDividerLine)
+
+        let scrollFrame = NSRect(x: 20, y: 56, width: width - 40, height: newHeight - 110)
         historyScrollView = NSScrollView(frame: scrollFrame)
         historyScrollView.drawsBackground = false
         historyScrollView.hasVerticalScroller = true
@@ -286,6 +354,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         historyTextView.isSelectable = true
         historyScrollView.documentView = historyTextView
         visualEffect.addSubview(historyScrollView)
+
+        bottomDividerLine = NSBox(frame: NSRect(x: 20, y: 50, width: width - 40, height: 1))
+        bottomDividerLine.boxType = .custom
+        bottomDividerLine.borderWidth = 0
+        bottomDividerLine.fillColor = NSColor(white: 1.0, alpha: 0.12)
+        visualEffect.addSubview(bottomDividerLine)
+
+        textField.frame = NSRect(x: 20, y: 10, width: width - 40, height: 32)
+        textField.font = NSFont.systemFont(ofSize: 14, weight: .regular)
+        textField.placeholderString = "Type follow-up instruction... (or press Esc to stop)"
+        textField.isHidden = false
+        visualEffect.addSubview(textField, positioned: .above, relativeTo: nil)
+        panel.makeFirstResponder(textField)
 
         appendHistory(role: "GOAL", text: query, color: .white, icon: "💬")
         appendHistory(role: "SYSTEM", text: "Task initialized. Preparing execution environment...", color: NSColor(white: 0.6, alpha: 1.0), icon: "⚡")
@@ -310,22 +391,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                     let role = dict["role"] as? String
 
                     if status == "COMPLETE" || status == "DONE" {
+                        self.isWorking = false
                         self.statusPill.stringValue = "✔ COMPLETE"
                         self.statusPill.textColor = .systemGreen
+                        self.stopButton.isHidden = true
                         self.appendHistory(role: role ?? "DONE", text: text.isEmpty ? "Task completed successfully." : text, color: .systemGreen, icon: "✔")
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-                            exit(0)
-                        }
+                        self.panel.makeFirstResponder(self.textField)
+                    } else if status == "STOPPED" || status == "CANCELLED" {
+                        self.isWorking = false
+                        self.statusPill.stringValue = "⏹ STOPPED"
+                        self.statusPill.textColor = .systemOrange
+                        self.stopButton.isHidden = true
+                        self.appendHistory(role: role ?? "STATUS", text: text.isEmpty ? "Task stopped." : text, color: .systemOrange, icon: "⏹")
+                        self.panel.makeFirstResponder(self.textField)
                     } else if status == "FAILED" || status == "ERROR" {
+                        self.isWorking = false
                         self.statusPill.stringValue = "⚠ FAILED"
                         self.statusPill.textColor = .systemYellow
+                        self.stopButton.isHidden = true
                         self.appendHistory(role: role ?? "ERROR", text: text.isEmpty ? "Task failed." : text, color: .systemRed, icon: "⚠")
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
-                            exit(0)
-                        }
+                        self.panel.makeFirstResponder(self.textField)
                     } else {
+                        self.isWorking = true
                         self.statusPill.stringValue = "● " + status
                         self.statusPill.textColor = .systemCyan
+                        self.stopButton.isHidden = false
                         if !text.isEmpty {
                             var color = NSColor.systemCyan
                             var icon = "🧠"
@@ -376,7 +466,6 @@ func emitHotkey() {
 }
 
 if mode == "listen" {
-
     var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
     var hotKeyRef: EventHotKeyRef?
     let hotKeyID = EventHotKeyID(signature: OSType(0x5248444B), id: 1)

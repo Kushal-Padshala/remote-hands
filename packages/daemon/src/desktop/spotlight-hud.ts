@@ -120,6 +120,7 @@ export class SpotlightHudRunner {
     activeApp: string | undefined,
     onSubmit: (result: SpotlightPromptResult, sendUpdate: HudUpdateSender) => Promise<void> | void,
     onCancel?: () => void,
+    onStop?: () => void,
   ): { close: () => void } {
     const target = this.ensureBinary();
     if (!target) {
@@ -142,11 +143,10 @@ export class SpotlightHudRunner {
     });
 
     let submitted = false;
-    let completedNaturally = false;
     let cancelled = false;
 
     const triggerCancel = () => {
-      if (!cancelled && !completedNaturally) {
+      if (!cancelled) {
         cancelled = true;
         if (onCancel) {
           try {
@@ -157,10 +157,6 @@ export class SpotlightHudRunner {
     };
 
     const sendUpdate: HudUpdateSender = (status: string, text: string, role?: string) => {
-      const upper = String(status || '').toUpperCase();
-      if (upper === 'COMPLETE' || upper === 'DONE' || upper === 'FAILED' || upper === 'ERROR') {
-        completedNaturally = true;
-      }
       if (!child.killed && child.stdin && child.stdin.writable) {
         try {
           const payload: any = { status, text };
@@ -187,6 +183,12 @@ export class SpotlightHudRunner {
               app: parsed.app || activeApp || 'Desktop',
             };
             Promise.resolve(onSubmit(res, sendUpdate)).catch(() => {});
+          } else if (parsed.event === 'stop') {
+            if (onStop) {
+              try {
+                onStop();
+              } catch {}
+            }
           } else if (parsed.event === 'cancel') {
             triggerCancel();
             try {
@@ -206,9 +208,7 @@ export class SpotlightHudRunner {
           }
         } catch {}
       }
-      if (!completedNaturally) {
-        triggerCancel();
-      }
+      triggerCancel();
     });
 
     return {

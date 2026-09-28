@@ -282,6 +282,7 @@ async function runLocalDaemon(
       const coordinator = new HudCoordinator({
         store,
         powerManager,
+        autoExecute: true,
         onTaskCreated: (task) => {
           options.stdout(`\n${c.brightGreen('⚡')} [Spotlight HUD] New task initiated: "${(((task as any).goal || task.prompt) as string).slice(0, 60)}..."`);
           wakeDaemon?.();

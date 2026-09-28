@@ -190,6 +190,7 @@ export class HudCoordinator {
   private onTaskCompleted?: ((task: Task, summary: string) => Promise<void> | void) | undefined;
   private activeExecution?: { taskId: string; abortController: AbortController } | undefined;
   private currentTaskId?: string | undefined;
+  private currentConversationId?: string | undefined;
   private powerManager?: DynamicPowerManager | undefined;
 
   constructor(
@@ -228,7 +229,6 @@ export class HudCoordinator {
     }
   }
 
-
   private initDefaultStore(): TaskStore | undefined {
     try {
       const dbPath = path.join(os.homedir(), '.remote-hands', 'local.db');
@@ -239,7 +239,7 @@ export class HudCoordinator {
     return undefined;
   }
 
-  async cancelActiveTask(reason = 'Task cancelled by user from HUD'): Promise<void> {
+  async stopActiveTask(reason = 'Task stopped by user from HUD', sendUpdate?: HudUpdateSender): Promise<void> {
     this.powerManager?.releaseAll();
     const currentId = this.activeExecution?.taskId || this.currentTaskId;
     if (this.activeExecution) {
@@ -264,6 +264,14 @@ export class HudCoordinator {
         }
       }
     }
+    if (sendUpdate) {
+      sendUpdate('STOPPED', reason, 'STATUS');
+    }
+  }
+
+  async cancelActiveTask(reason = 'Task cancelled by user from HUD'): Promise<void> {
+    this.currentConversationId = undefined;
+    await this.stopActiveTask(reason);
   }
 
   hasActiveTask(): boolean {
@@ -279,7 +287,6 @@ export class HudCoordinator {
     const abortController = new AbortController();
     this.activeExecution = { taskId: task.id, abortController };
 
-
     if (signal) {
       if (signal.aborted) {
         abortController.abort();
@@ -290,14 +297,29 @@ export class HudCoordinator {
 
     let running: Task | undefined;
     try {
-      const claimed = await store.claimNextTask('machine-local');
-      if (!claimed || abortController.signal.aborted) {
+      if (store.claimNextTask) {
+        const claimed = await store.claimNextTask('machine-local');
+        if (claimed) {
+          running = (await store.markTaskRunning?.(claimed.id)) || claimed;
+        }
+      }
+      if (!running) {
+        if (typeof (store as any).updateTaskStatus === 'function') {
+          await (store as any).updateTaskStatus(task.id, 'running');
+          running = (await store.getTask?.(task.id)) || task;
+        } else if (store.markTaskRunning) {
+          running = await store.markTaskRunning(task.id);
+        } else {
+          running = task;
+        }
+      }
+
+      if (!running || abortController.signal.aborted) {
         if (abortController.signal.aborted && store.cancelTask) {
           await store.cancelTask(task.id, 'Task cancelled by user').catch(() => {});
         }
         return;
       }
-      running = await store.markTaskRunning(claimed.id);
       if (this.activeExecution) {
         this.activeExecution.taskId = running.id;
       }
@@ -324,6 +346,10 @@ export class HudCoordinator {
           }
         }
       }, abortController.signal);
+
+      if (res.conversationId) {
+        this.currentConversationId = res.conversationId;
+      }
 
       if (abortController.signal.aborted) {
         if (store.cancelTask) {
@@ -392,6 +418,11 @@ export class HudCoordinator {
   }
 
   async handleResult(result: SpotlightPromptResult, sendUpdate?: HudUpdateSender, signal?: AbortSignal): Promise<boolean> {
+    if (this.activeExecution) {
+      const prev = this.activeExecution;
+      this.activeExecution = undefined;
+      prev.abortController.abort();
+    }
     const windowContext = await this.macosDriver.getActiveWindowContext(result.app);
     const isGoal = isAutonomousGoal(result.query);
 
@@ -408,6 +439,7 @@ export class HudCoordinator {
         status: 'queued',
         model: 'gemini-3.8-flash',
         effort: 'low',
+        conversation_id: this.currentConversationId ?? null,
       });
       this.currentTaskId = task.id;
       if (this.onTaskCreated) {
@@ -449,11 +481,11 @@ export class HudCoordinator {
         this.hudRunner.openInteractivePrompt(
           appOverride,
           async (result, sendUpdate) => {
+            const success = await this.handleResult(result, sendUpdate, promptAbortController.signal);
             if (!settled) {
               settled = true;
+              resolve(success);
             }
-            const success = await this.handleResult(result, sendUpdate, promptAbortController.signal);
-            resolve(success);
           },
           () => {
             promptAbortController.abort();
@@ -462,6 +494,10 @@ export class HudCoordinator {
               settled = true;
               resolve(false);
             }
+          },
+          () => {
+            promptAbortController.abort();
+            this.stopActiveTask('User stopped task from Spotlight HUD').catch(() => {});
           },
         );
       });
@@ -488,6 +524,7 @@ export class HudCoordinator {
             activePrompt.close();
             activePrompt = null;
           }
+          this.currentConversationId = undefined;
           promptAbortController = new AbortController();
           const currentController = promptAbortController;
           activePrompt = this.hudRunner.openInteractivePrompt(
@@ -495,14 +532,16 @@ export class HudCoordinator {
             async (result, sendUpdate) => {
               try {
                 await this.handleResult(result, sendUpdate, currentController.signal);
-              } finally {
-                activePrompt = null;
-              }
+              } catch {}
             },
             () => {
               currentController.abort();
               this.cancelActiveTask('User cancelled from Spotlight HUD').catch(() => {});
               activePrompt = null;
+            },
+            () => {
+              currentController.abort();
+              this.stopActiveTask('User stopped task from Spotlight HUD').catch(() => {});
             },
           );
         }

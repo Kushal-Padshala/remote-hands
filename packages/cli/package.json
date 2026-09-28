@@ -56,7 +56,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc --build && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --external:qrcode --external:ws --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
+    "build": "tsc --build && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
     "prepack": "rm -rf templates && mkdir -p templates/apps/cloudflare templates/apps/web && cp -R ../../apps/cloudflare/src ../../apps/cloudflare/migrations ../../apps/cloudflare/wrangler.jsonc templates/apps/cloudflare/ && cp -R ../../apps/web/dist ../../apps/web/wrangler.jsonc templates/apps/web/",
     "postpack": "rm -rf templates",
     "typecheck:tests": "tsc -p tsconfig.test.json"
