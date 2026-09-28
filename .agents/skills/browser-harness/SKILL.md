@@ -18,7 +18,7 @@ Domain skills are off by default. Set `BH_DOMAIN_SKILLS=1` to enable them; see t
 ## Speed Mandate: Zero Discovery
 
 - DO NOT execute exploratory diagnostic commands such as `which rh`, `rh --help`, `rh browser --help`, `rh profiles`, `find`, or test approval calls.
-- All `rh browser` subcommands (`open`, `snapshot`, `click`, `type`, `tabs`) and `rh approve` are pre-installed in PATH and function immediately.
+- All `rh browser` subcommands (`open`, `snapshot`, `click`, `type`, `tabs`, `focus`) and `rh approve` are pre-installed in PATH and function immediately.
 - Proceed directly to executing the task.
 
 ## Usage
@@ -26,11 +26,12 @@ Domain skills are off by default. Set `BH_DOMAIN_SKILLS=1` to enable them; see t
 For ultrafast DOM inspection and interaction without writing Python scripts, use indexed browser commands:
 
 ```bash
+rh browser tabs
+rh browser focus <index|id|url|title>
 rh browser open "<url>"
 rh browser snapshot
 rh browser click <index>
 rh browser type <index> "<text>"
-rh browser tabs
 ```
 
 ### Human Approval for Sensitive Actions
@@ -50,7 +51,7 @@ rh approve "<summary of action>" [--risk=high|medium] [--action=publish|delete|p
 Chrome is launched automatically on the desktop with the user's active logged-in profile (e.g. personal profile with Google, GitHub, X/Twitter credentials).
 - NEVER query or scrape macOS SQLite cookie databases (`~/Library/Application Support/Google/Chrome/.../Cookies`).
 - NEVER attempt to decrypt Keychain passwords or run security extraction scripts.
-- Simply navigate to the target site via `rh browser open "<url>"`; the user's session is already active.
+- Simply focus the existing tab via `rh browser focus "<url|title>"` or navigate via `rh browser open "<url>"` (which reuses matching open tabs automatically); the user's session is already active.
 
 For advanced scripting, multi-step sequences, or custom CDP interactions:
 

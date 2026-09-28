@@ -1,5 +1,5 @@
 import { isSafeWorkspacePath, type Task } from '@remote-hands/shared';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -31,13 +31,14 @@ export const DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT =
   '1. CRITICAL SPEED MANDATE - ZERO DISCOVERY: Start working immediately on the user\'s primary task from your first tool call. NEVER run exploratory commands such as `which rh`, `rh --help`, `rh browser --help`, `rh desktop --help`, `rh profiles`, `find`, `mdfind`, or test commands. The commands `rh browser open`, `rh browser snapshot`, `rh browser click`, `rh browser type`, `rh browser tabs`, `rh desktop`, `rh guide`, and `rh approve` are pre-installed in PATH and work immediately. Do not stall or check the environment. When a task requires research or strategy (e.g. setting up campaigns, rental property marketing, platform rules, client redirect workflows), perform targeted web research immediately and jump straight into working at full speed.\n' +
   '2. Browser Automation:\n' +
   '   - The desktop browser is ALREADY running and authenticated with the user\'s active personal profile (logged into X, GitHub, Google, etc.). Never search for profile directories, never query macOS SQLite cookie files or Keychain passwords.\n' +
-  '   - TAB AND WINDOW CONTINUITY: Work directly on the user\'s active tab and current window. NEVER open a new tab, new window, or separate profile unless explicitly requested. If already on the relevant page, do not reload or re-open — immediately inspect with `rh browser snapshot` and act in-place. Never steal focus or repeatedly bring windows to the front, allowing the user to multitask in other applications undisturbed.\n' +
+  '   - TAB AND WINDOW CONTINUITY: Work directly on the user\'s active tab and current window. Check the open browser tabs list in context. If the target page or service is already open in ANY window or tab, DO NOT open a new window or tab. Use `rh browser focus "<url|title|index>"` to switch directly to that tab in-place, or inspect with `rh browser snapshot` and act in-place. Never steal focus or repeatedly bring windows to the front, allowing the user to multitask in other applications undisturbed.\n' +
   '   - For web and browser tasks, inspect and act instantly using indexed commands:\n' +
+  '     rh browser tabs\n' +
+  '     rh browser focus <index|url|title>\n' +
   '     rh browser open "<url>"\n' +
   '     rh browser snapshot\n' +
   '     rh browser click <index>\n' +
   '     rh browser type <index> "<text>"\n' +
-  '     rh browser tabs\n' +
   '   - For custom scripts when necessary, use `browser-harness <<\'PY\' ... PY`.\n' +
   '   - Available pre-imported helpers for custom scripts: `new_tab(url)`, `goto_url(url)`, `click_at_xy(x, y)`, `fill_input(selector, text)`, `type_text(text)`, `press_key(key)`, `scroll(x, y, dy)`, `js("expression")`, `wait_for_load()`, `wait_for_element(selector)`, `page_info()`, `list_tabs()`, `switch_tab(id)`.\n' +
   '   - To open any URL in the user\'s desktop browser, use `open "<url>"`.\n' +
@@ -65,7 +66,7 @@ export const DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT =
   '7. Direct Execution & Zero-Scan Speed: Go directly to the relevant code files. Never execute broad filesystem sweeps or repetitive file slice reads. Read substantial chunks at once. Run targeted test files (e.g. `npx vitest run <path>`) rather than whole-repo test suites. Avoid redundant web searches for known standards.]';
 
 export const DEFAULT_REMOTE_HANDS_REMINDER =
-  '[Context Reminder: Remote Hands autonomous control plane. ZERO DISCOVERY STEPS: Never run `which rh`, `rh --help`, `rh desktop --help`, `rh profiles`, or explore flags. Take immediate action on the user\'s request. The desktop browser is already running and authenticated with the user\'s personal profile. Work directly on the current active tab and window in-place without opening new tabs, windows, or profiles. Never steal focus or repeatedly bring windows to the front. When research is needed, perform targeted web research immediately and jump straight into working at full speed. For browser actions, use `rh browser open "<url>"`, `rh browser snapshot`, `rh browser click <index>`, `rh browser type <index> "<text>"`, or `browser-harness <<\'PY\' ... PY`. For native desktop software and windows, use `rh desktop open "<app>"`, `rh desktop window focus "<app>"`, `rh desktop snapshot`, `rh desktop act "<goal>"`, `rh desktop click <index>`, `rh desktop type "<text>"`, `rh desktop key <combo>`, `rh desktop menu "<app>" "<menu>" "<item>"`. For visual guidance and annotations, use `rh guide show --browser --index=<index> --text="<label>"`, `rh guide show --desktop --app="<app>" --target="<target>" --text="<label>"`, `rh guide next`, `rh guide dismiss`. For sensitive actions (posting, deleting, deploying), run `rh approve "<summary>" --action=publish`. If rejected, read the user\'s rejection reason in stderr, modify the content as requested, and re-request approval or cancel if directed. When human approval is granted (`[HUMAN APPROVAL GRANTED]`), immediately execute the action (click Post / Submit) without asking for approval again. All actions stream live to the phone. Provide a clean, direct final summary.]';
+  '[Context Reminder: Remote Hands autonomous control plane. ZERO DISCOVERY STEPS: Never run `which rh`, `rh --help`, `rh desktop --help`, `rh profiles`, or explore flags. Take immediate action on the user\'s request. The desktop browser is already running and authenticated with the user\'s personal profile. Work directly on the current active tab and window in-place without opening new tabs, windows, or profiles. Check open browser tabs and use `rh browser focus "<url|title>"` to reuse existing tabs. Never steal focus or repeatedly bring windows to the front. When research is needed, perform targeted web research immediately and jump straight into working at full speed. For browser actions, use `rh browser tabs`, `rh browser focus <index>`, `rh browser open "<url>"`, `rh browser snapshot`, `rh browser click <index>`, `rh browser type <index> "<text>"`, or `browser-harness <<\'PY\' ... PY`. For native desktop software and windows, use `rh desktop open "<app>"`, `rh desktop window focus "<app>"`, `rh desktop snapshot`, `rh desktop act "<goal>"`, `rh desktop click <index>`, `rh desktop type "<text>"`, `rh desktop key <combo>`, `rh desktop menu "<app>" "<menu>" "<item>"`. For visual guidance and annotations, use `rh guide show --browser --index=<index> --text="<label>"`, `rh guide show --desktop --app="<app>" --target="<target>" --text="<label>"`, `rh guide next`, `rh guide dismiss`. For sensitive actions (posting, deleting, deploying), run `rh approve "<summary>" --action=publish`. If rejected, read the user\'s rejection reason in stderr, modify the content as requested, and re-request approval or cancel if directed. When human approval is granted (`[HUMAN APPROVAL GRANTED]`), immediately execute the action (click Post / Submit) without asking for approval again. All actions stream live to the phone. Provide a clean, direct final summary.]';
 
 
 export function extractSummaryFromTranscript(conversationId: string): string | null {
@@ -167,18 +168,64 @@ export function getDetectedChromeProfiles(): string {
   return '';
 }
 
+export function getLiveOpenBrowserTabs(): string {
+  if (process.platform !== 'darwin') return '';
+  try {
+    const script = `
+      tell application "Google Chrome"
+        if not running then return ""
+        set out to ""
+        set wIdx to 1
+        repeat with w in windows
+          set wid to id of w
+          set actIdx to active tab index of w
+          set tCount to count of tabs of w
+          repeat with tIdx from 1 to tCount
+            set t to tab tIdx of w
+            set isAct to (tIdx is actIdx)
+            set out to out & wIdx & "\t" & tIdx & "\t" & isAct & "\t" & (title of t) & "\t" & (URL of t) & linefeed
+          end repeat
+          set wIdx to wIdx + 1
+        end repeat
+        return out
+      end tell
+    `;
+    const res = spawnSync('osascript', ['-e', script], { encoding: 'utf-8', timeout: 1500 });
+    if (res.status === 0 && res.stdout) {
+      const lines = res.stdout.trim().split('\n').filter(Boolean);
+      if (lines.length === 0) return '';
+      const formatted: string[] = [];
+      for (const line of lines) {
+        const [wIdx, tIdx, isAct, title, url] = line.split('\t');
+        if (url) {
+          const actStr = isAct === 'true' ? ' (ACTIVE)' : '';
+          formatted.push(`- [Window ${wIdx}, Tab ${tIdx}]${actStr}: "${title || '(untitled)'}" - ${url}`);
+        }
+      }
+      if (formatted.length > 0) {
+        return 'Currently Open Browser Windows & Tabs:\n' + formatted.join('\n');
+      }
+    }
+  } catch {}
+  return '';
+}
+
 export function getDefaultRemoteHandsSystemPrompt(): string {
   const profileInfo = getDetectedChromeProfiles();
-  return profileInfo
-    ? `${DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT}\n\n${profileInfo}`
-    : DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT;
+  const openTabs = getLiveOpenBrowserTabs();
+  const parts = [DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT];
+  if (profileInfo) parts.push(profileInfo);
+  if (openTabs) parts.push(openTabs);
+  return parts.join('\n\n');
 }
 
 export function getDefaultRemoteHandsReminder(): string {
   const profileInfo = getDetectedChromeProfiles();
-  return profileInfo
-    ? `${DEFAULT_REMOTE_HANDS_REMINDER}\n\n${profileInfo}`
-    : DEFAULT_REMOTE_HANDS_REMINDER;
+  const openTabs = getLiveOpenBrowserTabs();
+  const parts = [DEFAULT_REMOTE_HANDS_REMINDER];
+  if (profileInfo) parts.push(profileInfo);
+  if (openTabs) parts.push(openTabs);
+  return parts.join('\n\n');
 }
 
 export function buildAgyArgs(task: Task, config: AgyArgConfig): readonly string[] {

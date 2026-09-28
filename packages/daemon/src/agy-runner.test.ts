@@ -10,6 +10,10 @@ import {
   ProcessAgentRunner,
   DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT,
   DEFAULT_REMOTE_HANDS_REMINDER,
+  getLiveOpenBrowserTabs,
+  getDetectedChromeProfiles,
+  getDefaultRemoteHandsSystemPrompt,
+  getDefaultRemoteHandsReminder,
 } from './agy-runner.js';
 import { HermesBrain } from './hermes-brain.js';
 
@@ -361,6 +365,29 @@ describe('remote hands system prompt and reminder', () => {
     expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('--browser');
     expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('--desktop');
     expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh guide show');
+  });
+
+  it('includes tab and window continuity mandate and focus command', () => {
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('TAB AND WINDOW CONTINUITY');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh browser tabs');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh browser focus <index|url|title>');
+    expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh browser focus');
+  });
+
+  it('executes getLiveOpenBrowserTabs and getDetectedChromeProfiles without error', () => {
+    const tabs = getLiveOpenBrowserTabs();
+    expect(typeof tabs).toBe('string');
+
+    const profiles = getDetectedChromeProfiles();
+    expect(typeof profiles).toBe('string');
+  });
+
+  it('composes full system prompt and reminder with live context', () => {
+    const prompt = getDefaultRemoteHandsSystemPrompt();
+    expect(prompt).toContain(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT);
+
+    const reminder = getDefaultRemoteHandsReminder();
+    expect(reminder).toContain(DEFAULT_REMOTE_HANDS_REMINDER);
   });
 });
 

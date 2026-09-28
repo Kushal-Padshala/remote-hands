@@ -413,4 +413,46 @@ describe('BrowserDriver', () => {
     vi.spyOn(driver as any, 'createWebSocket').mockReturnValue(new MockWs());
     await expect((driver as any).executeScript('1 + 1')).rejects.toThrow('WebSocket connection closed before CDP response was received');
   });
+
+  it('finds tab by url substring, host/path, title, or id', async () => {
+    driver = new BrowserDriver();
+    vi.spyOn(driver, 'listTabs').mockResolvedValue([
+      { id: 'tab-1', title: 'GitHub - Kushal-Padshala', url: 'https://github.com/Kushal-Padshala' },
+      { id: 'tab-2', title: 'App Store Connect', url: 'https://appstoreconnect.apple.com/apps/6817089779/distribution/info' },
+    ]);
+
+    const byUrl = await driver.findTab('https://appstoreconnect.apple.com/apps/6817089779');
+    expect(byUrl?.id).toBe('tab-2');
+
+    const byTitle = await driver.findTab('Kushal-Padshala');
+    expect(byTitle?.id).toBe('tab-1');
+
+    const byId = await driver.findTab('tab-2');
+    expect(byId?.title).toBe('App Store Connect');
+
+    const notFound = await driver.findTab('nonexistent');
+    expect(notFound).toBeUndefined();
+  });
+
+  it('focuses tab by tab id, url, title, or index', async () => {
+    driver = new BrowserDriver();
+    vi.spyOn(driver, 'listTabs').mockResolvedValue([
+      { id: 'tab-1', title: 'First Tab', url: 'https://first.com', tabIndex: 1, webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/tab-1' },
+      { id: 'tab-2', title: 'App Store Connect', url: 'https://appstoreconnect.apple.com', tabIndex: 2, webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/tab-2' },
+    ]);
+
+    const activateFetch = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', activateFetch);
+
+    const res1 = await driver.focusTab('appstoreconnect');
+    expect(res1.success).toBe(true);
+    expect(res1.tab.id).toBe('tab-2');
+    expect(activateFetch).toHaveBeenCalledWith('http://127.0.0.1:9222/json/activate/tab-2');
+
+    const res2 = await driver.focusTab(1);
+    expect(res2.success).toBe(true);
+    expect(res2.tab.id).toBe('tab-1');
+
+    await expect(driver.focusTab('nonexistent')).rejects.toThrow('Tab matching "nonexistent" not found');
+  });
 });

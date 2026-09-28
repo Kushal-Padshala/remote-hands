@@ -206,6 +206,14 @@ export function grantMacAutomationPermissions(): boolean {
   if (fs.existsSync(rhSpotlight)) knownPathClients.add(rhSpotlight);
   const rhScreenshot = path.join(os.homedir(), '.remote-hands', 'bin', 'rh-screenshot');
   if (fs.existsSync(rhScreenshot)) knownPathClients.add(rhScreenshot);
+  const agyBin = path.join(os.homedir(), '.local', 'bin', 'agy');
+  if (fs.existsSync(agyBin)) knownPathClients.add(agyBin);
+  try {
+    const whichAgy = spawnSync('which', ['agy'], { encoding: 'utf-8' });
+    if (whichAgy.status === 0 && whichAgy.stdout.trim()) {
+      knownPathClients.add(whichAgy.stdout.trim());
+    }
+  } catch {}
 
   try {
     const listRes = spawnSync(

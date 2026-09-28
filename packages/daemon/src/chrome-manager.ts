@@ -321,6 +321,7 @@ export class ChromeManager {
 
     const args = [
       `--remote-debugging-port=${this.port}`,
+      '--remote-allow-origins=*',
       `--user-data-dir=${profileDir}`,
       '--no-first-run',
       '--no-default-browser-check',
@@ -351,14 +352,7 @@ export class ChromeManager {
     }
 
     if (this.mode === 'active' && !this.customProfileDir && ChromeManager.isSystemChromeRunning()) {
-      if (process.platform === 'darwin') {
-        const { spawnSync } = await import('node:child_process');
-        spawnSync('osascript', ['-e', 'tell application "Google Chrome" to quit']);
-        for (let i = 0; i < 15; i++) {
-          await new Promise((r) => setTimeout(r, 200));
-          if (!ChromeManager.isSystemChromeRunning()) break;
-        }
-      }
+      return current;
     }
 
     const profileDir = this.getProfileDirectory();

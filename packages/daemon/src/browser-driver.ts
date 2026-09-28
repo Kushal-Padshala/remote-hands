@@ -14,6 +14,10 @@ export interface BrowserTab {
   title: string;
   url: string;
   webSocketDebuggerUrl?: string | undefined;
+  windowId?: string | number | undefined;
+  windowIndex?: number | undefined;
+  tabIndex?: number | undefined;
+  active?: boolean | undefined;
 }
 
 export class BrowserDriver {
@@ -24,21 +28,118 @@ export class BrowserDriver {
     this.cdpUrl = (options?.cdpUrl || 'http://127.0.0.1:9222').replace(/\/+$/, '');
   }
 
+  private queryMacChromeTabs(): BrowserTab[] {
+    try {
+      const script = `
+        tell application "Google Chrome"
+          if not running then return ""
+          set out to ""
+          set wIdx to 1
+          repeat with w in windows
+            set wid to id of w
+            set actIdx to active tab index of w
+            set tCount to count of tabs of w
+            repeat with tIdx from 1 to tCount
+              set t to tab tIdx of w
+              set isAct to (tIdx is actIdx)
+              set out to out & wid & "\t" & wIdx & "\t" & tIdx & "\t" & isAct & "\t" & (title of t) & "\t" & (URL of t) & linefeed
+            end repeat
+            set wIdx to wIdx + 1
+          end repeat
+          return out
+        end tell
+      `;
+      const res = spawnSync('osascript', ['-e', script], {
+        encoding: 'utf-8',
+        timeout: 2000,
+      });
+      if (res.status === 0 && res.stdout) {
+        const lines = res.stdout.trim().split('\n').filter(Boolean);
+        const tabs: BrowserTab[] = [];
+        for (const line of lines) {
+          const [wid, wIdx, tIdx, isAct, title, url] = line.split('\t');
+          if (url) {
+            const wIdxNum = parseInt(wIdx || '1', 10);
+            const tIdxNum = parseInt(tIdx || '1', 10);
+            const tabObj: BrowserTab = {
+              id: `w${wIdx || '1'}-t${tIdx || '1'}`,
+              title: title || '',
+              url: url || '',
+              windowIndex: Number.isNaN(wIdxNum) ? 1 : wIdxNum,
+              tabIndex: Number.isNaN(tIdxNum) ? 1 : tIdxNum,
+              active: isAct === 'true',
+            };
+            if (wid) tabObj.windowId = wid;
+            tabs.push(tabObj);
+          }
+        }
+        return tabs;
+      }
+    } catch {}
+    return [];
+  }
+
+  private queryFrontmostActiveTabAppleScript(): { url?: string; title?: string } | null {
+    try {
+      const script = `
+        tell application "Google Chrome"
+          if not running or (count of windows) is 0 then return ""
+          set t to active tab of front window
+          return (URL of t) & "\t" & (title of t)
+        end tell
+      `;
+      const res = spawnSync('osascript', ['-e', script], {
+        encoding: 'utf-8',
+        timeout: 1000,
+      });
+      if (res.status === 0 && res.stdout) {
+        const [url, title] = res.stdout.trim().split('\t');
+        const result: { url?: string; title?: string } = {};
+        if (url) result.url = url;
+        if (title) result.title = title;
+        if (result.url || result.title) return result;
+      }
+    } catch {}
+    return null;
+  }
+
   async listTabs(): Promise<BrowserTab[]> {
-    const res = await fetch(`${this.cdpUrl}/json`);
-    if (!res.ok) {
-      throw new Error(`Failed to list CDP targets: ${res.statusText}`);
+    let cdpError: Error | null = null;
+    try {
+      const res = await fetch(`${this.cdpUrl}/json`);
+      if (!res.ok) {
+        throw new Error(`Failed to list CDP targets: ${res.statusText}`);
+      }
+      const data = (await res.json()) as Array<Record<string, unknown>>;
+      const cdpTabs = data
+        .filter((t) => t.type === 'page')
+        .map((t) => {
+          const tab: BrowserTab = {
+            id: String(t.id || ''),
+            title: String(t.title || ''),
+            url: String(t.url || ''),
+          };
+          if (typeof t.webSocketDebuggerUrl === 'string') {
+            tab.webSocketDebuggerUrl = t.webSocketDebuggerUrl;
+          }
+          return tab;
+        });
+      return cdpTabs;
+    } catch (err: any) {
+      cdpError = err;
+      if (err.message && err.message.startsWith('Failed to list CDP targets:')) {
+        throw err;
+      }
     }
-    const data = (await res.json()) as Array<Record<string, unknown>>;
-    return data
-      .filter((t) => t.type === 'page')
-      .map((t) => ({
-        id: String(t.id || ''),
-        title: String(t.title || ''),
-        url: String(t.url || ''),
-        webSocketDebuggerUrl:
-          typeof t.webSocketDebuggerUrl === 'string' ? t.webSocketDebuggerUrl : undefined,
-      }));
+
+    if (process.platform === 'darwin') {
+      const macTabs = this.queryMacChromeTabs();
+      if (macTabs.length > 0) {
+        return macTabs;
+      }
+    }
+
+    throw cdpError || new Error('No open Chrome tabs found on CDP port or system Chrome');
   }
 
   async getActiveTab(): Promise<BrowserTab> {
@@ -47,30 +148,20 @@ export class BrowserDriver {
       throw new Error('No open Chrome tabs found on CDP port');
     }
 
+    const explicitlyActive = tabs.find((t) => t.active);
+    if (explicitlyActive) return explicitlyActive;
+
     if (process.platform === 'darwin') {
       try {
-        const script = `
-          (() => {
-            const chrome = Application("Google Chrome");
-            if (chrome.running() && chrome.windows.length > 0) {
-              const tab = chrome.windows[0].activeTab;
-              return JSON.stringify({ url: tab.url() || "", title: tab.title() || "" });
-            }
-            return "{}";
-          })()
-        `;
-        const res = spawnSync('osascript', ['-l', 'JavaScript', '-e', script], {
-          encoding: 'utf-8',
-          timeout: 1000,
-        });
-        const active = JSON.parse(res.stdout?.trim() || '{}');
-        if (active.url) {
+        const active = this.queryFrontmostActiveTabAppleScript();
+        if (active?.url) {
           const matchedByUrl = tabs.find((t) => t.url === active.url);
           if (matchedByUrl) return matchedByUrl;
         }
-        if (active.title) {
+        const activeTitle = active?.title;
+        if (activeTitle) {
           const matchedByTitle = tabs.find(
-            (t) => t.title === active.title || t.title.startsWith(active.title) || active.title.startsWith(t.title),
+            (t) => t.title === activeTitle || t.title.startsWith(activeTitle) || activeTitle.startsWith(t.title),
           );
           if (matchedByTitle) return matchedByTitle;
         }
@@ -275,6 +366,89 @@ export class BrowserDriver {
     `;
     await this.executeScript<boolean>(typeScript);
     return { success: true, label: target.label || target.role || 'element' };
+  }
+
+  async findTab(query: string): Promise<BrowserTab | undefined> {
+    const tabs = await this.listTabs();
+    if (tabs.length === 0) return undefined;
+    const norm = query.trim().toLowerCase();
+    let targetHostPath = '';
+    try {
+      const u = new URL(query);
+      targetHostPath = `${u.host}${u.pathname}`.replace(/\/+$/, '').toLowerCase();
+    } catch {}
+
+    return tabs.find((t) => {
+      if (t.id.toLowerCase() === norm) return true;
+      if (t.url.toLowerCase() === norm) return true;
+      if (targetHostPath) {
+        try {
+          const u = new URL(t.url);
+          const hostPath = `${u.host}${u.pathname}`.replace(/\/+$/, '').toLowerCase();
+          if (hostPath === targetHostPath) return true;
+        } catch {}
+      }
+      if (t.url.toLowerCase().includes(norm)) return true;
+      if (t.title.toLowerCase().includes(norm)) return true;
+      return false;
+    });
+  }
+
+  async focusTab(target: string | number): Promise<{ success: boolean; tab: BrowserTab }> {
+    const tabs = await this.listTabs();
+    if (tabs.length === 0) {
+      throw new Error('No open Chrome tabs found');
+    }
+    let matched: BrowserTab | undefined;
+    if (typeof target === 'number') {
+      matched = tabs[target - 1] || tabs.find((t) => t.tabIndex === target);
+    } else {
+      const norm = target.trim().toLowerCase();
+      matched = tabs.find((t) => t.id.toLowerCase() === norm);
+      if (!matched) {
+        matched = tabs.find((t) => t.url.toLowerCase() === norm);
+      }
+      if (!matched) {
+        matched = tabs.find((t) => t.url.toLowerCase().includes(norm));
+      }
+      if (!matched) {
+        matched = tabs.find((t) => t.title.toLowerCase().includes(norm));
+      }
+      if (!matched && /^\d+$/.test(norm)) {
+        const idx = parseInt(norm, 10);
+        matched = tabs[idx - 1];
+      }
+    }
+    if (!matched) {
+      throw new Error(`Tab matching "${target}" not found`);
+    }
+
+    if (matched.webSocketDebuggerUrl) {
+      try {
+        await fetch(`${this.cdpUrl}/json/activate/${matched.id}`);
+      } catch {}
+    }
+
+    if (process.platform === 'darwin') {
+      try {
+        const widClause = matched.windowId
+          ? `window id ${matched.windowId}`
+          : matched.windowIndex
+            ? `window ${matched.windowIndex}`
+            : 'front window';
+        const tIdx = matched.tabIndex ?? 1;
+        const script = `
+          tell application "Google Chrome"
+            set active tab index of ${widClause} to ${tIdx}
+            set index of ${widClause} to 1
+          end tell
+        `;
+        spawnSync('osascript', ['-e', script], { encoding: 'utf-8', timeout: 1500 });
+      } catch {}
+    }
+
+    matched.active = true;
+    return { success: true, tab: matched };
   }
 
   async openUrl(url: string): Promise<{ success: boolean; url: string }> {

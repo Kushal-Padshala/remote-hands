@@ -28,6 +28,9 @@ export async function ensureChromeAutomationReady(options?: { headless?: boolean
   if (await isCdpReady(`${cdpUrl}/json/version`)) {
     return true;
   }
+  if (ChromeManager.isSystemChromeRunning()) {
+    return true;
+  }
 
   let port = 9222;
   try {
@@ -114,8 +117,26 @@ export async function browserCommand(args: string[], context: CommandContext = {
     }
   }
 
+  if (subcommand === 'focus' || subcommand === 'switch') {
+    const targetArg = subArgs[0];
+    if (!targetArg) {
+      stderr('Usage: rh browser focus <index | id | url | title>');
+      return 1;
+    }
+    try {
+      const driver = new BrowserDriver({ cdpUrl });
+      const res = await driver.focusTab(targetArg);
+      stdout(`Focused tab [${res.tab.id}] ${res.tab.title || '(untitled)'} - ${res.tab.url}`);
+      return 0;
+    } catch (err: any) {
+      stderr(err?.message || String(err));
+      return 1;
+    }
+  }
+
   if (subcommand === 'open') {
-    const urlArg = subArgs[0];
+    const urlArg = subArgs.find((a) => !a.startsWith('--'));
+    const forceNew = subArgs.includes('--new');
     if (!urlArg) {
       stderr('Usage: rh browser open <url>');
       return 1;
@@ -128,6 +149,16 @@ export async function browserCommand(args: string[], context: CommandContext = {
     }
     try {
       const driver = new BrowserDriver({ cdpUrl });
+      if (!forceNew && typeof (driver as any).findTab === 'function') {
+        const existing = await (driver as any).findTab(urlArg);
+        if (existing) {
+          if (typeof (driver as any).focusTab === 'function') {
+            await (driver as any).focusTab(existing.id);
+          }
+          stdout(`Focused existing tab: [${existing.id}] ${existing.title || '(untitled)'} - ${existing.url}`);
+          return 0;
+        }
+      }
       const res = await driver.openUrl(urlArg);
       stdout(`Opened ${res.url}`);
       return 0;
@@ -147,7 +178,9 @@ export async function browserCommand(args: string[], context: CommandContext = {
         stdout('No open tabs found.');
       } else {
         for (const tab of tabs) {
-          stdout(`[${tab.id}] ${tab.title || '(untitled)'} - ${tab.url}`);
+          const act = tab.active ? ' (active)' : '';
+          const win = tab.windowIndex ? ` [Window ${tab.windowIndex}, Tab ${tab.tabIndex ?? 1}]` : '';
+          stdout(`[${tab.id}]${act} ${tab.title || '(untitled)'} - ${tab.url}${win}`);
         }
       }
       return 0;

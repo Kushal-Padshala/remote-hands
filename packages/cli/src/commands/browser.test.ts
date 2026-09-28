@@ -7,6 +7,8 @@ const mockClickIndex = vi.fn();
 const mockTypeIndex = vi.fn();
 const mockOpenUrl = vi.fn();
 const mockListTabs = vi.fn();
+const mockFocusTab = vi.fn();
+const mockFindTab = vi.fn();
 
 vi.mock('@remote-hands/daemon', () => ({
   BrowserDriver: class {
@@ -15,8 +17,11 @@ vi.mock('@remote-hands/daemon', () => ({
     typeIndex = mockTypeIndex;
     openUrl = mockOpenUrl;
     listTabs = mockListTabs;
+    focusTab = mockFocusTab;
+    findTab = mockFindTab;
   },
   ChromeManager: class {
+    static isSystemChromeRunning = vi.fn().mockReturnValue(false);
     ensureRunning = vi.fn().mockResolvedValue({ available: true });
   },
   MacOsDriver: class {
@@ -184,11 +189,72 @@ describe('browserCommand', () => {
       expect(stdoutMessages.join('\n')).toContain('Opened https://example.com');
     });
 
+    it('reuses and focuses existing tab when open matches open tab', async () => {
+      mockFindTab.mockResolvedValueOnce({
+        id: 'tab-9',
+        title: 'App Store Connect',
+        url: 'https://appstoreconnect.apple.com/apps/6817089779',
+      });
+      mockFocusTab.mockResolvedValueOnce({
+        success: true,
+        tab: {
+          id: 'tab-9',
+          title: 'App Store Connect',
+          url: 'https://appstoreconnect.apple.com/apps/6817089779',
+        },
+      });
+
+      const code = await browserCommand(['open', 'https://appstoreconnect.apple.com/apps/6817089779'], getCtx());
+      expect(code).toBe(0);
+      expect(mockFocusTab).toHaveBeenCalledWith('tab-9');
+      expect(mockOpenUrl).not.toHaveBeenCalled();
+      expect(stdoutMessages.join('\n')).toContain('Focused existing tab: [tab-9] App Store Connect');
+    });
+
+    it('bypasses reuse and opens new tab when --new is provided', async () => {
+      mockOpenUrl.mockResolvedValueOnce({ success: true, url: 'https://example.com' });
+      const code = await browserCommand(['open', 'https://example.com', '--new'], getCtx());
+      expect(code).toBe(0);
+      expect(mockFindTab).not.toHaveBeenCalled();
+      expect(mockOpenUrl).toHaveBeenCalledWith('https://example.com');
+      expect(stdoutMessages.join('\n')).toContain('Opened https://example.com');
+    });
+
     it('handles navigation error gracefully', async () => {
       mockOpenUrl.mockRejectedValueOnce(new Error('Navigation timed out'));
       const code = await browserCommand(['open', 'https://example.com'], getCtx());
       expect(code).toBe(1);
       expect(stderrMessages.join('\n')).toContain('Navigation timed out');
+    });
+  });
+
+  describe('focus subcommand', () => {
+    it('requires target argument', async () => {
+      const code = await browserCommand(['focus'], getCtx());
+      expect(code).toBe(1);
+      expect(stderrMessages.join('\n')).toContain('Usage: rh browser focus <index | id | url | title>');
+    });
+
+    it('focuses matching tab by query', async () => {
+      mockFocusTab.mockResolvedValueOnce({
+        success: true,
+        tab: {
+          id: 'w2-t2',
+          title: 'App Store Connect',
+          url: 'https://appstoreconnect.apple.com',
+        },
+      });
+      const code = await browserCommand(['focus', 'appstoreconnect'], getCtx());
+      expect(code).toBe(0);
+      expect(mockFocusTab).toHaveBeenCalledWith('appstoreconnect');
+      expect(stdoutMessages.join('\n')).toContain('Focused tab [w2-t2] App Store Connect');
+    });
+
+    it('handles focus error gracefully', async () => {
+      mockFocusTab.mockRejectedValueOnce(new Error('Tab matching "missing" not found'));
+      const code = await browserCommand(['focus', 'missing'], getCtx());
+      expect(code).toBe(1);
+      expect(stderrMessages.join('\n')).toContain('Tab matching "missing" not found');
     });
   });
 
