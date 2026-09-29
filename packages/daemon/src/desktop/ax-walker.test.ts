@@ -54,7 +54,7 @@ describe('AxWalker', () => {
     expect(elements[0]?.label).toBe('ValidSize');
   });
 
-  it('prunes offscreen elements with negative coordinates', () => {
+  it('prunes offscreen elements with negative coordinates by default', () => {
     const walker = new AxWalker();
     const rawNodes: RawAxNode[] = [
       { role: 'AXButton', label: 'NegativeX', x: -10, y: 50, width: 50, height: 30 },
@@ -64,6 +64,19 @@ describe('AxWalker', () => {
     const elements = walker.pruneAndIndex(rawNodes);
     expect(elements.length).toBe(1);
     expect(elements[0]?.label).toBe('Onscreen');
+  });
+
+  it('preserves valid multi-monitor elements with negative coordinates when allowNegativeCoordinates is true', () => {
+    const walker = new AxWalker();
+    const rawNodes: RawAxNode[] = [
+      { role: 'AXButton', label: 'SecondaryMonitorX', x: -1440, y: 50, width: 50, height: 30 },
+      { role: 'AXButton', label: 'SecondaryMonitorY', x: 50, y: -200, width: 50, height: 30 },
+      { role: 'AXButton', label: 'ExtremeOutlier', x: -30000, y: 50, width: 50, height: 30 },
+      { role: 'AXButton', label: 'Onscreen', x: 0, y: 0, width: 50, height: 30 },
+    ];
+    const elements = walker.pruneAndIndex(rawNodes, { allowNegativeCoordinates: true });
+    expect(elements.length).toBe(3);
+    expect(elements.map((e) => e.label)).toEqual(['SecondaryMonitorX', 'SecondaryMonitorY', 'Onscreen']);
   });
 
   it('prunes nameless layout groups while keeping empty text fields', () => {

@@ -140,8 +140,41 @@ describe('HudCoordinator', () => {
     const callArgs = mockStore.createTask.mock.calls[0]![0];
     expect(callArgs.prompt).toContain('Frontmost Application: Google Chrome');
     expect(callArgs.prompt).toContain('Active URL: https://realestate.example.com');
+    expect(callArgs.prompt).toContain('PRIORITIZED ACTIVE TARGET MANDATE:');
+    expect(callArgs.prompt).toContain('NEVER switch to a different profile');
     expect(callArgs.prompt).toContain('Autonomous Research:');
     expect(callArgs.prompt).toContain('Full-Speed Execution:');
+  });
+
+  it('passes windowTitle to getActiveWindowContext when available in prompt result', async () => {
+    mockMacOsDriver.getActiveWindowContext = vi.fn().mockResolvedValue({
+      app: 'Google Chrome',
+      title: 'College Pulse Survey - Guest',
+      url: 'https://survey.example.com',
+      isBrowser: true,
+    });
+    const mockStore = {
+      createTask: vi.fn().mockResolvedValue({ id: 'task-guest-1' }),
+    };
+
+    const taskCoordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: mockStore as any,
+    });
+
+    await taskCoordinator.handleResult({
+      query: 'complete this survey',
+      app: 'Google Chrome',
+      windowTitle: 'College Pulse Survey - Guest',
+    });
+
+    expect(mockMacOsDriver.getActiveWindowContext).toHaveBeenCalledWith('Google Chrome', 'College Pulse Survey - Guest');
+    const created = (mockStore.createTask as any).mock.calls[0][0];
+    expect(created.prompt).toContain('PRIORITIZED ACTIVE TARGET MANDATE:');
+    expect(created.prompt).toContain('College Pulse Survey - Guest');
   });
 
   it('correctly classifies autonomous goals vs visual guidance questions', () => {

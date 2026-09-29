@@ -29,6 +29,10 @@ export async function ensureChromeAutomationReady(options?: { headless?: boolean
     return true;
   }
 
+  if (ChromeManager.isSystemChromeRunning()) {
+    return false;
+  }
+
   let port = 9222;
   try {
     const parsed = new URL(cdpUrl);

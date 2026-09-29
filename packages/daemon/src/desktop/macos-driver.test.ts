@@ -247,4 +247,15 @@ describe('MacOsDriver', () => {
     expect(context.url).toBe('');
     expect(context.isBrowser).toBe(true);
   });
+
+  it('respects windowTitleOverride and passes it to script and fallback', async () => {
+    const execMock = vi.fn().mockReturnValue({ stdout: '', stderr: 'error', status: 1 });
+    const driver = new MacOsDriver({ exec: execMock });
+    const context = await driver.getActiveWindowContext('Google Chrome', 'College Pulse Survey - Guest');
+    expect(context.app).toBe('Google Chrome');
+    expect(context.title).toBe('College Pulse Survey - Guest');
+    expect(context.isBrowser).toBe(true);
+    const callArgs = execMock.mock.calls[0]![1];
+    expect(callArgs.join(' ')).toContain('College Pulse Survey - Guest');
+  });
 });

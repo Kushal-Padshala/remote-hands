@@ -349,5 +349,13 @@ describe('browserCommand', () => {
       const ready = await ensureChromeAutomationReady({ cdpUrl: 'http://127.0.0.1:9225' });
       expect(ready).toBe(true);
     });
+
+    it('returns false without launching dedicated instance if system Chrome is already running', async () => {
+      const { ChromeManager } = await import('@remote-hands/daemon');
+      (ChromeManager.isSystemChromeRunning as any).mockReturnValueOnce(true);
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connection refused')));
+      const ready = await ensureChromeAutomationReady();
+      expect(ready).toBe(false);
+    });
   });
 });

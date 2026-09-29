@@ -57,17 +57,19 @@ export class AxWalker {
     }
   }
 
-  pruneAndIndex(nodes: RawAxNode[]): IndexedElement[] {
+  pruneAndIndex(nodes: RawAxNode[], options?: { allowNegativeCoordinates?: boolean }): IndexedElement[] {
     const valid: IndexedElement[] = [];
     let counter = 1;
+    const allowNegative = options?.allowNegativeCoordinates ?? false;
 
     for (const node of nodes) {
       if (!node) continue;
       if (node.visible === false || node.hidden === true) continue;
       if (typeof node.width !== 'number' || typeof node.height !== 'number') continue;
       if (node.width < 4 || node.height < 4) continue;
-      if (typeof node.x !== 'number' || typeof node.y !== 'number') continue;
-      if (node.x < 0 || node.y < 0) continue;
+      if (typeof node.x !== 'number' || typeof node.y !== 'number' || Number.isNaN(node.x) || Number.isNaN(node.y)) continue;
+      if (!allowNegative && (node.x < 0 || node.y < 0)) continue;
+      if (allowNegative && (node.x < -20000 || node.y < -20000 || node.x > 50000 || node.y > 50000)) continue;
 
       const trimmed = (node.label ?? '').trim();
       if (
@@ -204,7 +206,7 @@ export class AxWalker {
       const res = execFunc('osascript', ['-l', 'JavaScript', '-e', script]);
       const raw = JSON.parse(res.stdout.trim() || '[]');
       if (Array.isArray(raw)) {
-        const indexed = this.pruneAndIndex(raw);
+        const indexed = this.pruneAndIndex(raw, { allowNegativeCoordinates: true });
         if (indexed.length > 0) return indexed;
       }
     } catch {}
@@ -256,8 +258,8 @@ guard let app = targetApp else {
 }
 
 let appEl = AXUIElementCreateApplication(app.processIdentifier)
-var wins: AnyObject?
-_ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
+AXUIElementSetAttributeValue(appEl, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
 
 func getAttr(_ el: AXUIElement, _ attr: String) -> String {
     var val: AnyObject?
@@ -306,8 +308,9 @@ func walk(el: AXUIElement, depth: Int) {
 }
 
 var rootWindow: AXUIElement?
-if let winList = wins as? [AXUIElement], !winList.isEmpty {
-    rootWindow = winList.first
+var focVal: AnyObject?
+if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
+    rootWindow = (w as! AXUIElement)
 }
 if rootWindow == nil {
     var mainVal: AnyObject?
@@ -316,9 +319,10 @@ if rootWindow == nil {
     }
 }
 if rootWindow == nil {
-    var focVal: AnyObject?
-    if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
-        rootWindow = (w as! AXUIElement)
+    var wins: AnyObject?
+    _ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
+    if let winList = wins as? [AXUIElement], !winList.isEmpty {
+        rootWindow = winList.first
     }
 }
 
@@ -342,7 +346,7 @@ if let data = try? JSONEncoder().encode(nodes), let str = String(data: data, enc
           const ocr = await this.walkVisionOcr(execFunc);
           if (ocr.length > 0) return ocr;
         }
-        return this.pruneAndIndex(raw);
+        return this.pruneAndIndex(raw, { allowNegativeCoordinates: true });
       }
     } catch {}
     return [];

@@ -1,7 +1,7 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { isSafeBrowserUrl } from '@remote-hands/shared';
 
 export type ChromeProfileMode = 'active' | 'dedicated' | 'none';
@@ -74,6 +74,14 @@ export class ChromeManager {
   }
 
   static isSystemChromeRunning(): boolean {
+    if (process.platform === 'darwin') {
+      try {
+        const res = spawnSync('pgrep', ['-x', 'Google Chrome'], { encoding: 'utf-8' });
+        if (res.status === 0 && res.stdout.trim()) {
+          return true;
+        }
+      } catch {}
+    }
     const defaultDir = ChromeManager.getDefaultUserDataDir();
     const lockFile = path.join(defaultDir, 'SingletonLock');
     try {

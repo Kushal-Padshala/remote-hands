@@ -60,10 +60,13 @@ guard let app = targetApp else {
 }
 
 let appEl = AXUIElementCreateApplication(app.processIdentifier)
+AXUIElementSetAttributeValue(appEl, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
 var rootWindow: AXUIElement?
-var wins: AnyObject?
-_ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
-if let winList = wins as? [AXUIElement], !winList.isEmpty { rootWindow = winList.first }
+var focVal: AnyObject?
+if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
+    rootWindow = (w as! AXUIElement)
+}
 if rootWindow == nil {
     var mainVal: AnyObject?
     if AXUIElementCopyAttributeValue(appEl, kAXMainWindowAttribute as CFString, &mainVal) == .success, let w = mainVal {
@@ -71,10 +74,9 @@ if rootWindow == nil {
     }
 }
 if rootWindow == nil {
-    var focVal: AnyObject?
-    if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
-        rootWindow = (w as! AXUIElement)
-    }
+    var wins: AnyObject?
+    _ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
+    if let winList = wins as? [AXUIElement], !winList.isEmpty { rootWindow = winList.first }
 }
 
 guard let rw = rootWindow ?? appEl as AXUIElement? else {
@@ -231,10 +233,13 @@ guard let app = targetApp else {
 }
 
 let appEl = AXUIElementCreateApplication(app.processIdentifier)
+AXUIElementSetAttributeValue(appEl, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
 var rootWindow: AXUIElement?
-var wins: AnyObject?
-_ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
-if let winList = wins as? [AXUIElement], !winList.isEmpty { rootWindow = winList.first }
+var focVal: AnyObject?
+if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
+    rootWindow = (w as! AXUIElement)
+}
 if rootWindow == nil {
     var mainVal: AnyObject?
     if AXUIElementCopyAttributeValue(appEl, kAXMainWindowAttribute as CFString, &mainVal) == .success, let w = mainVal {
@@ -242,10 +247,9 @@ if rootWindow == nil {
     }
 }
 if rootWindow == nil {
-    var focVal: AnyObject?
-    if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
-        rootWindow = (w as! AXUIElement)
-    }
+    var wins: AnyObject?
+    _ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
+    if let winList = wins as? [AXUIElement], !winList.isEmpty { rootWindow = winList.first }
 }
 
 guard let rw = rootWindow ?? appEl as AXUIElement? else {
@@ -409,10 +413,13 @@ guard let app = targetApp else {
 }
 
 let appEl = AXUIElementCreateApplication(app.processIdentifier)
+AXUIElementSetAttributeValue(appEl, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
 var rootWindow: AXUIElement?
-var wins: AnyObject?
-_ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
-if let winList = wins as? [AXUIElement], !winList.isEmpty { rootWindow = winList.first }
+var focVal: AnyObject?
+if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
+    rootWindow = (w as! AXUIElement)
+}
 if rootWindow == nil {
     var mainVal: AnyObject?
     if AXUIElementCopyAttributeValue(appEl, kAXMainWindowAttribute as CFString, &mainVal) == .success, let w = mainVal {
@@ -420,10 +427,9 @@ if rootWindow == nil {
     }
 }
 if rootWindow == nil {
-    var focVal: AnyObject?
-    if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
-        rootWindow = (w as! AXUIElement)
-    }
+    var wins: AnyObject?
+    _ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
+    if let winList = wins as? [AXUIElement], !winList.isEmpty { rootWindow = winList.first }
 }
 
 guard let rw = rootWindow ?? appEl as AXUIElement? else {

@@ -57,6 +57,11 @@ export function isAutonomousGoal(query: string): boolean {
     'start',
     'create',
     'make',
+    'complete',
+    'finish',
+    'answer',
+    'survey',
+    'form',
     'campaign',
     'launch',
     'run',
@@ -114,6 +119,12 @@ export function formatContextualTaskPrompt(
   if (context.title) lines.push(`- Window Title: ${context.title}`);
   if (context.url) lines.push(`- Active URL: ${context.url}`);
   lines.push(`- Application Type: ${context.isBrowser ? 'Web Browser' : 'Native Desktop Software'}`);
+
+  lines.push('');
+  lines.push('PRIORITIZED ACTIVE TARGET MANDATE:');
+  lines.push(`1. The user triggered this task while actively in "${context.title || context.app}" (${context.url || context.app}).`);
+  lines.push('2. You MUST prioritize and operate directly on this exact window, tab, and profile.');
+  lines.push('3. NEVER switch to a different profile (such as Personal or Default profile when Guest mode is active), and NEVER open new duplicate windows or tabs if this page or app is already in front.');
 
   if (attachments && attachments.length > 0) {
     lines.push('');
@@ -471,7 +482,9 @@ export class HudCoordinator {
       this.activeExecution = undefined;
       prev.abortController.abort();
     }
-    const windowContext = await this.macosDriver.getActiveWindowContext(result.app);
+    const windowContext = result.windowTitle
+      ? await this.macosDriver.getActiveWindowContext(result.app, result.windowTitle)
+      : await this.macosDriver.getActiveWindowContext(result.app);
     const isGoal = isAutonomousGoal(result.query);
 
     if (isGoal && this.store && typeof this.store.createTask === 'function') {
@@ -602,9 +615,9 @@ export class HudCoordinator {
             activePrompt = null;
           }
           this.currentConversationId = undefined;
-          activePrompt = this.hudRunner.openInteractivePrompt(
+          const promptArgs: any[] = [
             event.app,
-            async (result, sendUpdate) => {
+            async (result: any, sendUpdate: any) => {
               try {
                 await this.handleResult(result, sendUpdate);
               } catch {}
@@ -613,10 +626,14 @@ export class HudCoordinator {
               this.cancelActiveTask('User cancelled from Spotlight HUD').catch(() => {});
               activePrompt = null;
             },
-            (sendUpdate) => {
+            (sendUpdate: any) => {
               this.stopActiveTask('User stopped task from Spotlight HUD', sendUpdate).catch(() => {});
             },
-          );
+          ];
+          if (event.windowTitle) {
+            promptArgs.push(event.windowTitle);
+          }
+          activePrompt = (this.hudRunner.openInteractivePrompt as any)(...promptArgs);
         }
       } catch {}
     });

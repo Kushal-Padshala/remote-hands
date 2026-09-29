@@ -10,10 +10,13 @@ import { ContextService } from '../context/context-service.js';
 export interface SpotlightPromptResult {
   query: string;
   app: string;
+  windowTitle?: string | undefined;
   attachments?: ContextAttachment[];
 }
 
-export type SpotlightListenerEvent = SpotlightPromptResult | { event: string; app: string; query?: string };
+export type SpotlightListenerEvent =
+  | SpotlightPromptResult
+  | { event: string; app: string; windowTitle?: string | undefined; query?: string | undefined };
 
 export type HudUpdateSender = (status: string, text: string, role?: string) => void;
 
@@ -36,26 +39,6 @@ export class SpotlightHudRunner {
   private ensureBinary(): string | null {
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
     const userBinPath = path.join(os.homedir(), '.remote-hands', 'bin', 'rh-spotlight');
-    const candidateBinaries = [
-      this.binaryPath,
-      userBinPath,
-      path.resolve(currentDir, '..', '..', 'bin', 'rh-spotlight'),
-      path.resolve(currentDir, '..', '..', 'daemon', 'bin', 'rh-spotlight'),
-      path.resolve(currentDir, '..', 'daemon', 'bin', 'rh-spotlight'),
-      path.resolve(currentDir, '..', '..', '..', 'packages', 'daemon', 'bin', 'rh-spotlight'),
-      path.resolve(currentDir, '..', '..', '..', 'daemon', 'bin', 'rh-spotlight'),
-    ];
-    for (const b of candidateBinaries) {
-      if (fs.existsSync(b)) {
-        if (process.platform === 'darwin') {
-          const verify = spawnSync('codesign', ['-v', b], { encoding: 'utf-8' });
-          if (verify.status !== 0) {
-            spawnSync('codesign', ['-s', '-', '--force', b], { encoding: 'utf-8' });
-          }
-        }
-        return b;
-      }
-    }
 
     const candidateSwift = [
       this.swiftSourcePath,
@@ -68,10 +51,43 @@ export class SpotlightHudRunner {
     ];
 
     let swiftFile: string | null = null;
+    let swiftMtime = 0;
     for (const s of candidateSwift) {
       if (fs.existsSync(s)) {
         swiftFile = s;
+        try {
+          swiftMtime = fs.statSync(s).mtimeMs;
+        } catch {}
         break;
+      }
+    }
+
+    const candidateBinaries = [
+      this.binaryPath,
+      userBinPath,
+      path.resolve(currentDir, '..', '..', 'bin', 'rh-spotlight'),
+      path.resolve(currentDir, '..', '..', 'daemon', 'bin', 'rh-spotlight'),
+      path.resolve(currentDir, '..', 'daemon', 'bin', 'rh-spotlight'),
+      path.resolve(currentDir, '..', '..', '..', 'packages', 'daemon', 'bin', 'rh-spotlight'),
+      path.resolve(currentDir, '..', '..', '..', 'daemon', 'bin', 'rh-spotlight'),
+    ];
+
+    for (const b of candidateBinaries) {
+      if (fs.existsSync(b)) {
+        try {
+          const binMtime = fs.statSync(b).mtimeMs;
+          if (swiftMtime > 0 && binMtime < swiftMtime) {
+            continue;
+          }
+        } catch {}
+
+        if (process.platform === 'darwin') {
+          const verify = spawnSync('codesign', ['-v', b], { encoding: 'utf-8' });
+          if (verify.status !== 0) {
+            spawnSync('codesign', ['-s', '-', '--force', b], { encoding: 'utf-8' });
+          }
+        }
+        return b;
       }
     }
 
@@ -94,7 +110,7 @@ export class SpotlightHudRunner {
     return null;
   }
 
-  async openPrompt(activeApp?: string): Promise<SpotlightPromptResult | null> {
+  async openPrompt(activeApp?: string, windowTitle?: string): Promise<SpotlightPromptResult | null> {
     const target = this.ensureBinary();
     if (!target) {
       return null;
@@ -102,6 +118,9 @@ export class SpotlightHudRunner {
     const args: string[] = ['prompt'];
     if (activeApp) {
       args.push(`--app=${activeApp}`);
+    }
+    if (windowTitle) {
+      args.push(`--window-title=${windowTitle}`);
     }
 
     let cmd = target;
@@ -123,6 +142,7 @@ export class SpotlightHudRunner {
         return {
           query: parsed.query,
           app: parsed.app || activeApp || 'Desktop',
+          windowTitle: parsed.windowTitle || windowTitle || undefined,
           attachments: Array.isArray(parsed.attachments) ? parsed.attachments : undefined,
         };
       }
@@ -137,6 +157,7 @@ export class SpotlightHudRunner {
     onSubmit: (result: SpotlightPromptResult, sendUpdate: HudUpdateSender) => Promise<void> | void,
     onCancel?: () => void,
     onStop?: (sendUpdate?: HudUpdateSender) => void,
+    windowTitle?: string | undefined,
   ): { close: () => void } {
     const target = this.ensureBinary();
     if (!target) {
@@ -145,6 +166,9 @@ export class SpotlightHudRunner {
     const args: string[] = ['prompt'];
     if (activeApp) {
       args.push(`--app=${activeApp}`);
+    }
+    if (windowTitle) {
+      args.push(`--window-title=${windowTitle}`);
     }
 
     let cmd = target;
@@ -206,6 +230,7 @@ export class SpotlightHudRunner {
             const res: SpotlightPromptResult = {
               query: parsed.query,
               app: parsed.app || activeApp || 'Desktop',
+              windowTitle: parsed.windowTitle || windowTitle || undefined,
               attachments: Array.isArray(parsed.attachments) ? parsed.attachments : undefined,
             };
             Promise.resolve(onSubmit(res, sendUpdate)).catch(() => {});

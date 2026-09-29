@@ -166,6 +166,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
     var historyScrollView: NSScrollView!
     var historyTextView: NSTextView!
     var targetApp: String = "Desktop"
+    var targetWindowTitle: String = ""
     var isWorking: Bool = false
     var isExpanded: Bool = false
 
@@ -177,9 +178,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
     var filteredContextItems: [[String: Any]] = []
     var selectedAttachments: [[String: Any]] = []
 
-    init(targetApp: String, initialContext: [String: Any]? = nil) {
+    init(targetApp: String, initialContext: [String: Any]? = nil, targetWindowTitle: String = "") {
         self.targetApp = targetApp
         self.initialContext = initialContext
+        self.targetWindowTitle = targetWindowTitle
         super.init()
     }
 
@@ -1013,6 +1015,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             if !text.isEmpty {
                 textField.stringValue = ""
                 var dict: [String: Any] = ["event": "submit", "query": text, "app": targetApp]
+                if !targetWindowTitle.isEmpty {
+                    dict["windowTitle"] = targetWindowTitle
+                }
                 if !selectedAttachments.isEmpty {
                     dict["attachments"] = selectedAttachments
                 }
@@ -1230,6 +1235,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
 let args = CommandLine.arguments
 var mode = "prompt"
 var appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Desktop"
+var windowTitle = ""
 var initialContext: [String: Any]? = nil
 
 for arg in args {
@@ -1237,6 +1243,8 @@ for arg in args {
         mode = "listen"
     } else if arg.starts(with: "--app=") {
         appName = String(arg.dropFirst(6))
+    } else if arg.starts(with: "--window-title=") {
+        windowTitle = String(arg.dropFirst(15))
     } else if arg.starts(with: "--context=") {
         let jsonStr = String(arg.dropFirst(10))
         if let data = jsonStr.data(using: .utf8),
@@ -1256,7 +1264,20 @@ func emitHotkey() {
     if now - lastHotkeyTime < 0.5 { return }
     lastHotkeyTime = now
     let frontApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Desktop"
-    print("{\"event\":\"hotkey\",\"app\":\"\(frontApp)\"}")
+    var winTitle = ""
+    if let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] {
+        for w in windowList {
+            let layer = w[kCGWindowLayer as String] as? Int ?? -1
+            let owner = w[kCGWindowOwnerName as String] as? String ?? ""
+            let title = w[kCGWindowName as String] as? String ?? ""
+            if layer == 0 && !title.isEmpty && (owner == frontApp || frontApp == "Desktop") {
+                winTitle = title
+                break
+            }
+        }
+    }
+    let escapedTitle = winTitle.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+    print("{\"event\":\"hotkey\",\"app\":\"\(frontApp)\",\"windowTitle\":\"\(escapedTitle)\"}")
     fflush(stdout)
 }
 
@@ -1294,7 +1315,7 @@ if mode == "listen" {
     }
     app.run()
 } else {
-    let delegate = AppDelegate(targetApp: appName, initialContext: initialContext)
+    let delegate = AppDelegate(targetApp: appName, initialContext: initialContext, targetWindowTitle: windowTitle)
     app.delegate = delegate
     app.run()
 }

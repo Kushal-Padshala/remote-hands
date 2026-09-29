@@ -114,7 +114,7 @@ export class MacOsDriver {
     return [];
   }
 
-  async getActiveWindowContext(appOverride?: string): Promise<ActiveWindowContext> {
+  async getActiveWindowContext(appOverride?: string, windowTitleOverride?: string): Promise<ActiveWindowContext> {
     const script = `
       (() => {
         const se = Application("System Events");
@@ -122,10 +122,10 @@ export class MacOsDriver {
         const frontApp = procs.length > 0 ? procs[0] : null;
         let appName = frontApp ? frontApp.name() : "Desktop";
         ${appOverride ? `appName = ${JSON.stringify(appOverride)};` : ''}
-        let winTitle = "";
+        let winTitle = ${windowTitleOverride ? JSON.stringify(windowTitleOverride) : '""'};
         try {
           const appProc = se.applicationProcesses.byName(appName);
-          if (appProc && appProc.windows.length > 0) {
+          if (appProc && appProc.windows.length > 0 && !winTitle) {
             winTitle = appProc.windows[0].name() || "";
           }
         } catch (_) {}
@@ -135,8 +135,21 @@ export class MacOsDriver {
           if (/chrome/i.test(appName)) {
             const chrome = Application("Google Chrome");
             if (chrome.running() && chrome.windows.length > 0) {
-              url = chrome.windows[0].activeTab.url() || "";
-              if (!winTitle) winTitle = chrome.windows[0].activeTab.title() || "";
+              let targetWin = chrome.windows[0];
+              ${windowTitleOverride ? `
+              for (let i = 0; i < chrome.windows.length; i++) {
+                const w = chrome.windows[i];
+                const wName = (w.name && typeof w.name === 'function') ? w.name() : '';
+                const tTitle = (w.activeTab && w.activeTab.title && typeof w.activeTab.title === 'function') ? w.activeTab.title() : '';
+                if ((wName && wName.includes(${JSON.stringify(windowTitleOverride)})) ||
+                    (tTitle && tTitle.includes(${JSON.stringify(windowTitleOverride)}))) {
+                  targetWin = w;
+                  break;
+                }
+              }
+              ` : ''}
+              url = (targetWin.activeTab && typeof targetWin.activeTab.url === 'function' ? targetWin.activeTab.url() : "") || "";
+              if (!winTitle) winTitle = (targetWin.activeTab && typeof targetWin.activeTab.title === 'function' ? targetWin.activeTab.title() : "") || (targetWin.name && typeof targetWin.name === 'function' ? targetWin.name() : "") || "";
             }
           } else if (/safari/i.test(appName)) {
             const safari = Application("Safari");
@@ -147,20 +160,59 @@ export class MacOsDriver {
           } else if (/arc/i.test(appName)) {
             const arc = Application("Arc");
             if (arc.running() && arc.windows.length > 0) {
-              url = arc.windows[0].activeTab.url() || "";
-              if (!winTitle) winTitle = arc.windows[0].activeTab.title() || "";
+              let targetWin = arc.windows[0];
+              ${windowTitleOverride ? `
+              for (let i = 0; i < arc.windows.length; i++) {
+                const w = arc.windows[i];
+                const wName = (w.name && typeof w.name === 'function') ? w.name() : '';
+                const tTitle = (w.activeTab && w.activeTab.title && typeof w.activeTab.title === 'function') ? w.activeTab.title() : '';
+                if ((wName && wName.includes(${JSON.stringify(windowTitleOverride)})) ||
+                    (tTitle && tTitle.includes(${JSON.stringify(windowTitleOverride)}))) {
+                  targetWin = w;
+                  break;
+                }
+              }
+              ` : ''}
+              url = (targetWin.activeTab && typeof targetWin.activeTab.url === 'function' ? targetWin.activeTab.url() : "") || "";
+              if (!winTitle) winTitle = (targetWin.activeTab && typeof targetWin.activeTab.title === 'function' ? targetWin.activeTab.title() : "") || "";
             }
           } else if (/brave/i.test(appName)) {
             const brave = Application("Brave Browser");
             if (brave.running() && brave.windows.length > 0) {
-              url = brave.windows[0].activeTab.url() || "";
-              if (!winTitle) winTitle = brave.windows[0].activeTab.title() || "";
+              let targetWin = brave.windows[0];
+              ${windowTitleOverride ? `
+              for (let i = 0; i < brave.windows.length; i++) {
+                const w = brave.windows[i];
+                const wName = (w.name && typeof w.name === 'function') ? w.name() : '';
+                const tTitle = (w.activeTab && w.activeTab.title && typeof w.activeTab.title === 'function') ? w.activeTab.title() : '';
+                if ((wName && wName.includes(${JSON.stringify(windowTitleOverride)})) ||
+                    (tTitle && tTitle.includes(${JSON.stringify(windowTitleOverride)}))) {
+                  targetWin = w;
+                  break;
+                }
+              }
+              ` : ''}
+              url = (targetWin.activeTab && typeof targetWin.activeTab.url === 'function' ? targetWin.activeTab.url() : "") || "";
+              if (!winTitle) winTitle = (targetWin.activeTab && typeof targetWin.activeTab.title === 'function' ? targetWin.activeTab.title() : "") || "";
             }
           } else if (/edge/i.test(appName)) {
             const edge = Application("Microsoft Edge");
             if (edge.running() && edge.windows.length > 0) {
-              url = edge.windows[0].activeTab.url() || "";
-              if (!winTitle) winTitle = edge.windows[0].activeTab.title() || "";
+              let targetWin = edge.windows[0];
+              ${windowTitleOverride ? `
+              for (let i = 0; i < edge.windows.length; i++) {
+                const w = edge.windows[i];
+                const wName = (w.name && typeof w.name === 'function') ? w.name() : '';
+                const tTitle = (w.activeTab && w.activeTab.title && typeof w.activeTab.title === 'function') ? w.activeTab.title() : '';
+                if ((wName && wName.includes(${JSON.stringify(windowTitleOverride)})) ||
+                    (tTitle && tTitle.includes(${JSON.stringify(windowTitleOverride)}))) {
+                  targetWin = w;
+                  break;
+                }
+              }
+              ` : ''}
+              url = (targetWin.activeTab && typeof targetWin.activeTab.url === 'function' ? targetWin.activeTab.url() : "") || "";
+              if (!winTitle) winTitle = (targetWin.activeTab && typeof targetWin.activeTab.title === 'function' ? targetWin.activeTab.title() : "") || "";
             }
           }
         } catch (_) {}
@@ -174,7 +226,7 @@ export class MacOsDriver {
       const parsed = JSON.parse(res.stdout.trim());
       return {
         app: parsed.app || appOverride || 'Desktop',
-        title: parsed.title || '',
+        title: parsed.title || windowTitleOverride || '',
         url: parsed.url || '',
         isBrowser: Boolean(parsed.isBrowser),
       };
@@ -183,7 +235,7 @@ export class MacOsDriver {
       const isBrowser = /chrome|safari|arc|brave|edge|firefox|opera|browser/i.test(fallbackApp);
       return {
         app: fallbackApp,
-        title: '',
+        title: windowTitleOverride || '',
         url: '',
         isBrowser,
       };
