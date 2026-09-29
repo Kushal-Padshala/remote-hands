@@ -3,12 +3,18 @@ import {
   MacOsDriver,
   AxWalker,
   DesktopActEngine,
+  searchAndTriggerMenu,
+  crawlAppMenu,
+  performAxAction,
 } from '@remote-hands/daemon';
 
 export interface DesktopCommandContext extends CommandContext {
   desktopDriver?: MacOsDriver | any;
   walker?: AxWalker | any;
   actEngine?: DesktopActEngine | any;
+  searchAndTriggerMenu?: typeof searchAndTriggerMenu;
+  crawlAppMenu?: typeof crawlAppMenu;
+  performAxAction?: typeof performAxAction;
 }
 
 export async function desktopCommand(
@@ -20,10 +26,13 @@ export async function desktopCommand(
   const driver: MacOsDriver = context.desktopDriver ?? new MacOsDriver();
   const walker: AxWalker = context.walker ?? new AxWalker({ driver });
   const engine: DesktopActEngine = context.actEngine ?? new DesktopActEngine(driver);
+  const searchMenuFn = context.searchAndTriggerMenu ?? searchAndTriggerMenu;
+  const crawlMenuFn = context.crawlAppMenu ?? crawlAppMenu;
+  const axActionFn = context.performAxAction ?? performAxAction;
 
   const sub = args[0];
   if (!sub) {
-    stdout('Usage: rh desktop <act|open|window|snapshot|screenshot|click|type|key|menu> [args]');
+    stdout('Usage: rh desktop <act|open|window|snapshot|screenshot|click|type|key|menu|menu-search|menu-list|ax-action> [args]');
     stdout('');
     stdout('Commands:');
     stdout('  open <app>                  Launch or activate an application');
@@ -34,13 +43,16 @@ export async function desktopCommand(
     stdout('  type <text>                 Type text into the active element');
     stdout('  key <combo>                 Send keystroke or shortcut (e.g. return, cmd+s)');
     stdout('  menu <app> <menu> <item>    Select a menu item in an application');
+    stdout('  menu-search <app> <query>   Fuzzy search and trigger a menu bar item');
+    stdout('  menu-list <app>             List hierarchical menu items as JSON');
+    stdout('  ax-action <app> <idx> [act] Perform direct native accessibility action (default: AXPress)');
     stdout('  act <goal>                  Execute a natural language desktop goal');
     stdout('');
     return 1;
   }
 
   if (sub === '--help' || sub === '-h' || sub === 'help') {
-    stdout('Usage: rh desktop <act|open|window|snapshot|screenshot|click|type|key|menu> [args]');
+    stdout('Usage: rh desktop <act|open|window|snapshot|screenshot|click|type|key|menu|menu-search|menu-list|ax-action> [args]');
     stdout('');
     stdout('Commands:');
     stdout('  open <app>                  Launch or activate an application');
@@ -51,6 +63,9 @@ export async function desktopCommand(
     stdout('  type <text>                 Type text into the active element');
     stdout('  key <combo>                 Send keystroke or shortcut (e.g. return, cmd+s)');
     stdout('  menu <app> <menu> <item>    Select a menu item in an application');
+    stdout('  menu-search <app> <query>   Fuzzy search and trigger a menu bar item');
+    stdout('  menu-list <app>             List hierarchical menu items as JSON');
+    stdout('  ax-action <app> <idx> [act] Perform direct native accessibility action (default: AXPress)');
     stdout('  act <goal>                  Execute a natural language desktop goal');
     stdout('');
     return 0;
@@ -250,6 +265,58 @@ export async function desktopCommand(
       return 0;
     }
 
+    if (sub === 'menu-search') {
+      const app = args[1];
+      const query = args.slice(2).join(' ').trim();
+      if (!app || !query) {
+        stderr('Usage: rh desktop menu-search <app> <query>');
+        return 1;
+      }
+      const res = await searchMenuFn(app, query, driver.exec);
+      if (res.success) {
+        stdout(`Triggered menu: ${(res.triggeredPath || [query]).join(' > ')}`);
+        return 0;
+      } else {
+        stderr(`Failed to trigger menu: ${res.error || 'Menu item not found'}`);
+        return 1;
+      }
+    }
+
+    if (sub === 'menu-list') {
+      const app = args.slice(1).join(' ').trim();
+      if (!app) {
+        stderr('Usage: rh desktop menu-list <app>');
+        return 1;
+      }
+      const items = await crawlMenuFn(app, driver.exec);
+      stdout(JSON.stringify(items, null, 2));
+      return 0;
+    }
+
+    if (sub === 'ax-action') {
+      const app = args[1];
+      const idxStr = args[2];
+      const action = args[3] || 'AXPress';
+      if (!app || !idxStr) {
+        stderr('Usage: rh desktop ax-action <app> <index> [action]');
+        return 1;
+      }
+      const cleanIdx = idxStr.replace(/[\[\]]/g, '');
+      const targetIndex = parseInt(cleanIdx, 10);
+      if (isNaN(targetIndex)) {
+        stderr('Usage: rh desktop ax-action <app> <index> [action]');
+        return 1;
+      }
+      const success = await axActionFn(app, targetIndex, action, driver.exec);
+      if (success) {
+        stdout(`Executed ${action} on element [${cleanIdx}] in ${app}`);
+        return 0;
+      } else {
+        stderr(`Failed to execute ${action} on element [${cleanIdx}] in ${app}`);
+        return 1;
+      }
+    }
+
     if (sub === 'act') {
       const goal = args.slice(1).join(' ').trim();
       if (!goal) {
@@ -265,10 +332,10 @@ export async function desktopCommand(
       }
       const elements = await walker.walkActiveApp(targetApp);
       const decision = typeof engine.act === 'function'
-        ? await engine.act(goal, elements)
+        ? await (targetApp ? engine.act(goal, elements, targetApp) : engine.act(goal, elements))
         : await (async () => {
             const d = engine.matchHeuristic(goal, elements);
-            await engine.executeDecision(d, elements);
+            await (targetApp ? engine.executeDecision(d, elements, targetApp) : engine.executeDecision(d, elements));
             return d;
           })();
       if ((decision.action === 'CLICK' || decision.action === 'RIGHT_CLICK') && decision.targetIndex === undefined) {
@@ -279,7 +346,7 @@ export async function desktopCommand(
       return 0;
     }
 
-    stderr(`Unknown desktop subcommand: ${sub}. Usage: rh desktop <act|open|window|snapshot|click|type|key|menu> [args]`);
+    stderr(`Unknown desktop subcommand: ${sub}. Usage: rh desktop <act|open|window|snapshot|screenshot|click|type|key|menu|menu-search|menu-list|ax-action> [args]`);
     return 1;
   } catch (err) {
     stderr(err instanceof Error ? err.message : String(err));

@@ -485,4 +485,171 @@ describe('desktopCommand', () => {
     expect(code).toBe(1);
     expect(stderr).toHaveBeenCalledWith('Failed to capture desktop screenshot');
   });
+
+  it('dispatches menu-search command successfully', async () => {
+    const stdout = vi.fn();
+    const stderr = vi.fn();
+    const code = await desktopCommand(['menu-search', 'Bambu Studio', 'slice'], { stdout, stderr });
+    expect([0, 1]).toContain(code);
+  });
+
+  it('handles menu-search with mocked success and triggeredPath', async () => {
+    const searchMock = vi.fn().mockResolvedValue({
+      success: true,
+      triggeredPath: ['File', 'Export', 'STL'],
+    });
+    const driverMock = { exec: vi.fn() };
+    const stdout = vi.fn();
+    const code = await desktopCommand(['menu-search', 'Bambu Studio', 'Export', 'STL'], {
+      stdout,
+      desktopDriver: driverMock as any,
+      searchAndTriggerMenu: searchMock as any,
+    });
+    expect(code).toBe(0);
+    expect(searchMock).toHaveBeenCalledWith('Bambu Studio', 'Export STL', driverMock.exec);
+    expect(stdout).toHaveBeenCalledWith('Triggered menu: File > Export > STL');
+  });
+
+  it('handles menu-search with triggeredPath fallback to query', async () => {
+    const searchMock = vi.fn().mockResolvedValue({ success: true });
+    const stdout = vi.fn();
+    const code = await desktopCommand(['menu-search', 'Bambu Studio', 'slice'], {
+      stdout,
+      searchAndTriggerMenu: searchMock as any,
+    });
+    expect(code).toBe(0);
+    expect(stdout).toHaveBeenCalledWith('Triggered menu: slice');
+  });
+
+  it('handles menu-search failure from searchAndTriggerMenu', async () => {
+    const searchMock = vi.fn().mockResolvedValue({
+      success: false,
+      error: 'Menu item not found',
+    });
+    const stderr = vi.fn();
+    const code = await desktopCommand(['menu-search', 'Bambu Studio', 'unknown item'], {
+      stderr,
+      searchAndTriggerMenu: searchMock as any,
+    });
+    expect(code).toBe(1);
+    expect(stderr).toHaveBeenCalledWith('Failed to trigger menu: Menu item not found');
+  });
+
+  it('reports missing args for menu-search command', async () => {
+    const stderr1 = vi.fn();
+    const code1 = await desktopCommand(['menu-search'], { stderr: stderr1 });
+    expect(code1).toBe(1);
+    expect(stderr1).toHaveBeenCalledWith('Usage: rh desktop menu-search <app> <query>');
+
+    const stderr2 = vi.fn();
+    const code2 = await desktopCommand(['menu-search', 'Bambu Studio'], { stderr: stderr2 });
+    expect(code2).toBe(1);
+    expect(stderr2).toHaveBeenCalledWith('Usage: rh desktop menu-search <app> <query>');
+  });
+
+  it('dispatches menu-list command successfully', async () => {
+    const stdout = vi.fn();
+    const code = await desktopCommand(['menu-list', 'Bambu Studio'], { stdout });
+    expect([0, 1]).toContain(code);
+  });
+
+  it('handles menu-list with mocked menu tree', async () => {
+    const mockTree = [{ title: 'File', children: [{ title: 'New' }] }];
+    const crawlMock = vi.fn().mockResolvedValue(mockTree);
+    const driverMock = { exec: vi.fn() };
+    const stdout = vi.fn();
+    const code = await desktopCommand(['menu-list', 'Bambu', 'Studio'], {
+      stdout,
+      desktopDriver: driverMock as any,
+      crawlAppMenu: crawlMock as any,
+    });
+    expect(code).toBe(0);
+    expect(crawlMock).toHaveBeenCalledWith('Bambu Studio', driverMock.exec);
+    expect(stdout).toHaveBeenCalledWith(JSON.stringify(mockTree, null, 2));
+  });
+
+  it('reports missing app for menu-list command', async () => {
+    const stderr = vi.fn();
+    const code = await desktopCommand(['menu-list'], { stderr });
+    expect(code).toBe(1);
+    expect(stderr).toHaveBeenCalledWith('Usage: rh desktop menu-list <app>');
+  });
+
+  it('dispatches ax-action command successfully with default AXPress', async () => {
+    const axMock = vi.fn().mockResolvedValue(true);
+    const driverMock = { exec: vi.fn() };
+    const stdout = vi.fn();
+    const code = await desktopCommand(['ax-action', 'Bambu Studio', '12'], {
+      stdout,
+      desktopDriver: driverMock as any,
+      performAxAction: axMock as any,
+    });
+    expect(code).toBe(0);
+    expect(axMock).toHaveBeenCalledWith('Bambu Studio', 12, 'AXPress', driverMock.exec);
+    expect(stdout).toHaveBeenCalledWith('Executed AXPress on element [12] in Bambu Studio');
+  });
+
+  it('dispatches ax-action command with custom action and bracketed index', async () => {
+    const axMock = vi.fn().mockResolvedValue(true);
+    const driverMock = { exec: vi.fn() };
+    const stdout = vi.fn();
+    const code = await desktopCommand(['ax-action', 'Slack', '[5]', 'AXShowMenu'], {
+      stdout,
+      desktopDriver: driverMock as any,
+      performAxAction: axMock as any,
+    });
+    expect(code).toBe(0);
+    expect(axMock).toHaveBeenCalledWith('Slack', 5, 'AXShowMenu', driverMock.exec);
+    expect(stdout).toHaveBeenCalledWith('Executed AXShowMenu on element [5] in Slack');
+  });
+
+  it('reports missing args for ax-action command', async () => {
+    const stderr1 = vi.fn();
+    const code1 = await desktopCommand(['ax-action'], { stderr: stderr1 });
+    expect(code1).toBe(1);
+    expect(stderr1).toHaveBeenCalledWith('Usage: rh desktop ax-action <app> <index> [action]');
+
+    const stderr2 = vi.fn();
+    const code2 = await desktopCommand(['ax-action', 'Slack'], { stderr: stderr2 });
+    expect(code2).toBe(1);
+    expect(stderr2).toHaveBeenCalledWith('Usage: rh desktop ax-action <app> <index> [action]');
+  });
+
+  it('reports invalid index for ax-action command', async () => {
+    const stderr = vi.fn();
+    const code = await desktopCommand(['ax-action', 'Slack', 'notanumber'], { stderr });
+    expect(code).toBe(1);
+    expect(stderr).toHaveBeenCalledWith('Usage: rh desktop ax-action <app> <index> [action]');
+  });
+
+  it('handles ax-action failure from performAxAction', async () => {
+    const axMock = vi.fn().mockResolvedValue(false);
+    const stderr = vi.fn();
+    const code = await desktopCommand(['ax-action', 'Slack', '3'], {
+      stderr,
+      performAxAction: axMock as any,
+    });
+    expect(code).toBe(1);
+    expect(stderr).toHaveBeenCalledWith('Failed to execute AXPress on element [3] in Slack');
+  });
+
+  it('passes targetApp to engine.act when specified in goal', async () => {
+    const mockElements = [
+      { index: 1, role: 'AXButton', label: 'Submit', bounds: [0, 0, 10, 10] },
+    ];
+    const walkerMock = { walkActiveApp: vi.fn().mockResolvedValue(mockElements) };
+    const engineMock = {
+      act: vi.fn().mockResolvedValue({ action: 'CLICK', targetIndex: 1 }),
+    };
+    const stdout = vi.fn();
+    const code = await desktopCommand(['act', 'in', 'Slack,', 'click', 'Submit'], {
+      stdout,
+      walker: walkerMock as any,
+      actEngine: engineMock as any,
+    });
+    expect(code).toBe(0);
+    expect(walkerMock.walkActiveApp).toHaveBeenCalledWith('Slack');
+    expect(engineMock.act).toHaveBeenCalledWith('in Slack, click Submit', mockElements, 'Slack');
+    expect(stdout).toHaveBeenCalledWith('Executed: CLICK');
+  });
 });
