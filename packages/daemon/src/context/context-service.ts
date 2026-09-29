@@ -310,10 +310,12 @@ end if
 
     const filteredBrowsers: ContextBrowserTarget[] = [];
     for (const b of hierarchy.browsers) {
+      const isBrowserMatch = b.name.toLowerCase().includes(q) || b.id.toLowerCase().includes(q);
       const matchingProfiles: ContextBrowserProfile[] = [];
       for (const p of b.profiles) {
+        const isProfileMatch = p.name.toLowerCase().includes(q);
         const matchingTabs = p.tabs.filter(
-          (t) => t.title.toLowerCase().includes(q) || t.url.toLowerCase().includes(q),
+          (t) => isBrowserMatch || isProfileMatch || t.title.toLowerCase().includes(q) || t.url.toLowerCase().includes(q),
         );
         if (matchingTabs.length > 0) {
           matchingProfiles.push({ ...p, tabs: matchingTabs });

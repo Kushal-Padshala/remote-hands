@@ -543,8 +543,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
 
     @objc func onTableRowClicked() {
         let row = contextTableView?.clickedRow ?? -1
-        if row >= 0 && row < filteredContextItems.count {
-            attachItem(filteredContextItems[row])
+        let targetRow = row >= 0 ? row : (contextTableView?.selectedRow ?? -1)
+        if targetRow >= 0 && targetRow < filteredContextItems.count {
+            attachItem(filteredContextItems[targetRow])
         }
     }
 
