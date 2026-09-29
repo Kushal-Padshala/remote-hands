@@ -36,7 +36,7 @@ function escapeAppleScript(str: string): string {
 
 export class AxWalker {
   private exec: ExecFunction;
-  private allowOcr: boolean = true;
+  private allowOcr: boolean = false;
 
   constructor(options?: AxWalkerOptions | MacOsDriver) {
     if (options && 'openApp' in options) {
@@ -136,6 +136,15 @@ export class AxWalker {
       if (typeof maybeExecOrOpts === 'function') {
         execFunc = maybeExecOrOpts;
       }
+    } else {
+      if (maybeExecOrOpts && typeof maybeExecOrOpts === 'object') {
+        options = { ...options, ...maybeExecOrOpts };
+        if (typeof maybeExec === 'function') {
+          execFunc = maybeExec;
+        }
+      } else if (typeof maybeExecOrOpts === 'function') {
+        execFunc = maybeExecOrOpts;
+      }
     }
 
     const nativeElements = await this.walkNativeSwift(appName, execFunc, options);
@@ -148,7 +157,7 @@ export class AxWalker {
       return nativeElements;
     }
 
-    if (options.allowOcr !== false) {
+    if (options.allowOcr === true) {
       const ocrElements = await this.walkVisionOcr(execFunc);
       if (ocrElements.length > 0) {
         if (nativeElements.length === 0 || hasCustomRenderer || meaningfulCount < 5) {
@@ -241,13 +250,13 @@ let query = "${escapedApp}"
 let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
 let targetApp: NSRunningApplication?
 if !query.isEmpty {
-    targetApp = apps.first(where: {
+    let matched = apps.filter {
         ($0.localizedName ?? "").caseInsensitiveCompare(query) == .orderedSame ||
-        ($0.bundleIdentifier ?? "").caseInsensitiveCompare(query) == .orderedSame
-    }) ?? apps.first(where: {
+        ($0.bundleIdentifier ?? "").caseInsensitiveCompare(query) == .orderedSame ||
         ($0.localizedName ?? "").localizedCaseInsensitiveContains(query) ||
         ($0.bundleIdentifier ?? "").localizedCaseInsensitiveContains(query)
-    })
+    }
+    targetApp = matched.first(where: { $0.isActive }) ?? matched.first
 } else {
     targetApp = NSWorkspace.shared.frontmostApplication
 }
@@ -286,19 +295,19 @@ func getBounds(_ el: AXUIElement) -> (Int, Int, Int, Int)? {
 
 var nodes: [Node] = []
 func walk(el: AXUIElement, depth: Int) {
-    if depth > 8 || nodes.count >= 100 { return }
+    if depth > 24 || nodes.count >= 300 { return }
     var children: AnyObject?
     if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &children) == .success,
        let list = children as? [AXUIElement] {
         for c in list {
-            if nodes.count >= 100 { break }
+            if nodes.count >= 300 { break }
             let role = getAttr(c, kAXRoleAttribute)
             let title = getAttr(c, kAXTitleAttribute)
             let desc = getAttr(c, kAXDescriptionAttribute)
             let val = getAttr(c, kAXValueAttribute)
             let label = !title.isEmpty ? title : (!desc.isEmpty ? desc : val)
             if let (x, y, w, h) = getBounds(c), w > 4, h > 4 {
-                if !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || role.contains("Button") || role.contains("Text") {
+                if !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || role.contains("Button") || role.contains("Text") || role.contains("Radio") || role.contains("Check") || role.contains("Heading") || role.contains("Area") {
                     nodes.append(Node(role: role, label: label, x: x, y: y, width: w, height: h))
                 }
             }
@@ -342,7 +351,7 @@ if let data = try? JSONEncoder().encode(nodes), let str = String(data: data, enc
       const raw = JSON.parse(res.stdout.trim() || '[]');
       if (Array.isArray(raw) && raw.length > 0) {
         const hasCustom = raw.some((n: any) => typeof n.label === 'string' && (n.label.includes('wxCustomRendererObject') || n.label.includes('RendererObject')));
-        if (hasCustom && options.allowOcr !== false) {
+        if (hasCustom && options.allowOcr === true) {
           const ocr = await this.walkVisionOcr(execFunc);
           if (ocr.length > 0) return ocr;
         }
@@ -353,6 +362,7 @@ if let data = try? JSONEncoder().encode(nodes), let str = String(data: data, enc
   }
 
   async walkVisionOcr(execFunc: ExecFunction): Promise<IndexedElement[]> {
+    if (this.allowOcr !== true) return [];
     const tmpShot = '/tmp/rh_ax_ocr.png';
     const captureRes = execFunc('screencapture', ['-x', '-m', tmpShot]);
     if (captureRes.status !== 0) return [];

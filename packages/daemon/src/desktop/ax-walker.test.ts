@@ -220,7 +220,7 @@ describe('AxWalker', () => {
     expect(execMock).toHaveBeenCalled();
   });
 
-  it('falls back to walkVisionOcr when JXA returns empty elements', async () => {
+  it('falls back to walkVisionOcr when allowOcr is true and native returns empty', async () => {
     const ocrNodes = [
       { role: 'AXStaticText', label: 'Canvas Button', x: 50, y: 50, width: 80, height: 25 },
     ];
@@ -237,14 +237,14 @@ describe('AxWalker', () => {
       return { stdout: '', stderr: '', status: 0 };
     });
 
-    const walker = new AxWalker({ exec: execMock });
+    const walker = new AxWalker({ exec: execMock, allowOcr: true });
     const elements = await walker.walkActiveApp();
     expect(elements.length).toBe(1);
     expect(elements[0]?.label).toBe('Canvas Button');
     expect(elements[0]?.index).toBe(1);
   });
 
-  it('bypasses screencapture and Vision OCR when allowOcr is false', async () => {
+  it('bypasses screencapture by default without allowOcr', async () => {
     const execMock = vi.fn().mockImplementation((cmd: string) => {
       if (cmd === 'swift') {
         return { stdout: '[]', stderr: '', status: 0 };
@@ -256,12 +256,12 @@ describe('AxWalker', () => {
     });
 
     const walker = new AxWalker({ exec: execMock });
-    const elements = await walker.walkActiveApp('SomeApp', { allowOcr: false });
+    const elements = await walker.walkActiveApp();
     expect(elements).toEqual([]);
     expect(execMock).not.toHaveBeenCalledWith('screencapture', expect.anything());
   });
 
-  it('bypasses screencapture when AxWalker is constructed with allowOcr false', async () => {
+  it('bypasses screencapture and Vision OCR when allowOcr is false with undefined app', async () => {
     const execMock = vi.fn().mockImplementation((cmd: string) => {
       if (cmd === 'swift') {
         return { stdout: '[]', stderr: '', status: 0 };
@@ -272,8 +272,8 @@ describe('AxWalker', () => {
       return { stdout: '', stderr: '', status: 0 };
     });
 
-    const walker = new AxWalker({ exec: execMock, allowOcr: false });
-    const elements = await walker.walkActiveApp('SomeApp');
+    const walker = new AxWalker({ exec: execMock });
+    const elements = await walker.walkActiveApp(undefined, { allowOcr: false });
     expect(elements).toEqual([]);
     expect(execMock).not.toHaveBeenCalledWith('screencapture', expect.anything());
   });

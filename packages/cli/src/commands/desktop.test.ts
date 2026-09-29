@@ -137,7 +137,7 @@ describe('desktopCommand', () => {
       walker: walkerMock as any,
     });
     expect(code).toBe(0);
-    expect(walkerMock.walkActiveApp).toHaveBeenCalledWith(undefined);
+    expect(walkerMock.walkActiveApp).toHaveBeenCalledWith(undefined, { allowOcr: false });
     expect(stdout).toHaveBeenCalledWith('[1] AXButton "Submit"');
   });
 
@@ -155,7 +155,7 @@ describe('desktopCommand', () => {
       walker: walkerMock as any,
     });
     expect(code).toBe(0);
-    expect(walkerMock.walkActiveApp).toHaveBeenCalledWith(undefined);
+    expect(walkerMock.walkActiveApp).toHaveBeenCalledWith(undefined, { allowOcr: false });
     expect(stdout).toHaveBeenCalledWith(JSON.stringify(mockElements, null, 2));
     expect(walkerMock.formatTable).not.toHaveBeenCalled();
   });
@@ -173,7 +173,7 @@ describe('desktopCommand', () => {
       walker: walkerMock as any,
     });
     expect(code).toBe(0);
-    expect(walkerMock.walkActiveApp).toHaveBeenCalledWith('Slack');
+    expect(walkerMock.walkActiveApp).toHaveBeenCalledWith('Slack', { allowOcr: false });
   });
 
   it('handles snapshot with --no-ocr flag', async () => {
@@ -191,6 +191,23 @@ describe('desktopCommand', () => {
     });
     expect(code).toBe(0);
     expect(walkerMock.walkActiveApp).toHaveBeenCalledWith('Slack', { allowOcr: false });
+  });
+
+  it('handles snapshot with --ocr flag', async () => {
+    const mockElements = [
+      { index: 1, role: 'AXButton', label: 'Save', bounds: [0, 0, 10, 10] },
+    ];
+    const walkerMock = {
+      walkActiveApp: vi.fn().mockResolvedValue(mockElements),
+      formatTable: vi.fn().mockReturnValue('[1] AXButton "Save"'),
+    };
+    const stdout = vi.fn();
+    const code = await desktopCommand(['snapshot', 'Slack', '--ocr'], {
+      stdout,
+      walker: walkerMock as any,
+    });
+    expect(code).toBe(0);
+    expect(walkerMock.walkActiveApp).toHaveBeenCalledWith('Slack', { allowOcr: true });
   });
 
   it('handles click at x,y coordinates with clickAt method', async () => {
@@ -665,7 +682,7 @@ describe('desktopCommand', () => {
       actEngine: engineMock as any,
     });
     expect(code).toBe(0);
-    expect(walkerMock.walkActiveApp).toHaveBeenCalledWith('Slack');
+    expect(walkerMock.walkActiveApp).toHaveBeenCalledWith('Slack', { allowOcr: false });
     expect(engineMock.act).toHaveBeenCalledWith('in Slack, click Submit', mockElements, 'Slack');
     expect(stdout).toHaveBeenCalledWith('Executed: CLICK');
   });

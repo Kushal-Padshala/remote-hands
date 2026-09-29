@@ -43,13 +43,13 @@ let query = "${escapedApp}"
 let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
 let targetApp: NSRunningApplication?
 if !query.isEmpty {
-    targetApp = apps.first(where: {
+    let matched = apps.filter {
         ($0.localizedName ?? "").caseInsensitiveCompare(query) == .orderedSame ||
-        ($0.bundleIdentifier ?? "").caseInsensitiveCompare(query) == .orderedSame
-    }) ?? apps.first(where: {
+        ($0.bundleIdentifier ?? "").caseInsensitiveCompare(query) == .orderedSame ||
         ($0.localizedName ?? "").localizedCaseInsensitiveContains(query) ||
         ($0.bundleIdentifier ?? "").localizedCaseInsensitiveContains(query)
-    })
+    }
+    targetApp = matched.first(where: { $0.isActive }) ?? matched.first
 } else {
     targetApp = NSWorkspace.shared.frontmostApplication
 }
@@ -121,7 +121,7 @@ var targetEl: AXUIElement?
 var fallbackEl: AXUIElement?
 
 func checkElement(_ el: AXUIElement, depth: Int) {
-    if depth > 10 || targetEl != nil { return }
+    if depth > 24 || targetEl != nil { return }
     var children: AnyObject?
     if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &children) == .success,
        let list = children as? [AXUIElement] {
@@ -138,7 +138,7 @@ func checkElement(_ el: AXUIElement, depth: Int) {
                     }
                 }
             }
-            if let (x, y, w, h) = getBounds(c), w >= 4, h >= 4, x >= 0, y >= 0 {
+            if let (x, y, w, h) = getBounds(c), w >= 4, h >= 4, x >= -20000, y >= -20000 {
                 let role = getAttr(c, kAXRoleAttribute)
                 let title = getAttr(c, kAXTitleAttribute)
                 let desc = getAttr(c, kAXDescriptionAttribute)
@@ -216,13 +216,13 @@ let query = "${escapedApp}"
 let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
 let targetApp: NSRunningApplication?
 if !query.isEmpty {
-    targetApp = apps.first(where: {
+    let matched = apps.filter {
         ($0.localizedName ?? "").caseInsensitiveCompare(query) == .orderedSame ||
-        ($0.bundleIdentifier ?? "").caseInsensitiveCompare(query) == .orderedSame
-    }) ?? apps.first(where: {
+        ($0.bundleIdentifier ?? "").caseInsensitiveCompare(query) == .orderedSame ||
         ($0.localizedName ?? "").localizedCaseInsensitiveContains(query) ||
         ($0.bundleIdentifier ?? "").localizedCaseInsensitiveContains(query)
-    })
+    }
+    targetApp = matched.first(where: { $0.isActive }) ?? matched.first
 } else {
     targetApp = NSWorkspace.shared.frontmostApplication
 }
@@ -294,7 +294,7 @@ var targetEl: AXUIElement?
 var fallbackEl: AXUIElement?
 
 func checkElement(_ el: AXUIElement, depth: Int) {
-    if depth > 10 || targetEl != nil { return }
+    if depth > 24 || targetEl != nil { return }
     var children: AnyObject?
     if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &children) == .success,
        let list = children as? [AXUIElement] {
@@ -311,7 +311,7 @@ func checkElement(_ el: AXUIElement, depth: Int) {
                     }
                 }
             }
-            if let (x, y, w, h) = getBounds(c), w >= 4, h >= 4, x >= 0, y >= 0 {
+            if let (x, y, w, h) = getBounds(c), w >= 4, h >= 4, x >= -20000, y >= -20000 {
                 let role = getAttr(c, kAXRoleAttribute)
                 let title = getAttr(c, kAXTitleAttribute)
                 let desc = getAttr(c, kAXDescriptionAttribute)
@@ -396,13 +396,13 @@ let query = "${escapedApp}"
 let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
 let targetApp: NSRunningApplication?
 if !query.isEmpty {
-    targetApp = apps.first(where: {
+    let matched = apps.filter {
         ($0.localizedName ?? "").caseInsensitiveCompare(query) == .orderedSame ||
-        ($0.bundleIdentifier ?? "").caseInsensitiveCompare(query) == .orderedSame
-    }) ?? apps.first(where: {
+        ($0.bundleIdentifier ?? "").caseInsensitiveCompare(query) == .orderedSame ||
         ($0.localizedName ?? "").localizedCaseInsensitiveContains(query) ||
         ($0.bundleIdentifier ?? "").localizedCaseInsensitiveContains(query)
-    })
+    }
+    targetApp = matched.first(where: { $0.isActive }) ?? matched.first
 } else {
     targetApp = NSWorkspace.shared.frontmostApplication
 }
@@ -474,7 +474,7 @@ var targetEl: AXUIElement?
 var fallbackEl: AXUIElement?
 
 func checkElement(_ el: AXUIElement, depth: Int) {
-    if depth > 10 || targetEl != nil { return }
+    if depth > 24 || targetEl != nil { return }
     var children: AnyObject?
     if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &children) == .success,
        let list = children as? [AXUIElement] {
@@ -491,7 +491,7 @@ func checkElement(_ el: AXUIElement, depth: Int) {
                     }
                 }
             }
-            if let (x, y, w, h) = getBounds(c), w >= 4, h >= 4, x >= 0, y >= 0 {
+            if let (x, y, w, h) = getBounds(c), w >= 4, h >= 4, x >= -20000, y >= -20000 {
                 let role = getAttr(c, kAXRoleAttribute)
                 let title = getAttr(c, kAXTitleAttribute)
                 let desc = getAttr(c, kAXDescriptionAttribute)

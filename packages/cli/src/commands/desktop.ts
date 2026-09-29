@@ -120,17 +120,15 @@ export async function desktopCommand(
 
     if (sub === 'snapshot') {
       const isJson = args.includes('--json');
-      const isNoOcr = args.includes('--no-ocr') || args.includes('--native-only');
-      const filtered = args.slice(1).filter((a) => a !== '--json' && a !== '--no-ocr' && a !== '--native-only');
+      const isOcr = args.includes('--ocr');
+      const filtered = args.slice(1).filter((a) => a !== '--json' && a !== '--no-ocr' && a !== '--native-only' && a !== '--ocr');
       const app = filtered.join(' ').trim() || undefined;
       if (app && typeof driver.focusWindow === 'function') {
         try {
           await driver.focusWindow(app);
         } catch {}
       }
-      const elements = isNoOcr
-        ? await walker.walkActiveApp(app, { allowOcr: false })
-        : await walker.walkActiveApp(app);
+      const elements = await walker.walkActiveApp(app, { allowOcr: isOcr });
       if (isJson) {
         stdout(JSON.stringify(elements, null, 2));
       } else {
@@ -196,7 +194,7 @@ export async function desktopCommand(
       const indexMatch = target.match(/^\[?(\d+)\]?$/);
       if (indexMatch && indexMatch[1]) {
         const targetIndex = parseInt(indexMatch[1], 10);
-        const elements = await walker.walkActiveApp();
+        const elements = await walker.walkActiveApp(undefined, { allowOcr: false });
         const el = elements.find((e) => e.index === targetIndex);
         if (!el && !context.actEngine) {
           stderr(`Element [${targetIndex}] not found`);
@@ -207,7 +205,7 @@ export async function desktopCommand(
         return 0;
       }
 
-      const elements = await walker.walkActiveApp();
+      const elements = await walker.walkActiveApp(undefined, { allowOcr: false });
       const lower = target.toLowerCase();
       const matched =
         elements.find((e) => e.label.toLowerCase() === lower) ||
@@ -341,7 +339,7 @@ export async function desktopCommand(
           await driver.focusWindow(targetApp);
         } catch {}
       }
-      const elements = await walker.walkActiveApp(targetApp);
+      const elements = await walker.walkActiveApp(targetApp, { allowOcr: false });
       const decision = typeof engine.act === 'function'
         ? await (targetApp ? engine.act(goal, elements, targetApp) : engine.act(goal, elements))
         : await (async () => {
