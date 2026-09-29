@@ -78,11 +78,13 @@ class SpotlightPanel: NSPanel {
                     delegate.hideContextPanel()
                     return true
                 }
-                if delegate.isWorking {
-                    delegate.onStopClicked()
-                } else {
-                    delegate.onCancelClicked()
+                if delegate.isExpanded {
+                    if delegate.isWorking {
+                        delegate.onStopClicked()
+                    }
+                    return true
                 }
+                delegate.onCancelClicked()
                 return true
             }
         }
@@ -95,7 +97,9 @@ class SpotlightPanel: NSPanel {
                 }
             case "w":
                 if let delegate = NSApp.delegate as? AppDelegate {
-                    delegate.onCancelClicked()
+                    if !delegate.isExpanded {
+                        delegate.onCancelClicked()
+                    }
                     return true
                 }
             case "v":
@@ -137,11 +141,13 @@ class SpotlightPanel: NSPanel {
                 delegate.hideContextPanel()
                 return
             }
-            if delegate.isWorking {
-                delegate.onStopClicked()
-            } else {
-                delegate.onCancelClicked()
+            if delegate.isExpanded {
+                if delegate.isWorking {
+                    delegate.onStopClicked()
+                }
+                return
             }
+            delegate.onCancelClicked()
         }
     }
 }
@@ -1030,8 +1036,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             }
             return true
         } else if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-            if isWorking {
-                onStopClicked()
+            if isExpanded {
+                if isWorking {
+                    onStopClicked()
+                }
             } else {
                 onCancelClicked()
             }
@@ -1110,12 +1118,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                         self.stopButton.isHidden = true
                         self.panel.makeFirstResponder(self.textField)
                     } else if status == "FAILED" || status == "ERROR" {
-                        self.isWorking = false
-                        self.statusPill.stringValue = "⚠ FAILED"
-                        self.statusPill.textColor = .systemYellow
-                        self.stopButton.isHidden = true
-                        self.appendHistory(role: role ?? "ERROR", text: text.isEmpty ? "Task failed." : text, color: .systemRed, icon: "⚠")
-                        self.panel.makeFirstResponder(self.textField)
+                        self.appendHistory(role: role ?? "ERROR", text: text.isEmpty ? "Action error occurred." : text, color: .systemRed, icon: "⚠")
                     } else {
                         self.isWorking = true
                         self.statusPill.stringValue = "● " + status
@@ -1146,14 +1149,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
     func transitionToProgress(query: String) {
         isExpanded = true
         isWorking = true
-        let newHeight: CGFloat = 440
+        let newHeight: CGFloat = 420
         guard let screen = panel.screen ?? NSScreen.main else { return }
-        let width: CGFloat = 680
-        let x = (screen.frame.width - width) / 2
-        let y = screen.frame.height * 0.65 - (newHeight - 84)
+        let width: CGFloat = 580
+        let x = screen.frame.width - width - 24
+        let y = screen.frame.height - newHeight - 48
 
         panel.setFrame(NSRect(x: x, y: y, width: width, height: newHeight), display: true, animate: true)
-        panel.level = .normal
+        panel.level = .floating
         visualEffect.frame = NSRect(x: 0, y: 0, width: width, height: newHeight)
 
         badge.stringValue = targetApp.uppercased()

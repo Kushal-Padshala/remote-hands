@@ -61,6 +61,18 @@ export class AxWalker {
       if (node.x < 0 || node.y < 0) continue;
 
       const trimmed = (node.label ?? '').trim();
+      if (
+        trimmed.includes('Type follow-up instruction') ||
+        trimmed.includes('press Esc to stop') ||
+        trimmed === '⏹ Stop' ||
+        trimmed === '✕' ||
+        trimmed.includes('• EXECUTING') ||
+        trimmed.includes('• WORKING') ||
+        trimmed.includes('✔ COMPLETE') ||
+        trimmed.includes('⏹ STOPPED')
+      ) {
+        continue;
+      }
       if (!trimmed || trimmed.startsWith('<NSImage') || trimmed.startsWith('<wxCustomRendererObject')) {
         if (node.role !== 'AXTextField' && node.role !== 'AXTextArea') continue;
       }

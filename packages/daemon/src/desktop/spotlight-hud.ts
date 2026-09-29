@@ -226,15 +226,18 @@ export class SpotlightHudRunner {
     });
 
     child.on('close', () => {
+      let isCancelEvent = false;
       if (buffer.trim()) {
         try {
           const parsed = JSON.parse(buffer.trim());
           if (parsed.event === 'cancel') {
-            triggerCancel();
+            isCancelEvent = true;
           }
         } catch {}
       }
-      triggerCancel();
+      if (isCancelEvent || !submitted) {
+        triggerCancel();
+      }
     });
 
     return {
