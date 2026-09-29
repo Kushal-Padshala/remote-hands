@@ -42,3 +42,4 @@ export * from './desktop/hud-service.js';
 export * from './system/power-manager.js';
 export * from './desktop/ax-actions.js';
 export * from './desktop/menu-crawler.js';
+export * from './desktop/slicer-adapter.js';
