@@ -151,7 +151,7 @@ export function formatHudStatus(event: any): { status: string; text: string; rol
     if (payload.input) {
       if (typeof payload.input === 'object') {
         const inp = payload.input as any;
-        detail = inp.goal || inp.url || inp.text || inp.app || inp.command || inp.query || '';
+        detail = inp.toolAction || inp.CommandLine || inp.goal || inp.url || inp.text || inp.app || inp.toolSummary || inp.command || inp.query || '';
       } else {
         detail = String(payload.input);
       }
@@ -159,7 +159,7 @@ export function formatHudStatus(event: any): { status: string; text: string; rol
     const cleanDetail = detail ? `: ${detail.slice(0, 80)}` : '';
     return {
       status: 'EXECUTING',
-      text: `Using ${tool}${cleanDetail}`,
+      text: tool === 'run_command' && detail ? detail.slice(0, 90) : `Using ${tool}${cleanDetail}`,
       role: 'ACTION',
     };
   }

@@ -144,7 +144,7 @@ export class DesktopActEngine {
       }
     }
 
-    const rightClickMatch = trimmed.match(/^(?:right[\s-]click|context[\s-]click)(?:\s+on)?\s+["']?(.+?)["']?$/i);
+    const rightClickMatch = trimmed.match(/(?:right[\s-]click|context[\s-]click)(?:\s+on)?\s+["']?([^"'\n]+?)["']?(?:\s+(?:in|to|and|from)\b|$)/i);
     if (rightClickMatch && rightClickMatch[1]) {
       const targetDesc = rightClickMatch[1].trim();
       if (/^\[?(\d+)\]?$/.test(targetDesc)) {
@@ -177,7 +177,7 @@ export class DesktopActEngine {
       };
     }
 
-    const clickMatch = trimmed.match(/^(?:click(?:\s+on)?|tap)\s+["']?(.+?)["']?$/i);
+    const clickMatch = trimmed.match(/(?:click(?:\s+on)?|tap)\s+["']?([^"'\n]+?)["']?(?:\s+(?:in|to|and|from)\b|$)/i);
     if (clickMatch) {
       const targetDesc = clickMatch[1]!.trim();
       if (/^\[?(\d+)\]?$/.test(targetDesc)) {

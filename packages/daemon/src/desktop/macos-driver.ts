@@ -222,7 +222,7 @@ export class MacOsDriver {
   async clickAt(x: number, y: number, button: 'left' | 'right' = 'left'): Promise<void> {
     if (button === 'right') {
       if (process.platform === 'darwin') {
-        const swiftScript = `import CoreGraphics\nimport Foundation\nlet pt = CGPoint(x: ${x}, y: ${y})\nif let down = CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: pt, mouseButton: .right), let up = CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: pt, mouseButton: .right) {\ndown.post(tap: .cghidEventTap)\nusleep(50000)\nup.post(tap: .cghidEventTap)\n}`;
+        const swiftScript = `import CoreGraphics\nimport Foundation\nlet pt = CGPoint(x: ${x}, y: ${y})\nCGWarpMouseCursorPosition(pt)\nif let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: pt, mouseButton: .left) {\nmove.post(tap: .cghidEventTap)\n}\nusleep(30000)\nif let down = CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: pt, mouseButton: .right), let up = CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: pt, mouseButton: .right) {\ndown.post(tap: .cghidEventTap)\nusleep(50000)\nup.post(tap: .cghidEventTap)\n}`;
         const res = this.exec('swift', ['-e', swiftScript]);
         if (res.status === 0) return;
       }
@@ -231,7 +231,7 @@ export class MacOsDriver {
     const res = this.exec('osascript', ['-e', script]);
     if (res.status !== 0 && process.platform === 'darwin') {
       const isRight = button === 'right';
-      const swiftScript = `import CoreGraphics\nimport Foundation\nlet pt = CGPoint(x: ${x}, y: ${y})\nlet downType: CGEventType = ${isRight ? '.rightMouseDown' : '.leftMouseDown'}\nlet upType: CGEventType = ${isRight ? '.rightMouseUp' : '.leftMouseUp'}\nlet mouseBtn: CGMouseButton = ${isRight ? '.right' : '.left'}\nif let down = CGEvent(mouseEventSource: nil, mouseType: downType, mouseCursorPosition: pt, mouseButton: mouseBtn), let up = CGEvent(mouseEventSource: nil, mouseType: upType, mouseCursorPosition: pt, mouseButton: mouseBtn) {\ndown.post(tap: .cghidEventTap)\nusleep(50000)\nup.post(tap: .cghidEventTap)\n}`;
+      const swiftScript = `import CoreGraphics\nimport Foundation\nlet pt = CGPoint(x: ${x}, y: ${y})\nCGWarpMouseCursorPosition(pt)\nif let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: pt, mouseButton: .left) {\nmove.post(tap: .cghidEventTap)\n}\nusleep(30000)\nlet downType: CGEventType = ${isRight ? '.rightMouseDown' : '.leftMouseDown'}\nlet upType: CGEventType = ${isRight ? '.rightMouseUp' : '.leftMouseUp'}\nlet mouseBtn: CGMouseButton = ${isRight ? '.right' : '.left'}\nif let down = CGEvent(mouseEventSource: nil, mouseType: downType, mouseCursorPosition: pt, mouseButton: mouseBtn), let up = CGEvent(mouseEventSource: nil, mouseType: upType, mouseCursorPosition: pt, mouseButton: mouseBtn) {\ndown.post(tap: .cghidEventTap)\nusleep(50000)\nup.post(tap: .cghidEventTap)\n}`;
       this.exec('swift', ['-e', swiftScript]);
     }
   }
