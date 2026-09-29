@@ -128,8 +128,19 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
         : (await import('node:child_process')).spawnSync('pmset', ['-g'], { encoding: 'utf-8' });
       const pmOut = 'stdout' in pmRes ? String(pmRes.stdout) : '';
       if (pmOut.includes('SleepDisabled\t\t1')) {
-        stdout('[!] macOS Sleep Prevention: SleepDisabled is ON (normal sleep is prevented)');
-        stdout('    To restore normal sleep and save battery, run: sudo pmset -a disablesleep 0');
+        if (args.includes('--fix') && !runner) {
+          (await import('node:child_process')).spawnSync('sudo', ['pmset', '-a', 'disablesleep', '0'], { stdio: 'inherit' });
+          const verifyRes = (await import('node:child_process')).spawnSync('pmset', ['-g'], { encoding: 'utf-8' });
+          if (!verifyRes.stdout.includes('SleepDisabled\t\t1')) {
+            stdout('[✓] macOS Power Management: normal sleep restored');
+          } else {
+            stdout('[!] macOS Sleep Prevention: SleepDisabled is ON (normal sleep is prevented)');
+            stdout('    To restore normal sleep and save battery, run: sudo pmset -a disablesleep 0');
+          }
+        } else {
+          stdout('[!] macOS Sleep Prevention: SleepDisabled is ON (normal sleep is prevented)');
+          stdout('    To restore normal sleep and save battery, run: sudo pmset -a disablesleep 0');
+        }
       } else {
         stdout('[✓] macOS Power Management: normal sleep enabled');
       }

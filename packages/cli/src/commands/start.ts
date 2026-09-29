@@ -87,6 +87,14 @@ export async function startCommand(args: string[], context: CommandContext = {})
   powerManager.cleanupOrphanedAssertions();
   context.powerManager = powerManager;
 
+  try {
+    const { HudServiceManager } = await import('@remote-hands/daemon');
+    const hudService = (context as any).hudServiceManager ?? new HudServiceManager();
+    if (hudService.isInstalled()) {
+      hudService.uninstall();
+    }
+  } catch {}
+
   const restoreSleep = () => {
     powerManager.releaseAll();
     if (caffeinateProc) {
@@ -117,34 +125,16 @@ export async function startCommand(args: string[], context: CommandContext = {})
   const forceClamshell = args.includes('--force-clamshell') || args.includes('--permanent-sleep-prevent');
   if (forceClamshell && !runner && process.env.NODE_ENV !== 'test') {
     if (process.platform === 'darwin') {
-      const fdaGranted = checkMacFullDiskAccess();
-      const hostApp = detectHostAppName();
-
-      stdout(
-        '\n' +
-          c.yellow(`╭─ ${c.bold('🔒 Administrator Password Required (macOS)')} ${'─'.repeat(Math.max(2, termWidth - 46))}\n`) +
-          `${c.yellow('│')}  ${c.white('Please enter your Mac password to enable lid-closed sleep prevention.')}\n` +
-          `${c.yellow('│')}  ${c.dim('Allows your MacBook to run agent tasks with the lid closed (pmset disablesleep=1).')}\n` +
-          (!fdaGranted
-            ? `${c.yellow('│')}  ${c.dim(`Tip: Grant Full Disk Access to ${hostApp} to skip permission dialogs.`)}\n`
-            : '') +
-          c.yellow(`╰${hr}\n`),
-      );
       try {
-        const res = spawnSync('sudo', ['pmset', '-a', 'disablesleep', '1'], {
-          stdio: ['inherit', 'pipe', 'pipe'],
+        caffeinateProc = spawn('caffeinate', ['-dimsu'], {
+          detached: true,
+          stdio: 'ignore',
         });
-        if (res.status === 0) {
-          clamshellActive = true;
+        if (caffeinateProc && typeof caffeinateProc.unref === 'function') {
+          caffeinateProc.unref();
         }
+        clamshellActive = true;
       } catch {}
-    } else if (process.platform === 'linux') {
-      stdout(
-        '\n' +
-          c.yellow(`╭─ ${c.bold('🔒 Administrator Password Required (Linux)')} ${'─'.repeat(Math.max(2, termWidth - 46))}\n`) +
-          `${c.yellow('│')}  ${c.white('Please enter your Linux password if prompted to inhibit system suspend.')}\n` +
-          c.yellow(`╰${hr}\n`),
-      );
     }
   } else if (!runner && process.env.NODE_ENV !== 'test' && process.platform === 'darwin') {
     stdout(
@@ -181,7 +171,7 @@ export async function startCommand(args: string[], context: CommandContext = {})
         c.yellow(`╰${hr}\n`),
     );
     try {
-      const setupExit = await setupCommand([], context);
+      const setupExit = await setupCommand(['--no-hud'], context);
       if (setupExit !== 0) {
         stdout(c.yellow('[start] Cloudflare setup was not completed. Seamlessly starting in local embedded mode...'));
       }
@@ -200,7 +190,7 @@ export async function startCommand(args: string[], context: CommandContext = {})
       c.brightCyan(`╭─ ${c.bold('⚡ Remote Hands Daemon Active')} ${'─'.repeat(Math.max(2, termWidth - 32))}\n`) +
       `${c.brightCyan('│')}  ${
         clamshellActive
-          ? `${c.brightGreen('✔')} ${c.green('Lid-closed clamshell mode: ACTIVE (disablesleep = 1)')}`
+          ? `${c.brightGreen('✔')} ${c.green('Lid-closed clamshell mode: ACTIVE (caffeinate assertion)')}`
           : c.dim('Lid-closed sleep prevention: OFF')
       }\n` +
       `${c.brightCyan('│')}  ${
