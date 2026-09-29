@@ -119,17 +119,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
         setupUI()
+        discoverNativeContext()
         if let ctx = initialContext {
             loadHierarchy(ctx)
-        } else {
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                if let h = self?.fetchContextHierarchy() {
-                    DispatchQueue.main.async {
-                        self?.loadHierarchy(h)
-                    }
-                }
-            }
         }
+        setupInputReader()
     }
 
     func setupMainMenu() {
@@ -248,46 +242,87 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         panel.makeFirstResponder(textField)
     }
 
-    func fetchContextHierarchy() -> [String: Any]? {
-        let p = Process()
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = FileHandle.nullDevice
+    func discoverNativeContext() {
+        var items: [[String: Any]] = []
 
-        let searchPaths = [
-            "/usr/local/bin/rh",
-            "/opt/homebrew/bin/rh",
-            NSHomeDirectory() + "/.remote-hands/bin/rh",
-            FileManager.default.currentDirectoryPath + "/packages/cli/bin/rh.js",
-        ]
-        var execPath = "/usr/bin/env"
-        var execArgs = ["rh", "context", "list", "--json"]
-
-        for path in searchPaths {
-            if FileManager.default.fileExists(atPath: path) {
-                if path.hasSuffix(".js") {
-                    execPath = "/usr/bin/env"
-                    execArgs = ["node", path, "context", "list", "--json"]
-                } else {
-                    execPath = path
-                    execArgs = ["context", "list", "--json"]
+        let arcPath = NSHomeDirectory() + "/Library/Application Support/Arc/StorableSidebar.json"
+        if FileManager.default.fileExists(atPath: arcPath),
+           let data = try? Data(contentsOf: URL(fileURLWithPath: arcPath)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            var tabs: [(title: String, url: String)] = []
+            var seen = Set<String>()
+            func walk(_ obj: Any) {
+                if let dict = obj as? [String: Any] {
+                    if let d = dict["data"] as? [String: Any],
+                       let tab = d["tab"] as? [String: Any],
+                       let url = tab["savedURL"] as? String {
+                        if !seen.contains(url) {
+                            seen.insert(url)
+                            let title = (dict["title"] as? String) ?? (tab["savedTitle"] as? String) ?? url
+                            tabs.append((title: title, url: url))
+                        }
+                    }
+                    for (_, v) in dict { walk(v) }
+                } else if let arr = obj as? [Any] {
+                    for v in arr { walk(v) }
                 }
-                break
+            }
+            walk(json)
+            for (idx, t) in tabs.enumerated() {
+                items.append([
+                    "type": "browser_tab",
+                    "id": "arc-\(idx)",
+                    "browser": "Arc",
+                    "profile": "Default",
+                    "title": t.title,
+                    "url": t.url,
+                    "label": "🌐 Arc: \(t.title)"
+                ])
             }
         }
 
-        p.executableURL = URL(fileURLWithPath: execPath)
-        p.arguments = execArgs
-
-        do {
-            try p.run()
-            p.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                return json
+        let regularApps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+        for app in regularApps {
+            if let name = app.localizedName, !name.isEmpty {
+                let id = app.bundleIdentifier ?? name
+                items.append([
+                    "type": "app_window",
+                    "id": "app-\(id)",
+                    "app": name,
+                    "title": name,
+                    "label": "💻 \(name)"
+                ])
             }
-        } catch {}
-        return nil
+        }
+
+        let fileDirs = [
+            NSHomeDirectory() + "/Downloads",
+            NSHomeDirectory() + "/Desktop"
+        ]
+        let fm = FileManager.default
+        for dir in fileDirs {
+            if let entries = try? fm.contentsOfDirectory(atPath: dir) {
+                for name in entries.prefix(25) {
+                    if name.hasPrefix(".") { continue }
+                    let fullPath = (dir as NSString).appendingPathComponent(name)
+                    var isDir: ObjCBool = false
+                    if fm.fileExists(atPath: fullPath, isDirectory: &isDir) {
+                        items.append([
+                            "type": "local_file",
+                            "id": "file-\(name)",
+                            "name": name,
+                            "path": fullPath,
+                            "isDir": isDir.boolValue,
+                            "label": "📄 \(name)"
+                        ])
+                    }
+                }
+            }
+        }
+
+        if !items.isEmpty {
+            self.contextItems = items
+        }
     }
 
     func loadHierarchy(_ h: [String: Any]) {
@@ -312,7 +347,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                                     "profile": pName,
                                     "title": title,
                                     "url": url,
-                                    "label": "🌐 \(bName) [\(pName)]: \(title)"
+                                    "label": "🌐 \(bName): \(title)"
                                 ]
                                 if let idx = tabIndex {
                                     att["tabIndex"] = idx
@@ -336,7 +371,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                     "id": "app-\(aId)",
                     "app": aName,
                     "title": wTitle,
-                    "label": "💻 \(aName) (\(wTitle))"
+                    "label": "💻 \(aName)"
                 ])
             }
         }
@@ -358,28 +393,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             }
         }
 
-        if items.isEmpty {
-            for app in NSWorkspace.shared.runningApplications {
-                if app.activationPolicy == .regular, let name = app.localizedName {
-                    items.append([
-                        "type": "app_window",
-                        "id": "app-\(app.bundleIdentifier ?? name)",
-                        "app": name,
-                        "title": name,
-                        "label": "💻 \(name)"
-                    ])
-                }
-            }
+        if !items.isEmpty {
+            self.contextItems = items
         }
-
-        self.contextItems = items
     }
 
     func showContextPanel(query: String) {
         if contextItems.isEmpty {
-            if let h = fetchContextHierarchy() {
-                loadHierarchy(h)
-            }
+            discoverNativeContext()
         }
 
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -391,14 +412,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                 let title = ($0["title"] as? String ?? "").lowercased()
                 let name = ($0["name"] as? String ?? "").lowercased()
                 let url = ($0["url"] as? String ?? "").lowercased()
-                return label.contains(q) || title.contains(q) || name.contains(q) || url.contains(q)
+                let app = ($0["app"] as? String ?? "").lowercased()
+                let browser = ($0["browser"] as? String ?? "").lowercased()
+                return label.contains(q) || title.contains(q) || name.contains(q) || url.contains(q) || app.contains(q) || browser.contains(q)
             }
         }
 
-        let rowCount = max(1, min(6, filteredContextItems.count))
-        let targetHeight: CGFloat = CGFloat(rowCount * 32 + 16)
+        if filteredContextItems.isEmpty {
+            hideContextPanel()
+            return
+        }
+
+        let rowCount = min(6, filteredContextItems.count)
+        let targetHeight: CGFloat = CGFloat(rowCount * 34 + 14)
         let panelFrame = panel.frame
-        let popoverRect = NSRect(x: panelFrame.origin.x, y: panelFrame.origin.y - targetHeight - 4, width: panelFrame.width, height: targetHeight)
+        let popoverRect = NSRect(x: panelFrame.origin.x, y: panelFrame.origin.y - targetHeight - 6, width: panelFrame.width, height: targetHeight)
 
         if contextPanel == nil {
             let p = NSPanel(
@@ -422,7 +450,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             effect.layer?.borderWidth = 1
             effect.layer?.borderColor = NSColor(white: 1.0, alpha: 0.15).cgColor
 
-            let scroll = NSScrollView(frame: NSRect(x: 8, y: 8, width: popoverRect.width - 16, height: targetHeight - 16))
+            let scroll = NSScrollView(frame: NSRect(x: 6, y: 6, width: popoverRect.width - 12, height: targetHeight - 12))
             scroll.drawsBackground = false
             scroll.hasVerticalScroller = true
             scroll.autohidesScrollers = true
@@ -431,12 +459,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             let table = NSTableView(frame: scroll.bounds)
             table.headerView = nil
             table.backgroundColor = .clear
+            table.rowHeight = 32
             table.selectionHighlightStyle = .regular
             table.target = self
             table.action = #selector(onTableRowClicked)
+            table.autoresizingMask = [.width, .height]
 
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("contextCol"))
-            column.width = popoverRect.width - 32
+            column.resizingMask = .autoresizingMask
+            column.width = scroll.bounds.width
             table.addTableColumn(column)
 
             table.dataSource = self
@@ -452,7 +483,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             self.contextTableView = table
         } else {
             contextPanel?.setFrame(popoverRect, display: true)
-            contextScrollView?.frame = NSRect(x: 8, y: 8, width: popoverRect.width - 16, height: targetHeight - 16)
+            contextScrollView?.frame = NSRect(x: 6, y: 6, width: popoverRect.width - 12, height: targetHeight - 12)
+            contextTableView?.frame = contextScrollView?.bounds ?? .zero
         }
 
         contextTableView?.reloadData()
@@ -526,22 +558,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         let label = item["label"] as? String ?? ""
 
         let cellId = NSUserInterfaceItemIdentifier("ContextCell")
-        var tf = tableView.makeView(withIdentifier: cellId, owner: self) as? NSTextField
-        if tf == nil {
-            tf = NSTextField(labelWithString: "")
-            tf?.identifier = cellId
-            tf?.isBordered = false
-            tf?.drawsBackground = false
-            tf?.font = NSFont.systemFont(ofSize: 13, weight: .regular)
-            tf?.textColor = .white
-            tf?.lineBreakMode = .byTruncatingTail
+        var cell = tableView.makeView(withIdentifier: cellId, owner: self) as? NSTableCellView
+        if cell == nil {
+            cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: tableView.bounds.width, height: 32))
+            cell?.identifier = cellId
+
+            let tf = NSTextField(labelWithString: "")
+            tf.isBordered = false
+            tf.drawsBackground = false
+            tf.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+            tf.textColor = .white
+            tf.lineBreakMode = .byTruncatingTail
+            tf.frame = NSRect(x: 10, y: 5, width: tableView.bounds.width - 20, height: 22)
+            tf.autoresizingMask = [.width]
+            cell?.textField = tf
+            cell?.addSubview(tf)
         }
-        tf?.stringValue = label
-        return tf
+        cell?.textField?.stringValue = label
+        return cell
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        return 28
+        return 32
     }
 
     func controlTextDidChange(_ obj: Notification) {
@@ -673,6 +711,78 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         }
     }
 
+    func setupInputReader() {
+        FileHandle.standardInput.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            if data.isEmpty { return }
+            guard let text = String(data: data, encoding: .utf8) else { return }
+            let lines = text.split(separator: "\n")
+            for line in lines {
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty,
+                      let jsonData = trimmed.data(using: .utf8),
+                      let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else { continue }
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    if dict["event"] as? String == "context", let h = dict["hierarchy"] as? [String: Any] {
+                        self.loadHierarchy(h)
+                        return
+                    }
+
+                    let status = (dict["status"] as? String)?.uppercased() ?? "WORKING"
+                    let text = dict["text"] as? String ?? ""
+                    let role = dict["role"] as? String
+
+                    if status == "COMPLETE" || status == "DONE" {
+                        self.isWorking = false
+                        self.statusPill.stringValue = "✔ COMPLETE"
+                        self.statusPill.textColor = .systemGreen
+                        self.stopButton.isHidden = true
+                        self.appendHistory(role: role ?? "DONE", text: text.isEmpty ? "Task completed successfully." : text, color: .systemGreen, icon: "✔")
+                        self.panel.makeFirstResponder(self.textField)
+                    } else if status == "STOPPED" || status == "CANCELLED" {
+                        if self.isWorking {
+                            self.appendHistory(role: role ?? "STATUS", text: text.isEmpty ? "Task stopped." : text, color: .systemOrange, icon: "⏹")
+                        }
+                        self.isWorking = false
+                        self.statusPill.stringValue = "⏹ STOPPED"
+                        self.statusPill.textColor = .systemOrange
+                        self.stopButton.isHidden = true
+                        self.panel.makeFirstResponder(self.textField)
+                    } else if status == "FAILED" || status == "ERROR" {
+                        self.isWorking = false
+                        self.statusPill.stringValue = "⚠ FAILED"
+                        self.statusPill.textColor = .systemYellow
+                        self.stopButton.isHidden = true
+                        self.appendHistory(role: role ?? "ERROR", text: text.isEmpty ? "Task failed." : text, color: .systemRed, icon: "⚠")
+                        self.panel.makeFirstResponder(self.textField)
+                    } else {
+                        self.isWorking = true
+                        self.statusPill.stringValue = "● " + status
+                        self.statusPill.textColor = .systemCyan
+                        self.stopButton.isHidden = false
+                        if !text.isEmpty {
+                            var color = NSColor.systemCyan
+                            var icon = "🧠"
+                            let r = role ?? status
+                            if status == "EXECUTING" || status == "ACTION" {
+                                color = NSColor(red: 1.0, green: 0.78, blue: 0.28, alpha: 1.0)
+                                icon = "⚡"
+                            } else if status == "FOCUS" {
+                                color = NSColor(red: 0.6, green: 0.6, blue: 1.0, alpha: 1.0)
+                                icon = "🎯"
+                            } else if status == "OUTPUT" {
+                                color = NSColor(red: 0.4, green: 0.85, blue: 0.5, alpha: 1.0)
+                                icon = "✔"
+                            }
+                            self.appendHistory(role: r, text: text, color: color, icon: icon)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     func transitionToProgress(query: String) {
         isExpanded = true
         isWorking = true
@@ -750,74 +860,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
 
         appendHistory(role: "GOAL", text: query, color: .white, icon: "💬")
         appendHistory(role: "SYSTEM", text: "Task initialized. Preparing execution environment...", color: NSColor(white: 0.6, alpha: 1.0), icon: "⚡")
-
-        FileHandle.standardInput.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            if data.isEmpty {
-                FileHandle.standardInput.readabilityHandler = nil
-                return
-            }
-            guard let text = String(data: data, encoding: .utf8) else { return }
-            let lines = text.split(separator: "\n")
-            for line in lines {
-                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty,
-                      let jsonData = trimmed.data(using: .utf8),
-                      let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else { continue }
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    let status = (dict["status"] as? String)?.uppercased() ?? "WORKING"
-                    let text = dict["text"] as? String ?? ""
-                    let role = dict["role"] as? String
-
-                    if status == "COMPLETE" || status == "DONE" {
-                        self.isWorking = false
-                        self.statusPill.stringValue = "✔ COMPLETE"
-                        self.statusPill.textColor = .systemGreen
-                        self.stopButton.isHidden = true
-                        self.appendHistory(role: role ?? "DONE", text: text.isEmpty ? "Task completed successfully." : text, color: .systemGreen, icon: "✔")
-                        self.panel.makeFirstResponder(self.textField)
-                    } else if status == "STOPPED" || status == "CANCELLED" {
-                        if self.isWorking {
-                            self.appendHistory(role: role ?? "STATUS", text: text.isEmpty ? "Task stopped." : text, color: .systemOrange, icon: "⏹")
-                        }
-                        self.isWorking = false
-                        self.statusPill.stringValue = "⏹ STOPPED"
-                        self.statusPill.textColor = .systemOrange
-                        self.stopButton.isHidden = true
-                        self.panel.makeFirstResponder(self.textField)
-                    } else if status == "FAILED" || status == "ERROR" {
-                        self.isWorking = false
-                        self.statusPill.stringValue = "⚠ FAILED"
-                        self.statusPill.textColor = .systemYellow
-                        self.stopButton.isHidden = true
-                        self.appendHistory(role: role ?? "ERROR", text: text.isEmpty ? "Task failed." : text, color: .systemRed, icon: "⚠")
-                        self.panel.makeFirstResponder(self.textField)
-                    } else {
-                        self.isWorking = true
-                        self.statusPill.stringValue = "● " + status
-                        self.statusPill.textColor = .systemCyan
-                        self.stopButton.isHidden = false
-                        if !text.isEmpty {
-                            var color = NSColor.systemCyan
-                            var icon = "🧠"
-                            let r = role ?? status
-                            if status == "EXECUTING" || status == "ACTION" {
-                                color = NSColor(red: 1.0, green: 0.78, blue: 0.28, alpha: 1.0)
-                                icon = "⚡"
-                            } else if status == "FOCUS" {
-                                color = NSColor(red: 0.6, green: 0.6, blue: 1.0, alpha: 1.0)
-                                icon = "🎯"
-                            } else if status == "OUTPUT" {
-                                color = NSColor(red: 0.4, green: 0.85, blue: 0.5, alpha: 1.0)
-                                icon = "✔"
-                            }
-                            self.appendHistory(role: r, text: text, color: color, icon: icon)
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 

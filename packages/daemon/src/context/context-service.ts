@@ -110,6 +110,40 @@ end if
       });
   }
 
+  private fetchArcTabsFromStorage(): { id: string; title: string; url: string }[] {
+    try {
+      const filePath = path.join(os.homedir(), 'Library', 'Application Support', 'Arc', 'StorableSidebar.json');
+      if (!fs.existsSync(filePath)) return [];
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const data = JSON.parse(content);
+      const tabs: { id: string; title: string; url: string }[] = [];
+      const seen = new Set<string>();
+
+      const walk = (node: any) => {
+        if (!node || typeof node !== 'object') return;
+        if (node.data && node.data.tab && node.data.tab.savedURL) {
+          const url = String(node.data.tab.savedURL);
+          if (!seen.has(url)) {
+            seen.add(url);
+            const title = String(node.title || node.data.tab.savedTitle || url);
+            tabs.push({
+              id: `arc-${tabs.length}`,
+              title,
+              url,
+            });
+          }
+        }
+        for (const key of Object.keys(node)) {
+          walk(node[key]);
+        }
+      };
+      walk(data);
+      return tabs;
+    } catch {
+      return [];
+    }
+  }
+
   private async getRunningApps(): Promise<ContextAppTarget[]> {
     if (this.runningAppProvider) {
       const apps = await this.runningAppProvider();
@@ -121,19 +155,36 @@ end if
     }
 
     const script = `tell application "System Events" to get name of every process whose background only is false`;
-    const raw = await this.appleScriptRunner(script);
-    if (!raw) return [];
+    const raw = await this.appleScriptRunner(script).catch(() => '');
+    if (raw && raw.trim()) {
+      const names = raw.split(',').map((s) => s.trim()).filter(Boolean);
+      const browserNames = new Set(['Google Chrome', 'Arc', 'Brave Browser', 'Safari', 'Microsoft Edge']);
+      return names
+        .filter((name) => !browserNames.has(name))
+        .map((name) => ({
+          id: name.toLowerCase().replace(/\s+/g, '-'),
+          name,
+          windows: [{ id: `${name.toLowerCase()}-main`, title: name }],
+        }));
+    }
 
-    const names = raw.split(',').map((s) => s.trim()).filter(Boolean);
-    const browserNames = new Set(['Google Chrome', 'Arc', 'Brave Browser', 'Safari', 'Microsoft Edge']);
+    try {
+      const { stdout } = await execFileAsync('lsappinfo', ['visibleProcessList']);
+      const matches = stdout.match(/"([^"]+)"/g);
+      if (matches && matches.length > 0) {
+        const names = matches.map((m) => m.replace(/"/g, '').replace(/_/g, ' '));
+        const browserNames = new Set(['Google Chrome', 'Arc', 'Brave Browser', 'Safari', 'Microsoft Edge']);
+        return names
+          .filter((name) => !browserNames.has(name) && !name.startsWith('‎'))
+          .map((name) => ({
+            id: name.toLowerCase().replace(/\s+/g, '-'),
+            name,
+            windows: [{ id: `${name.toLowerCase()}-main`, title: name }],
+          }));
+      }
+    } catch {}
 
-    return names
-      .filter((name) => !browserNames.has(name))
-      .map((name) => ({
-        id: name.toLowerCase().replace(/\s+/g, '-'),
-        name,
-        windows: [{ id: `${name.toLowerCase()}-main`, title: name }],
-      }));
+    return [];
   }
 
   private async getFiles(): Promise<ContextFileTarget[]> {
@@ -223,7 +274,10 @@ end if
     ];
 
     for (const b of otherBrowsers) {
-      const tabs = await this.fetchBrowserTabsViaAppleScript(b.name, b.useName);
+      let tabs = await this.fetchBrowserTabsViaAppleScript(b.name, b.useName);
+      if (tabs.length === 0 && b.id === 'arc') {
+        tabs = this.fetchArcTabsFromStorage();
+      }
       if (tabs.length > 0) {
         browsers.push({
           id: b.id,

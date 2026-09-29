@@ -5,6 +5,7 @@ import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { ExecFunction } from './macos-driver.js';
 import type { ContextAttachment } from '@remote-hands/shared';
+import { ContextService } from '../context/context-service.js';
 
 export interface SpotlightPromptResult {
   query: string;
@@ -156,6 +157,15 @@ export class SpotlightHudRunner {
     const child = spawn(cmd, execArgs, {
       stdio: ['pipe', 'pipe', 'inherit'],
     });
+
+    try {
+      const contextService = new ContextService();
+      contextService.getHierarchy().then((h) => {
+        if (!child.killed && child.stdin && child.stdin.writable) {
+          child.stdin.write(JSON.stringify({ event: 'context', hierarchy: h }) + '\n');
+        }
+      }).catch(() => {});
+    } catch {}
 
     let submitted = false;
     let cancelled = false;
