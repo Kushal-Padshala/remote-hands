@@ -73,8 +73,9 @@ export class AxWalker {
       ) {
         continue;
       }
-      if (!trimmed || trimmed.startsWith('<NSImage') || trimmed.startsWith('<wxCustomRendererObject')) {
+      if (!trimmed || trimmed.startsWith('<NSImage') || trimmed.startsWith('<wxCustomRendererObject') || trimmed.includes('RendererObject')) {
         if (node.role !== 'AXTextField' && node.role !== 'AXTextArea') continue;
+        if (trimmed.startsWith('<wxCustomRendererObject') || trimmed.includes('RendererObject')) continue;
       }
       if (node.role === 'AXGroup' && !trimmed) continue;
 
@@ -108,6 +109,22 @@ export class AxWalker {
     }
 
     const nativeElements = await this.walkNativeSwift(appName, execFunc);
+    const hasCustomRenderer = nativeElements.some(
+      (e) => e.label.includes('<wxCustomRendererObject') || e.label.includes('RendererObject'),
+    );
+    const meaningfulCount = nativeElements.filter((e) => e.label && !e.label.startsWith('<')).length;
+
+    if (nativeElements.length > 0 && !hasCustomRenderer && meaningfulCount >= 5) {
+      return nativeElements;
+    }
+
+    const ocrElements = await this.walkVisionOcr(execFunc);
+    if (ocrElements.length > 0) {
+      if (nativeElements.length === 0 || hasCustomRenderer || meaningfulCount < 5) {
+        return ocrElements;
+      }
+    }
+
     if (nativeElements.length > 0) return nativeElements;
 
     const escapedApp = appName ? escapeAppleScript(appName) : '';
@@ -283,6 +300,11 @@ if let data = try? JSONEncoder().encode(nodes), let str = String(data: data, enc
       const res = execFunc('swift', ['-e', swiftScript]);
       const raw = JSON.parse(res.stdout.trim() || '[]');
       if (Array.isArray(raw) && raw.length > 0) {
+        const hasCustom = raw.some((n: any) => typeof n.label === 'string' && (n.label.includes('wxCustomRendererObject') || n.label.includes('RendererObject')));
+        if (hasCustom) {
+          const ocr = await this.walkVisionOcr(execFunc);
+          if (ocr.length > 0) return ocr;
+        }
         return this.pruneAndIndex(raw);
       }
     } catch {}
@@ -309,14 +331,16 @@ let handler = VNImageRequestHandler(cgImage: cg, options: [:])
 try? handler.perform([req])
 let w = CGFloat(cg.width)
 let h = CGFloat(cg.height)
+let scaleX = img.size.width > 0 ? (img.size.width / w) : 1.0
+let scaleY = img.size.height > 0 ? (img.size.height / h) : 1.0
 var out: [[String: Any]] = []
 for obs in (req.results ?? []) {
   guard let cand = obs.topCandidates(1).first else { continue }
   let b = obs.boundingBox
-  let x = Int(b.origin.x * w)
-  let y = Int((1.0 - b.origin.y - b.size.height) * h)
-  let bw = Int(b.size.width * w)
-  let bh = Int(b.size.height * h)
+  let x = Int(b.origin.x * w * scaleX)
+  let y = Int((1.0 - b.origin.y - b.size.height) * h * scaleY)
+  let bw = Int(b.size.width * w * scaleX)
+  let bh = Int(b.size.height * h * scaleY)
   out.append([
     "role": "AXStaticText",
     "label": cand.string,

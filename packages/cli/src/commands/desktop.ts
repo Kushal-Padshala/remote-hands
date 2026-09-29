@@ -107,6 +107,11 @@ export async function desktopCommand(
       const isJson = args.includes('--json');
       const filtered = args.slice(1).filter((a) => a !== '--json');
       const app = filtered.join(' ').trim() || undefined;
+      if (app && typeof driver.focusWindow === 'function') {
+        try {
+          await driver.focusWindow(app);
+        } catch {}
+      }
       const elements = await walker.walkActiveApp(app);
       if (isJson) {
         stdout(JSON.stringify(elements, null, 2));
@@ -251,7 +256,14 @@ export async function desktopCommand(
         stderr('Missing goal. Usage: rh desktop act <goal>');
         return 1;
       }
-      const elements = await walker.walkActiveApp();
+      const appMatch = goal.match(/(?:in|on)\s+["']?([A-Za-z0-9\s]+?)["']?(?:\s*,\s*|\s+(?:select|click|right|type|press)\b)/i);
+      const targetApp = appMatch && appMatch[1] ? appMatch[1].trim() : undefined;
+      if (targetApp && typeof driver.focusWindow === 'function') {
+        try {
+          await driver.focusWindow(targetApp);
+        } catch {}
+      }
+      const elements = await walker.walkActiveApp(targetApp);
       const decision = typeof engine.act === 'function'
         ? await engine.act(goal, elements)
         : await (async () => {
@@ -259,6 +271,10 @@ export async function desktopCommand(
             await engine.executeDecision(d, elements);
             return d;
           })();
+      if ((decision.action === 'CLICK' || decision.action === 'RIGHT_CLICK') && decision.targetIndex === undefined) {
+        stderr(`No matching element found for goal: "${goal}"`);
+        return 1;
+      }
       stdout(`Executed: ${decision.action}`);
       return 0;
     }

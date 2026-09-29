@@ -95,12 +95,23 @@ export class MacOsDriver {
       JSON.stringify(results);
     `;
     const res = this.exec('osascript', ['-l', 'JavaScript', '-e', script]);
-    try {
-      const parsed = JSON.parse(res.stdout.trim());
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
+    if (res.status === 0 && res.stdout.trim()) {
+      try {
+        const parsed = JSON.parse(res.stdout.trim());
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
     }
+    if (process.platform === 'darwin') {
+      const swiftScript = `import Cocoa\nlet list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []\nvar results: [[String: String]] = []\nfor w in list {\n    let owner = w[kCGWindowOwnerName as String] as? String ?? ""\n    let name = w[kCGWindowName as String] as? String ?? ""\n    let layer = w[kCGWindowLayer as String] as? Int ?? 0\n    if layer == 0 && !owner.isEmpty {\n        results.append(["app": owner, "title": name])\n    }\n}\nif let data = try? JSONSerialization.data(withJSONObject: results), let s = String(data: data, encoding: .utf8) {\n    print(s)\n} else {\n    print("[]")\n}`;
+      const swiftRes = this.exec('swift', ['-e', swiftScript]);
+      if (swiftRes.status === 0 && swiftRes.stdout.trim()) {
+        try {
+          const parsed = JSON.parse(swiftRes.stdout.trim());
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        } catch {}
+      }
+    }
+    return [];
   }
 
   async getActiveWindowContext(appOverride?: string): Promise<ActiveWindowContext> {
