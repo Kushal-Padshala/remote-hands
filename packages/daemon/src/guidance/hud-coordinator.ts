@@ -17,7 +17,19 @@ import { DynamicPowerManager } from '../system/power-manager.js';
 
 export function isAutonomousGoal(query: string): boolean {
   const q = query.toLowerCase().trim();
-  const guidanceTriggers = [
+
+  if (
+    q.includes('teach') ||
+    q.includes('explain') ||
+    q.includes('help me') ||
+    q.includes('what is') ||
+    q.includes('how can i make') ||
+    q.includes('how do i make')
+  ) {
+    return true;
+  }
+
+  const pureGuidanceTriggers = [
     'how to',
     'how do i',
     'how can i',
@@ -31,7 +43,13 @@ export function isAutonomousGoal(query: string): boolean {
     'which button is',
     'highlight the',
   ];
-  if (guidanceTriggers.some((t) => q.startsWith(t) || q.includes(` ${t} `))) {
+
+  const words = q.split(/\s+/);
+  if (pureGuidanceTriggers.some((t) => q.startsWith(t)) && words.length <= 6) {
+    return false;
+  }
+
+  if (pureGuidanceTriggers.some((t) => q.includes(` ${t} `)) && words.length <= 5) {
     return false;
   }
 
@@ -71,8 +89,16 @@ export function isAutonomousGoal(query: string): boolean {
     'set up',
     'configure',
     'deploy',
+    'change',
+    'color',
+    'edit',
+    'add',
+    'remove',
+    'delete',
+    'slice',
+    'print',
   ];
-  return actionKeywords.some((verb) => q.includes(verb)) || q.split(/\s+/).length >= 4;
+  return actionKeywords.some((verb) => q.includes(verb)) || words.length >= 4;
 }
 
 export function formatContextualTaskPrompt(
@@ -482,16 +508,49 @@ export class HudCoordinator {
       windowContext.app || result.app
     );
 
-    if (resolution.steps.length === 0) {
-      if (sendUpdate) {
-        sendUpdate('FAILED', 'Could not determine guidance steps');
+    const isUnresolvedEcho =
+      resolution.steps.length === 1 &&
+      resolution.steps[0]?.target === (windowContext.app || result.app) &&
+      resolution.confidence <= 0.7;
+
+    if (resolution.steps.length === 0 || isUnresolvedEcho) {
+      if (this.store && typeof this.store.createTask === 'function') {
+        if (sendUpdate) {
+          sendUpdate('THINKING', 'Analyzing context and initializing agent...');
+        }
+        const prompt = formatContextualTaskPrompt(result.query, windowContext, result.attachments);
+        const task = await this.store.createTask({
+          prompt,
+          goal: result.query,
+          kind: windowContext.isBrowser ? 'browser' : 'mixed',
+          mode: 'autonomous',
+          status: 'queued',
+          model: 'gemini-3.8-flash',
+          effort: 'low',
+          conversation_id: this.currentConversationId ?? null,
+          attachments: result.attachments,
+        });
+        this.currentTaskId = task.id;
+        if (this.onTaskCreated) {
+          await this.onTaskCreated(task);
+        }
+        if (this.autoExecute) {
+          this.executeTaskStandalone(task, sendUpdate, signal).catch(() => {});
+        }
+        return true;
       }
-      return false;
+      if (resolution.steps.length === 0) {
+        if (sendUpdate) {
+          sendUpdate('FAILED', 'Could not determine guidance steps');
+        }
+        return false;
+      }
     }
 
     await this.guidanceManager.startSession(resolution.steps);
     if (sendUpdate) {
-      sendUpdate('COMPLETE', 'Guidance overlay active');
+      const stepSummary = resolution.steps.map((s) => s.text).filter(Boolean).join('\n') || 'Guidance overlay active';
+      sendUpdate('COMPLETE', stepSummary, 'GUIDE');
     }
     return true;
   }

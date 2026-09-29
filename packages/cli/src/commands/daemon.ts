@@ -556,6 +556,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
       const coordinator = new HudCoordinator({
         store,
         powerManager,
+        autoExecute: true,
         onTaskCreated: (task) => {
           stdout(`\n${c.brightGreen('⚡')} [Spotlight HUD] New task initiated: "${(((task as any).goal || task.prompt) as string).slice(0, 60)}..."`);
           triggerImmediateClaim();

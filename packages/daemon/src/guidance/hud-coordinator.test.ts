@@ -594,4 +594,65 @@ describe('HudCoordinator', () => {
     expect(createdTasks[1].goal).toBe('download CS 350 lab 3 handouts instead');
     expect(updateSender).toHaveBeenCalledWith('COMPLETE', 'Downloaded files successfully', 'DONE');
   });
+
+  it('classifies complex instructional requests as autonomous goals and executes via agent', async () => {
+    expect(
+      isAutonomousGoal('can you please teach me how to change the color of the overlay which i have added here')
+    ).toBe(true);
+
+    const createdTasks: any[] = [];
+    const mockStore = {
+      createTask: vi.fn().mockImplementation(async (input: any) => {
+        const task = {
+          id: 'task-teach-1',
+          prompt: input.prompt,
+          goal: input.goal,
+          kind: input.kind,
+          status: 'queued',
+        };
+        createdTasks.push(task);
+        return task;
+      }),
+      appendEvent: vi.fn(),
+      completeTask: vi.fn(),
+    };
+
+    const mockRunner = {
+      run: vi.fn().mockResolvedValue({
+        status: 'done',
+        summary: 'To change the color in Bambu Studio, click the filament swatch under Project Filaments.',
+      }),
+    };
+
+    const coordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: mockStore as any,
+      runner: mockRunner as any,
+      autoExecute: true,
+    });
+
+    const updateSender = vi.fn();
+    const result = await coordinator.handleResult(
+      { query: 'can you please teach me how to change the color of the overlay which i have added here', app: 'Bambu Studio' },
+      updateSender
+    );
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(result).toBe(true);
+    expect(mockStore.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goal: 'can you please teach me how to change the color of the overlay which i have added here',
+      })
+    );
+    expect(mockRunner.run).toHaveBeenCalled();
+    expect(updateSender).toHaveBeenCalledWith(
+      'COMPLETE',
+      'To change the color in Bambu Studio, click the filament swatch under Project Filaments.',
+      'DONE'
+    );
+  });
 });
