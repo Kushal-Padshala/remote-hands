@@ -22,6 +22,7 @@ export {
   AxWalker,
   type RawAxNode,
   type AxWalkerOptions,
+  type WalkOptions,
   type IndexedElement as AxIndexedElement,
   type IndexedElement as DesktopIndexedElement,
 } from './desktop/ax-walker.js';

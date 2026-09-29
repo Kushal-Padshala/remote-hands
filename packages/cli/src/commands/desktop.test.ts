@@ -176,6 +176,23 @@ describe('desktopCommand', () => {
     expect(walkerMock.walkActiveApp).toHaveBeenCalledWith('Slack');
   });
 
+  it('handles snapshot with --no-ocr flag', async () => {
+    const mockElements = [
+      { index: 1, role: 'AXButton', label: 'Save', bounds: [0, 0, 10, 10] },
+    ];
+    const walkerMock = {
+      walkActiveApp: vi.fn().mockResolvedValue(mockElements),
+      formatTable: vi.fn().mockReturnValue('[1] AXButton "Save"'),
+    };
+    const stdout = vi.fn();
+    const code = await desktopCommand(['snapshot', 'Slack', '--no-ocr'], {
+      stdout,
+      walker: walkerMock as any,
+    });
+    expect(code).toBe(0);
+    expect(walkerMock.walkActiveApp).toHaveBeenCalledWith('Slack', { allowOcr: false });
+  });
+
   it('handles click at x,y coordinates with clickAt method', async () => {
     const driverMock = { clickAt: vi.fn().mockResolvedValue(undefined) };
     const stdout = vi.fn();
@@ -651,5 +668,29 @@ describe('desktopCommand', () => {
     expect(walkerMock.walkActiveApp).toHaveBeenCalledWith('Slack');
     expect(engineMock.act).toHaveBeenCalledWith('in Slack, click Submit', mockElements, 'Slack');
     expect(stdout).toHaveBeenCalledWith('Executed: CLICK');
+  });
+
+  it('resolves verified bounds and role from walker in ax-action command', async () => {
+    const mockElements = [
+      { index: 5, role: 'AXButton', label: 'Slice', bounds: [100, 200, 80, 40] },
+    ];
+    const walkerMock = { walkActiveApp: vi.fn().mockResolvedValue(mockElements) };
+    const axMock = vi.fn().mockResolvedValue(true);
+    const driverMock = { exec: vi.fn() };
+    const stdout = vi.fn();
+    const code = await desktopCommand(['ax-action', 'Bambu Studio', '5'], {
+      stdout,
+      desktopDriver: driverMock as any,
+      walker: walkerMock as any,
+      performAxAction: axMock as any,
+    });
+    expect(code).toBe(0);
+    expect(axMock).toHaveBeenCalledWith(
+      'Bambu Studio',
+      { index: 5, bounds: [100, 200, 80, 40], role: 'AXButton', label: 'Slice' },
+      'AXPress',
+      driverMock.exec,
+    );
+    expect(stdout).toHaveBeenCalledWith('Executed AXPress on element [5] in Bambu Studio');
   });
 });

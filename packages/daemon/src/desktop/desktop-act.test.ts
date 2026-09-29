@@ -432,4 +432,17 @@ describe('DesktopActEngine', () => {
     expect(execMock).toHaveBeenCalledWith('swift', expect.arrayContaining(['-e', expect.stringContaining('TextEdit')]));
     expect(execMock).not.toHaveBeenCalledWith('osascript', expect.anything());
   });
+
+  it('passes verified bounds, role, and label to performAxAction', async () => {
+    const execMock = vi.fn().mockReturnValue({ stdout: '{"success":true}\n', stderr: '', status: 0 });
+    const engine = new DesktopActEngine({ exec: execMock });
+    const elements: IndexedElement[] = [
+      { index: 3, role: 'AXButton', label: 'Export', bounds: [50, 60, 70, 80] },
+    ];
+    await engine.executeDecision({ action: 'CLICK', targetIndex: 3 }, elements, 'Bambu Studio');
+    expect(execMock).toHaveBeenCalledWith('swift', expect.arrayContaining([
+      '-e',
+      expect.stringContaining('targetX = 50'),
+    ]));
+  });
 });

@@ -234,7 +234,12 @@ export class DesktopActEngine {
             decision.action === 'CLICK' &&
             (el.role === 'AXButton' || el.role === 'AXMenuItem' || el.role === 'AXCheckBox' || el.role === 'AXRadioButton')
           ) {
-            const axSuccess = await performAxAction(appName, el.index, 'AXPress', this.driver.exec);
+            const axSuccess = await performAxAction(
+              appName,
+              { index: el.index, bounds: el.bounds, role: el.role, label: el.label },
+              'AXPress',
+              this.driver.exec,
+            );
             if (axSuccess) {
               return;
             }

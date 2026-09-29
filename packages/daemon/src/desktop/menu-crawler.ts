@@ -24,12 +24,18 @@ import ApplicationServices
 
 let query = "${escapedApp}"
 let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
-let targetApp = apps.first(where: {
-    ($0.localizedName ?? "").caseInsensitiveCompare(query) == .orderedSame ||
-    ($0.bundleIdentifier ?? "").caseInsensitiveCompare(query) == .orderedSame
-}) ?? apps.first(where: {
-    ($0.localizedName ?? "").localizedCaseInsensitiveContains(query)
-}) ?? NSWorkspace.shared.frontmostApplication
+let targetApp: NSRunningApplication?
+if !query.isEmpty {
+    targetApp = apps.first(where: {
+        ($0.localizedName ?? "").caseInsensitiveCompare(query) == .orderedSame ||
+        ($0.bundleIdentifier ?? "").caseInsensitiveCompare(query) == .orderedSame
+    }) ?? apps.first(where: {
+        ($0.localizedName ?? "").localizedCaseInsensitiveContains(query) ||
+        ($0.bundleIdentifier ?? "").localizedCaseInsensitiveContains(query)
+    })
+} else {
+    targetApp = NSWorkspace.shared.frontmostApplication
+}
 
 guard let app = targetApp else {
     print("[]")
@@ -120,12 +126,18 @@ let appQuery = "${escapedApp}"
 let itemQuery = "${escapedQuery}".lowercased()
 
 let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
-let targetApp = apps.first(where: {
-    ($0.localizedName ?? "").caseInsensitiveCompare(appQuery) == .orderedSame ||
-    ($0.bundleIdentifier ?? "").caseInsensitiveCompare(appQuery) == .orderedSame
-}) ?? apps.first(where: {
-    ($0.localizedName ?? "").localizedCaseInsensitiveContains(appQuery)
-}) ?? NSWorkspace.shared.frontmostApplication
+let targetApp: NSRunningApplication?
+if !appQuery.isEmpty {
+    targetApp = apps.first(where: {
+        ($0.localizedName ?? "").caseInsensitiveCompare(appQuery) == .orderedSame ||
+        ($0.bundleIdentifier ?? "").caseInsensitiveCompare(appQuery) == .orderedSame
+    }) ?? apps.first(where: {
+        ($0.localizedName ?? "").localizedCaseInsensitiveContains(appQuery) ||
+        ($0.bundleIdentifier ?? "").localizedCaseInsensitiveContains(appQuery)
+    })
+} else {
+    targetApp = NSWorkspace.shared.frontmostApplication
+}
 
 guard let app = targetApp else {
     print("{\\"success\\":false,\\"error\\":\\"App not found\\"}")

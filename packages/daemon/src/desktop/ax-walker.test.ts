@@ -230,4 +230,46 @@ describe('AxWalker', () => {
     expect(elements[0]?.label).toBe('Canvas Button');
     expect(elements[0]?.index).toBe(1);
   });
+
+  it('bypasses screencapture and Vision OCR when allowOcr is false', async () => {
+    const execMock = vi.fn().mockImplementation((cmd: string) => {
+      if (cmd === 'swift') {
+        return { stdout: '[]', stderr: '', status: 0 };
+      }
+      if (cmd === 'osascript') {
+        return { stdout: '[]', stderr: '', status: 0 };
+      }
+      return { stdout: '', stderr: '', status: 0 };
+    });
+
+    const walker = new AxWalker({ exec: execMock });
+    const elements = await walker.walkActiveApp('SomeApp', { allowOcr: false });
+    expect(elements).toEqual([]);
+    expect(execMock).not.toHaveBeenCalledWith('screencapture', expect.anything());
+  });
+
+  it('bypasses screencapture when AxWalker is constructed with allowOcr false', async () => {
+    const execMock = vi.fn().mockImplementation((cmd: string) => {
+      if (cmd === 'swift') {
+        return { stdout: '[]', stderr: '', status: 0 };
+      }
+      if (cmd === 'osascript') {
+        return { stdout: '[]', stderr: '', status: 0 };
+      }
+      return { stdout: '', stderr: '', status: 0 };
+    });
+
+    const walker = new AxWalker({ exec: execMock, allowOcr: false });
+    const elements = await walker.walkActiveApp('SomeApp');
+    expect(elements).toEqual([]);
+    expect(execMock).not.toHaveBeenCalledWith('screencapture', expect.anything());
+  });
+
+  it('does not fall back to frontmost app when query is non-empty', async () => {
+    const execMock = vi.fn().mockReturnValue({ stdout: '[]', stderr: '', status: 0 });
+    const walker = new AxWalker({ exec: execMock });
+    await walker.walkActiveApp('NonExistentAppXYZ');
+    const swiftCode = execMock.mock.calls[0]![1][1];
+    expect(swiftCode).toContain('guard let app = targetApp else');
+  });
 });

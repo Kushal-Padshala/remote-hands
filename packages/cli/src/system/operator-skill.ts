@@ -113,7 +113,7 @@ Never capture screenshots or run vision loops for desktop automation. Screen cap
 - \`rh desktop menu-list <app>\`: Inspect available native application menus
 - \`rh desktop ax-action <app> <index> [action]\`: Execute accessibility action directly on a control (e.g. \`AXPress\`)
 - \`rh desktop key <combo>\`: Send native keyboard shortcuts
-- \`rh desktop snapshot\`: Fast semantic inspection of the UI element hierarchy
+- \`rh desktop snapshot [--no-ocr]\`: Fast semantic inspection of the UI element hierarchy (use \`--no-ocr\` for pure native AX)
 
 ### Window Operations
 
@@ -136,7 +136,7 @@ rh desktop open "Slack"
 
 1. Snapshot the native UI hierarchy:
 \`\`\`bash
-rh desktop snapshot
+rh desktop snapshot --no-ocr
 \`\`\`
 
 2. Execute direct accessibility action on control (instant <5ms, no mouse movement):
@@ -232,7 +232,7 @@ rh approve "Post announcement tweet to @account: Launching Remote Hands 2.0" --r
 | Type into browser field | \`rh browser type <index> "<text>"\` |
 | List desktop windows | \`rh desktop window list\` |
 | Focus desktop window | \`rh desktop window focus "<app>"\` |
-| Snapshot desktop UI | \`rh desktop snapshot\` |
+| Snapshot desktop UI | \`rh desktop snapshot [--no-ocr]\` |
 | Execute accessibility action | \`rh desktop ax-action <app> <index> [action]\` |
 | Search and trigger menu | \`rh desktop menu-search <app> "<item>"\` |
 | List app menu bar items | \`rh desktop menu-list <app>\` |
@@ -249,7 +249,7 @@ rh approve "Post announcement tweet to @account: Launching Remote Hands 2.0" --r
 | Rationalization / Mistake | Reality & Correct Behavior |
 |---|---|
 | "I should run \`rh --help\` to inspect arguments." | Never run discovery commands. All commands match the syntax in this guide. |
-| "I should capture screenshots or use vision to find buttons." | Never take screenshots. Use \`rh desktop snapshot\`, \`rh desktop ax-action\`, or \`rh desktop menu-search\` directly. |
+| "I should capture screenshots or use vision to find buttons." | Never take screenshots. Use \`rh desktop snapshot --no-ocr\`, \`rh desktop ax-action\`, or \`rh desktop menu-search\` directly. |
 | "I need to open a new tab for each site." | Always check \`rh browser tabs\` first. Switch to existing tabs in-place with \`rh browser focus\`. |
 | "I should scrape SQLite cookie databases to authenticate." | Chrome is already authenticated with the user's active session. Use the browser directly. |
 | "I will click the button for the user when they asked 'where is'." | When asked 'where is' or 'how do I', use \`rh guide show\` to project an interactive arrow. |

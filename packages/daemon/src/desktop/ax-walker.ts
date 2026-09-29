@@ -23,6 +23,11 @@ export interface IndexedElement {
 export interface AxWalkerOptions {
   driver?: MacOsDriver;
   exec?: ExecFunction;
+  allowOcr?: boolean;
+}
+
+export interface WalkOptions {
+  allowOcr?: boolean;
 }
 
 function escapeAppleScript(str: string): string {
@@ -31,6 +36,7 @@ function escapeAppleScript(str: string): string {
 
 export class AxWalker {
   private exec: ExecFunction;
+  private allowOcr: boolean = true;
 
   constructor(options?: AxWalkerOptions | MacOsDriver) {
     if (options && 'openApp' in options) {
@@ -40,6 +46,9 @@ export class AxWalker {
         const res = spawnSync(cmd, args, { encoding: 'utf-8' });
         return { stdout: res.stdout || '', stderr: res.stderr || '', status: res.status };
       });
+      if (typeof options.allowOcr === 'boolean') {
+        this.allowOcr = options.allowOcr;
+      }
     } else {
       this.exec = (cmd, args) => {
         const res = spawnSync(cmd, args, { encoding: 'utf-8' });
@@ -96,19 +105,38 @@ export class AxWalker {
       .join('\n');
   }
 
-  async walkActiveApp(appNameOrExec?: string | ExecFunction, maybeExec?: ExecFunction): Promise<IndexedElement[]> {
+  async walkActiveApp(
+    appNameOrExecOrOpts?: string | ExecFunction | WalkOptions,
+    maybeExecOrOpts?: ExecFunction | WalkOptions,
+    maybeExec?: ExecFunction,
+  ): Promise<IndexedElement[]> {
     let appName: string | undefined;
+    let options: WalkOptions = { allowOcr: this.allowOcr };
     let execFunc = this.exec;
-    if (typeof appNameOrExec === 'function') {
-      execFunc = appNameOrExec;
-    } else if (typeof appNameOrExec === 'string') {
-      appName = appNameOrExec;
-      if (typeof maybeExec === 'function') {
-        execFunc = maybeExec;
+
+    if (typeof appNameOrExecOrOpts === 'string') {
+      appName = appNameOrExecOrOpts;
+      if (typeof maybeExecOrOpts === 'function') {
+        execFunc = maybeExecOrOpts;
+      } else if (maybeExecOrOpts && typeof maybeExecOrOpts === 'object') {
+        options = { ...options, ...maybeExecOrOpts };
+        if (typeof maybeExec === 'function') {
+          execFunc = maybeExec;
+        }
+      }
+    } else if (typeof appNameOrExecOrOpts === 'function') {
+      execFunc = appNameOrExecOrOpts;
+      if (maybeExecOrOpts && typeof maybeExecOrOpts === 'object') {
+        options = { ...options, ...maybeExecOrOpts };
+      }
+    } else if (appNameOrExecOrOpts && typeof appNameOrExecOrOpts === 'object') {
+      options = { ...options, ...appNameOrExecOrOpts };
+      if (typeof maybeExecOrOpts === 'function') {
+        execFunc = maybeExecOrOpts;
       }
     }
 
-    const nativeElements = await this.walkNativeSwift(appName, execFunc);
+    const nativeElements = await this.walkNativeSwift(appName, execFunc, options);
     const hasCustomRenderer = nativeElements.some(
       (e) => e.label.includes('<wxCustomRendererObject') || e.label.includes('RendererObject'),
     );
@@ -118,10 +146,12 @@ export class AxWalker {
       return nativeElements;
     }
 
-    const ocrElements = await this.walkVisionOcr(execFunc);
-    if (ocrElements.length > 0) {
-      if (nativeElements.length === 0 || hasCustomRenderer || meaningfulCount < 5) {
-        return ocrElements;
+    if (options.allowOcr !== false) {
+      const ocrElements = await this.walkVisionOcr(execFunc);
+      if (ocrElements.length > 0) {
+        if (nativeElements.length === 0 || hasCustomRenderer || meaningfulCount < 5) {
+          return ocrElements;
+        }
       }
     }
 
@@ -179,10 +209,17 @@ export class AxWalker {
       }
     } catch {}
 
-    return this.walkVisionOcr(execFunc);
+    if (options.allowOcr !== false) {
+      return this.walkVisionOcr(execFunc);
+    }
+    return [];
   }
 
-  async walkNativeSwift(appName?: string, execFunc: ExecFunction = this.exec): Promise<IndexedElement[]> {
+  async walkNativeSwift(
+    appName?: string,
+    execFunc: ExecFunction = this.exec,
+    options: WalkOptions = { allowOcr: this.allowOcr },
+  ): Promise<IndexedElement[]> {
     const escapedApp = (appName ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const swiftScript = `
 import Cocoa
@@ -208,7 +245,7 @@ if !query.isEmpty {
     }) ?? apps.first(where: {
         ($0.localizedName ?? "").localizedCaseInsensitiveContains(query) ||
         ($0.bundleIdentifier ?? "").localizedCaseInsensitiveContains(query)
-    }) ?? NSWorkspace.shared.frontmostApplication
+    })
 } else {
     targetApp = NSWorkspace.shared.frontmostApplication
 }
@@ -301,7 +338,7 @@ if let data = try? JSONEncoder().encode(nodes), let str = String(data: data, enc
       const raw = JSON.parse(res.stdout.trim() || '[]');
       if (Array.isArray(raw) && raw.length > 0) {
         const hasCustom = raw.some((n: any) => typeof n.label === 'string' && (n.label.includes('wxCustomRendererObject') || n.label.includes('RendererObject')));
-        if (hasCustom) {
+        if (hasCustom && options.allowOcr !== false) {
           const ocr = await this.walkVisionOcr(execFunc);
           if (ocr.length > 0) return ocr;
         }

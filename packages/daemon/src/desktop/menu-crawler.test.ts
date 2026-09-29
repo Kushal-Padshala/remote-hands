@@ -57,4 +57,18 @@ describe('menu-crawler', () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe('Command failed');
   });
+
+  it('returns failure and does not fall back when target app is not running', async () => {
+    const execMock = vi.fn().mockReturnValue({
+      stdout: JSON.stringify({ success: false, error: 'App not found' }) + '\n',
+      stderr: '',
+      status: 0,
+    });
+    const result = await searchAndTriggerMenu('NonExistentAppXYZ', 'File', execMock);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('App not found');
+    const swiftCode = execMock.mock.calls[0]![1][1];
+    expect(swiftCode).toContain('guard let app = targetApp else');
+    expect(swiftCode).toContain('App not found');
+  });
 });

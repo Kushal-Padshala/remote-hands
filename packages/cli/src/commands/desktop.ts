@@ -37,7 +37,7 @@ export async function desktopCommand(
     stdout('Commands:');
     stdout('  open <app>                  Launch or activate an application');
     stdout('  window <list|focus|close>   Manage windows');
-    stdout('  snapshot [--json]           Inspect UI elements of the active application');
+    stdout('  snapshot [--json] [--no-ocr] Inspect UI elements of the active application');
     stdout('  screenshot [--path|--b64]   Capture full desktop screenshot');
     stdout('  click <index|x,y>           Click an element by index or coordinate');
     stdout('  type <text>                 Type text into the active element');
@@ -57,7 +57,7 @@ export async function desktopCommand(
     stdout('Commands:');
     stdout('  open <app>                  Launch or activate an application');
     stdout('  window <list|focus|close>   Manage windows');
-    stdout('  snapshot [--json]           Inspect UI elements of the active application');
+    stdout('  snapshot [--json] [--no-ocr] Inspect UI elements of the active application');
     stdout('  screenshot [--path|--b64]   Capture full desktop screenshot');
     stdout('  click <index|x,y>           Click an element by index or coordinate');
     stdout('  type <text>                 Type text into the active element');
@@ -120,14 +120,17 @@ export async function desktopCommand(
 
     if (sub === 'snapshot') {
       const isJson = args.includes('--json');
-      const filtered = args.slice(1).filter((a) => a !== '--json');
+      const isNoOcr = args.includes('--no-ocr') || args.includes('--native-only');
+      const filtered = args.slice(1).filter((a) => a !== '--json' && a !== '--no-ocr' && a !== '--native-only');
       const app = filtered.join(' ').trim() || undefined;
       if (app && typeof driver.focusWindow === 'function') {
         try {
           await driver.focusWindow(app);
         } catch {}
       }
-      const elements = await walker.walkActiveApp(app);
+      const elements = isNoOcr
+        ? await walker.walkActiveApp(app, { allowOcr: false })
+        : await walker.walkActiveApp(app);
       if (isJson) {
         stdout(JSON.stringify(elements, null, 2));
       } else {
@@ -307,7 +310,15 @@ export async function desktopCommand(
         stderr('Usage: rh desktop ax-action <app> <index> [action]');
         return 1;
       }
-      const success = await axActionFn(app, targetIndex, action, driver.exec);
+      let target: number | any = targetIndex;
+      try {
+        const elements = await walker.walkActiveApp(app, { allowOcr: false });
+        const matched = Array.isArray(elements) ? elements.find((e: any) => e.index === targetIndex) : undefined;
+        if (matched) {
+          target = { index: matched.index, bounds: matched.bounds, role: matched.role, label: matched.label };
+        }
+      } catch {}
+      const success = await axActionFn(app, target, action, driver.exec);
       if (success) {
         stdout(`Executed ${action} on element [${cleanIdx}] in ${app}`);
         return 0;
