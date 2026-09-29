@@ -100,7 +100,16 @@ Available pre-imported helpers in `browser-harness`:
 
 ## Native Desktop & Window Management
 
-Control native macOS software using accessibility-driven inspection and keyboard/menu routing.
+Control native macOS software using accessibility-driven inspection, native accessibility actions, and menu bar search.
+
+### Zero Screenshots & Instant Accessibility Mandate
+
+Never capture screenshots or run vision loops for desktop automation. Screen capture is strictly prohibited during autonomous execution. Speak directly to the application layer using Accessibility APIs and native menu commands:
+- `rh desktop menu-search <app> "<item>"`: Trigger any application menu item instantly (<5ms)
+- `rh desktop menu-list <app>`: Inspect available native application menus
+- `rh desktop ax-action <app> <index> [action]`: Execute accessibility action directly on a control (e.g. `AXPress`)
+- `rh desktop key <combo>`: Send native keyboard shortcuts
+- `rh desktop snapshot`: Fast semantic inspection of the UI element hierarchy
 
 ### Window Operations
 
@@ -126,28 +135,43 @@ rh desktop open "Slack"
 rh desktop snapshot
 ```
 
-2. Click a native control by numeric index:
+2. Execute direct accessibility action on control (instant <5ms, no mouse movement):
+```bash
+rh desktop ax-action "Bambu Studio" 5 AXPress
+```
+
+3. Fuzzy search and execute application menu bar items instantly:
+```bash
+rh desktop menu-search "Bambu Studio" "Import 3D Model"
+```
+
+4. List application menu hierarchy:
+```bash
+rh desktop menu-list "Bambu Studio"
+```
+
+5. Click a native control by numeric index:
 ```bash
 rh desktop click 5
 ```
 
-3. Type into the focused control:
+6. Type into the focused control:
 ```bash
 rh desktop type "New Project"
 ```
 
-4. Execute keyboard shortcuts:
+7. Execute keyboard shortcuts:
 ```bash
 rh desktop key "cmd+s"
 rh desktop key "enter"
 ```
 
-5. Select application menu bar items:
+8. Select application menu bar items:
 ```bash
 rh desktop menu "Code" "File" "Save All"
 ```
 
-6. High-level goal automation:
+9. High-level goal automation:
 ```bash
 rh desktop act "create a new file named test.py"
 ```
@@ -205,6 +229,9 @@ rh approve "Post announcement tweet to @account: Launching Remote Hands 2.0" --r
 | List desktop windows | `rh desktop window list` |
 | Focus desktop window | `rh desktop window focus "<app>"` |
 | Snapshot desktop UI | `rh desktop snapshot` |
+| Execute accessibility action | `rh desktop ax-action <app> <index> [action]` |
+| Search and trigger menu | `rh desktop menu-search <app> "<item>"` |
+| List app menu bar items | `rh desktop menu-list <app>` |
 | Click desktop element | `rh desktop click <index>` |
 | Type desktop text | `rh desktop type "<text>"` |
 | Send keyboard shortcut | `rh desktop key "<combo>"` |
@@ -218,6 +245,7 @@ rh approve "Post announcement tweet to @account: Launching Remote Hands 2.0" --r
 | Rationalization / Mistake | Reality & Correct Behavior |
 |---|---|
 | "I should run `rh --help` to inspect arguments." | Never run discovery commands. All commands match the syntax in this guide. |
+| "I should capture screenshots or use vision to find buttons." | Never take screenshots. Use `rh desktop snapshot`, `rh desktop ax-action`, or `rh desktop menu-search` directly. |
 | "I need to open a new tab for each site." | Always check `rh browser tabs` first. Switch to existing tabs in-place with `rh browser focus`. |
 | "I should scrape SQLite cookie databases to authenticate." | Chrome is already authenticated with the user's active session. Use the browser directly. |
 | "I will click the button for the user when they asked 'where is'." | When asked 'where is' or 'how do I', use `rh guide show` to project an interactive arrow. |

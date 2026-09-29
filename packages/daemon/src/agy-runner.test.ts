@@ -349,6 +349,17 @@ describe('remote hands system prompt and reminder', () => {
     expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop menu "<app>" "<menu>" "<item>"');
   });
 
+  it('includes zero-screenshot mandate and menu-search in DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT and DEFAULT_REMOTE_HANDS_REMINDER', () => {
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('ZERO SCREENSHOTS');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop menu-search');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop menu-list');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop ax-action');
+    expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('ZERO SCREENSHOTS');
+    expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh desktop menu-search');
+    expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh desktop menu-list');
+    expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh desktop ax-action');
+  });
+
   it('includes indexed browser shortcuts in DEFAULT_REMOTE_HANDS_REMINDER', () => {
     expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh browser snapshot');
     expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh browser click <index>');
