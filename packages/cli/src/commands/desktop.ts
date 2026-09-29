@@ -184,7 +184,18 @@ export async function desktopCommand(
         return 0;
       }
 
-      stderr(`Invalid click target: "${target}". Expected index or x,y coordinates.`);
+      const elements = await walker.walkActiveApp();
+      const lower = target.toLowerCase();
+      const matched =
+        elements.find((e) => e.label.toLowerCase() === lower) ||
+        elements.find((e) => e.label && (e.label.toLowerCase().includes(lower) || lower.includes(e.label.toLowerCase())));
+      if (matched) {
+        await engine.executeDecision({ action: isRight ? 'RIGHT_CLICK' : 'CLICK', targetIndex: matched.index }, elements);
+        stdout(`${isRight ? 'Right-clicked' : 'Clicked'} "${matched.label}" [${matched.index}]`);
+        return 0;
+      }
+
+      stderr(`Invalid click target: "${target}". Expected index, label, or x,y coordinates.`);
       return 1;
     }
 

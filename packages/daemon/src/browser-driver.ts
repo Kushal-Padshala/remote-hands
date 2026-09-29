@@ -452,8 +452,19 @@ export class BrowserDriver {
   }
 
   async openUrl(url: string): Promise<{ success: boolean; url: string }> {
-    const tab = await this.getActiveTab();
-    const wsUrl = tab.webSocketDebuggerUrl;
+    let tab: BrowserTab | null = null;
+    try {
+      tab = await this.getActiveTab();
+    } catch {
+      try {
+        const res = await fetch(`${this.cdpUrl}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' });
+        if (res.ok) {
+          return { success: true, url };
+        }
+      } catch {}
+      throw new Error('No active browser tab found');
+    }
+    const wsUrl = tab?.webSocketDebuggerUrl;
     if (!wsUrl) {
       throw new Error('Active tab does not provide webSocketDebuggerUrl');
     }

@@ -1153,6 +1153,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         let y = screen.frame.height * 0.65 - (newHeight - 84)
 
         panel.setFrame(NSRect(x: x, y: y, width: width, height: newHeight), display: true, animate: true)
+        panel.level = .normal
         visualEffect.frame = NSRect(x: 0, y: 0, width: width, height: newHeight)
 
         badge.stringValue = targetApp.uppercased()

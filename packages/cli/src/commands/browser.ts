@@ -28,9 +28,6 @@ export async function ensureChromeAutomationReady(options?: { headless?: boolean
   if (await isCdpReady(`${cdpUrl}/json/version`)) {
     return true;
   }
-  if (ChromeManager.isSystemChromeRunning()) {
-    return true;
-  }
 
   let port = 9222;
   try {
@@ -39,7 +36,7 @@ export async function ensureChromeAutomationReady(options?: { headless?: boolean
   } catch {}
 
   const manager = new ChromeManager({
-    mode: 'active',
+    mode: 'dedicated',
     profile: options?.profile,
     port,
   });

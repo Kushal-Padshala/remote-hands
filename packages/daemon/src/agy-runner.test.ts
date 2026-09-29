@@ -345,7 +345,7 @@ describe('remote hands system prompt and reminder', () => {
     expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop open "<app>"');
     expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop snapshot');
     expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop act "<goal>"');
-    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop click <index>');
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop click <index|x,y>');
     expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh desktop menu "<app>" "<menu>" "<item>"');
   });
 
@@ -357,7 +357,7 @@ describe('remote hands system prompt and reminder', () => {
   it('includes desktop shortcuts in DEFAULT_REMOTE_HANDS_REMINDER', () => {
     expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh desktop open "<app>"');
     expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh desktop act "<goal>"');
-    expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh desktop click <index>');
+    expect(DEFAULT_REMOTE_HANDS_REMINDER).toContain('rh desktop click <index|x,y>');
   });
 
   it('includes rh guide commands in system prompt and reminder', () => {
