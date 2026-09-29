@@ -144,6 +144,100 @@ end if
     }
   }
 
+  private fetchChromiumTabsFromStorage(
+    appSupportFolder: string,
+  ): Array<{ profile: string; tabs: Array<{ id: string; title: string; url: string }> }> {
+    try {
+      const basePath = path.join(os.homedir(), 'Library', 'Application Support', appSupportFolder);
+      if (!fs.existsSync(basePath)) return [];
+      const localStatePath = path.join(basePath, 'Local State');
+      const profilesMap = new Map<string, string>();
+      profilesMap.set('Default', 'Default');
+      if (fs.existsSync(localStatePath)) {
+        try {
+          const ls = JSON.parse(fs.readFileSync(localStatePath, 'utf-8'));
+          const infoCache = ls.profile?.info_cache || {};
+          for (const [k, v] of Object.entries(infoCache)) {
+            const pName = (v as any)?.name || k;
+            profilesMap.set(k, pName);
+          }
+        } catch {}
+      }
+
+      const results: Array<{ profile: string; tabs: Array<{ id: string; title: string; url: string }> }> = [];
+
+      for (const [dirName, profName] of profilesMap.entries()) {
+        const profileDir = path.join(basePath, dirName);
+        const sessionsDir = path.join(profileDir, 'Sessions');
+        if (!fs.existsSync(sessionsDir)) continue;
+
+        let files: Array<{ name: string; time: number }> = [];
+        try {
+          files = fs.readdirSync(sessionsDir)
+            .filter((f) => f.startsWith('Tabs_') || f.startsWith('Session_'))
+            .map((f) => ({ name: f, time: fs.statSync(path.join(sessionsDir, f)).mtimeMs }))
+            .sort((a, b) => b.time - a.time);
+        } catch {
+          continue;
+        }
+
+        if (files.length === 0 || !files[0]) continue;
+        const targetFile = path.join(sessionsDir, files[0].name);
+        let buf: Buffer;
+        try {
+          buf = fs.readFileSync(targetFile);
+        } catch {
+          continue;
+        }
+
+        const tabs: Array<{ id: string; title: string; url: string }> = [];
+        const seen = new Set<string>();
+        let i = 0;
+        while (i < buf.length - 8) {
+          if (
+            (buf[i] === 0x68 && buf[i + 1] === 0x74 && buf[i + 2] === 0x74 && buf[i + 3] === 0x70 && buf[i + 4] === 0x73 && buf[i + 5] === 0x3a && buf[i + 6] === 0x2f && buf[i + 7] === 0x2f) ||
+            (buf[i] === 0x68 && buf[i + 1] === 0x74 && buf[i + 2] === 0x74 && buf[i + 3] === 0x70 && buf[i + 4] === 0x3a && buf[i + 5] === 0x2f && buf[i + 6] === 0x2f)
+          ) {
+            const start = i;
+            while (i < buf.length && (buf[i] ?? 0) >= 0x21 && (buf[i] ?? 0) <= 0x7e) {
+              i++;
+            }
+            const url = buf.subarray(start, i).toString('utf-8');
+            if ((url.startsWith('http://') || url.startsWith('https://')) && !seen.has(url)) {
+              try {
+                const parsed = new URL(url);
+                if (parsed.hostname) {
+                  seen.add(url);
+                  let title = parsed.hostname;
+                  const parts = parsed.pathname.split('/').filter(Boolean);
+                  const lastPart = parts.length > 0 ? parts[parts.length - 1] : undefined;
+                  if (lastPart) {
+                    title += ` / ${decodeURIComponent(lastPart).slice(0, 40)}`;
+                  }
+                  tabs.push({
+                    id: `${appSupportFolder.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${dirName}-${tabs.length}`,
+                    title,
+                    url,
+                  });
+                }
+              } catch {}
+            }
+          } else {
+            i++;
+          }
+        }
+
+        if (tabs.length > 0) {
+          results.push({ profile: profName, tabs });
+        }
+      }
+
+      return results;
+    } catch {
+      return [];
+    }
+  }
+
   private async getRunningApps(): Promise<ContextAppTarget[]> {
     if (this.runningAppProvider) {
       const apps = await this.runningAppProvider();
@@ -203,18 +297,31 @@ end if
       if (!fs.existsSync(dir)) continue;
       try {
         const entries = fs.readdirSync(dir, { withFileTypes: true });
+        const dirFiles: Array<{ name: string; isDir: boolean; path: string; mtime: number }> = [];
         for (const entry of entries) {
           if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === 'dist') continue;
-          targets.push({
-            id: `file-${Buffer.from(path.join(dir, entry.name)).toString('base64url').slice(0, 16)}`,
+          const fullPath = path.join(dir, entry.name);
+          let mtime = 0;
+          try {
+            mtime = fs.statSync(fullPath).mtimeMs;
+          } catch {}
+          dirFiles.push({
             name: entry.name,
-            path: path.join(dir, entry.name),
             isDir: entry.isDirectory(),
+            path: fullPath,
+            mtime,
           });
-          if (targets.length >= 60) break;
+        }
+        dirFiles.sort((a, b) => b.mtime - a.mtime);
+        for (const f of dirFiles.slice(0, 30)) {
+          targets.push({
+            id: `file-${Buffer.from(f.path).toString('base64url').slice(0, 16)}`,
+            name: f.name,
+            path: f.path,
+            isDir: f.isDir,
+          });
         }
       } catch {}
-      if (targets.length >= 60) break;
     }
 
     return targets;
@@ -260,6 +367,17 @@ end if
       });
     }
 
+    if (chromeProfilesMap.size === 0) {
+      const storageProfiles = this.fetchChromiumTabsFromStorage(path.join('Google', 'Chrome'));
+      for (const p of storageProfiles) {
+        chromeProfilesMap.set(p.profile, {
+          id: p.profile.toLowerCase().replace(/\s+/g, '-'),
+          name: p.profile,
+          tabs: p.tabs,
+        });
+      }
+    }
+
     browsers.push({
       id: 'chrome',
       name: 'Google Chrome',
@@ -267,10 +385,10 @@ end if
     });
 
     const otherBrowsers = [
-      { id: 'arc', name: 'Arc', useName: false },
-      { id: 'brave', name: 'Brave Browser', useName: false },
-      { id: 'safari', name: 'Safari', useName: true },
-      { id: 'edge', name: 'Microsoft Edge', useName: false },
+      { id: 'arc', name: 'Arc', useName: false, folder: 'Arc' },
+      { id: 'brave', name: 'Brave Browser', useName: false, folder: path.join('BraveSoftware', 'Brave-Browser') },
+      { id: 'safari', name: 'Safari', useName: true, folder: '' },
+      { id: 'edge', name: 'Microsoft Edge', useName: false, folder: 'Microsoft Edge' },
     ];
 
     for (const b of otherBrowsers) {
@@ -290,6 +408,19 @@ end if
             },
           ],
         });
+      } else if (b.folder && b.id !== 'arc') {
+        const storageProfiles = this.fetchChromiumTabsFromStorage(b.folder);
+        if (storageProfiles.length > 0) {
+          browsers.push({
+            id: b.id,
+            name: b.name,
+            profiles: storageProfiles.map((p) => ({
+              id: p.profile.toLowerCase().replace(/\s+/g, '-'),
+              name: p.profile,
+              tabs: p.tabs,
+            })),
+          });
+        }
       }
     }
 
@@ -308,15 +439,26 @@ end if
     const q = query.trim().toLowerCase();
     if (!q) return hierarchy;
 
+    const parts = q.split('/').map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const p0 = parts[0];
+    const p1 = parts[1];
+
     const filteredBrowsers: ContextBrowserTarget[] = [];
     for (const b of hierarchy.browsers) {
-      const isBrowserMatch = b.name.toLowerCase().includes(q) || b.id.toLowerCase().includes(q);
+      const isBrowserMatch =
+        b.name.toLowerCase().includes(q) ||
+        b.id.toLowerCase().includes(q) ||
+        (p0 !== undefined && (b.name.toLowerCase().includes(p0) || b.id.toLowerCase().includes(p0)));
       const matchingProfiles: ContextBrowserProfile[] = [];
       for (const p of b.profiles) {
-        const isProfileMatch = p.name.toLowerCase().includes(q);
-        const matchingTabs = p.tabs.filter(
-          (t) => isBrowserMatch || isProfileMatch || t.title.toLowerCase().includes(q) || t.url.toLowerCase().includes(q),
-        );
+        const isProfileMatch = p.name.toLowerCase().includes(q) || (p1 !== undefined && p.name.toLowerCase().includes(p1));
+        const matchingTabs = p.tabs.filter((t) => {
+          if (parts.length > 1) {
+            const subQ = parts.slice(1).join(' ');
+            return t.title.toLowerCase().includes(subQ) || t.url.toLowerCase().includes(subQ);
+          }
+          return isBrowserMatch || isProfileMatch || t.title.toLowerCase().includes(q) || t.url.toLowerCase().includes(q);
+        });
         if (matchingTabs.length > 0) {
           matchingProfiles.push({ ...p, tabs: matchingTabs });
         }
@@ -330,7 +472,13 @@ end if
       (a) => a.name.toLowerCase().includes(q) || a.windows.some((w) => w.title.toLowerCase().includes(q)),
     );
 
-    const filteredFiles = hierarchy.files.filter((f) => f.name.toLowerCase().includes(q));
+    const filteredFiles = hierarchy.files.filter((f) => {
+      if (parts.length > 1 && (p0 === 'downloads' || p0 === 'finder' || p0 === 'files')) {
+        const subQ = parts.slice(1).join(' ');
+        return f.name.toLowerCase().includes(subQ) || f.path.toLowerCase().includes(subQ);
+      }
+      return f.name.toLowerCase().includes(q) || (p0 !== undefined && (p0 === 'downloads' || p0 === 'finder') && f.path.toLowerCase().includes('downloads'));
+    });
 
     return {
       browsers: filteredBrowsers,

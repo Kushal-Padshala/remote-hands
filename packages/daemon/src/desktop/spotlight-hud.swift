@@ -6,6 +6,67 @@ class HudActionButton: NSButton {
     override var mouseDownCanMoveWindow: Bool { false }
 }
 
+class ContextTableRowView: NSTableRowView {
+    override func drawSelection(in dirtyRect: NSRect) {
+        if isSelected {
+            let selectionRect = bounds.insetBy(dx: 4, dy: 2)
+            let path = NSBezierPath(roundedRect: selectionRect, xRadius: 8, yRadius: 8)
+            NSColor(red: 0.15, green: 0.38, blue: 0.95, alpha: 0.90).setFill()
+            path.fill()
+        }
+    }
+}
+
+class ContextTableCell: NSTableCellView {
+    var iconField: NSTextField!
+    var titleField: NSTextField!
+    var subtitleField: NSTextField!
+    var badgeField: NSTextField!
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupViews()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupViews()
+    }
+
+    private func setupViews() {
+        wantsLayer = true
+
+        iconField = NSTextField(labelWithString: "")
+        iconField.font = NSFont.systemFont(ofSize: 15)
+        iconField.frame = NSRect(x: 10, y: 8, width: 24, height: 22)
+        addSubview(iconField)
+
+        titleField = NSTextField(labelWithString: "")
+        titleField.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        titleField.textColor = .white
+        titleField.lineBreakMode = .byTruncatingTail
+        titleField.frame = NSRect(x: 38, y: 17, width: bounds.width - 90, height: 18)
+        titleField.autoresizingMask = [.width]
+        addSubview(titleField)
+
+        subtitleField = NSTextField(labelWithString: "")
+        subtitleField.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        subtitleField.textColor = NSColor(white: 0.60, alpha: 1.0)
+        subtitleField.lineBreakMode = .byTruncatingTail
+        subtitleField.frame = NSRect(x: 38, y: 3, width: bounds.width - 90, height: 15)
+        subtitleField.autoresizingMask = [.width]
+        addSubview(subtitleField)
+
+        badgeField = NSTextField(labelWithString: "")
+        badgeField.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        badgeField.textColor = NSColor(white: 0.50, alpha: 1.0)
+        badgeField.alignment = .right
+        badgeField.frame = NSRect(x: bounds.width - 65, y: 10, width: 55, height: 18)
+        badgeField.autoresizingMask = [.minXMargin]
+        addSubview(badgeField)
+    }
+}
+
 class SpotlightPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -169,14 +230,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         visualEffect.blendingMode = .behindWindow
         visualEffect.state = .active
         visualEffect.wantsLayer = true
-        visualEffect.layer?.cornerRadius = 18
+        visualEffect.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.07, alpha: 0.98).cgColor
+        visualEffect.layer?.cornerRadius = 16
         visualEffect.layer?.masksToBounds = true
         visualEffect.layer?.borderWidth = 1
-        visualEffect.layer?.borderColor = NSColor(white: 1.0, alpha: 0.15).cgColor
+        visualEffect.layer?.borderColor = NSColor(white: 1.0, alpha: 0.12).cgColor
 
         badge = NSTextField(labelWithString: targetApp.uppercased())
         badge.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
-        badge.textColor = NSColor(red: 0.23, green: 0.51, blue: 0.96, alpha: 1.0)
+        badge.textColor = NSColor(red: 0.25, green: 0.70, blue: 1.0, alpha: 1.0)
         badge.frame = NSRect(x: 24, y: height - 26, width: 130, height: 16)
         visualEffect.addSubview(badge)
 
@@ -195,7 +257,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         closeButton.wantsLayer = true
         closeButton.layer?.cornerRadius = 12
         closeButton.layer?.masksToBounds = true
-        closeButton.font = NSFont.systemFont(ofSize: 14, weight: .bold)
+        closeButton.layer?.backgroundColor = NSColor(white: 0.20, alpha: 0.8).cgColor
+        closeButton.font = NSFont.systemFont(ofSize: 12, weight: .bold)
         closeButton.contentTintColor = NSColor(white: 0.75, alpha: 1.0)
         closeButton.target = self
         closeButton.action = #selector(onCancelClicked)
@@ -228,9 +291,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         textField.isBordered = false
         textField.drawsBackground = false
         textField.focusRingType = .none
-        textField.font = NSFont.systemFont(ofSize: 18, weight: .medium)
+        textField.font = NSFont.systemFont(ofSize: 17, weight: .regular)
         textField.textColor = .white
-        textField.placeholderString = "Ask anything or type @ to attach context..."
+        let pAttr: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor(white: 0.45, alpha: 1.0),
+            .font: NSFont.systemFont(ofSize: 17, weight: .regular)
+        ]
+        textField.placeholderAttributedString = NSAttributedString(string: "Ask anything or type @ to attach context...", attributes: pAttr)
         textField.isEditable = true
         textField.isSelectable = true
         textField.delegate = self
@@ -269,6 +336,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             }
             walk(json)
             for (idx, t) in tabs.enumerated() {
+                let domain = URL(string: t.url)?.host ?? ""
                 items.append([
                     "type": "browser_tab",
                     "id": "arc-\(idx)",
@@ -276,10 +344,90 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                     "profile": "Default",
                     "title": t.title,
                     "url": t.url,
-                    "label": "🌐 Arc: \(t.title)"
+                    "label": "Arc: \(t.title)",
+                    "subtitle": domain.isEmpty ? t.url : "Arc · \(domain)",
+                    "icon": "🌐"
                 ])
             }
         }
+
+        func parseChromium(folder: String, browserName: String) {
+            let base = NSHomeDirectory() + "/Library/Application Support/" + folder
+            guard FileManager.default.fileExists(atPath: base) else { return }
+            var profileNames: [String: String] = ["Default": "Default"]
+            let localState = (base as NSString).appendingPathComponent("Local State")
+            if let data = try? Data(contentsOf: URL(fileURLWithPath: localState)),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let profDict = json["profile"] as? [String: Any],
+               let infoCache = profDict["info_cache"] as? [String: Any] {
+                for (k, v) in infoCache {
+                    if let d = v as? [String: Any], let name = d["name"] as? String {
+                        profileNames[k] = name
+                    }
+                }
+            }
+
+            let fm = FileManager.default
+            for (dirName, profName) in profileNames {
+                let sessionsDir = (base as NSString).appendingPathComponent(dirName + "/Sessions")
+                guard let files = try? fm.contentsOfDirectory(atPath: sessionsDir) else { continue }
+                let sessionFiles = files.filter { $0.hasPrefix("Tabs_") || $0.hasPrefix("Session_") }
+                guard let latest = sessionFiles.max(by: { a, b in
+                    let aPath = (sessionsDir as NSString).appendingPathComponent(a)
+                    let bPath = (sessionsDir as NSString).appendingPathComponent(b)
+                    let aTime = (try? fm.attributesOfItem(atPath: aPath)[.modificationDate] as? Date) ?? Date.distantPast
+                    let bTime = (try? fm.attributesOfItem(atPath: bPath)[.modificationDate] as? Date) ?? Date.distantPast
+                    return aTime < bTime
+                }) else { continue }
+
+                let filePath = (sessionsDir as NSString).appendingPathComponent(latest)
+                guard let data = try? Data(contentsOf: URL(fileURLWithPath: filePath)) else { continue }
+
+                var seen = Set<String>()
+                data.withUnsafeBytes { raw in
+                    guard let ptr = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+                    let len = data.count
+                    var i = 0
+                    while i < len - 8 {
+                        if (ptr[i] == 0x68 && ptr[i+1] == 0x74 && ptr[i+2] == 0x74 && ptr[i+3] == 0x70 && ptr[i+4] == 0x73 && ptr[i+5] == 0x3a && ptr[i+6] == 0x2f && ptr[i+7] == 0x2f) ||
+                           (ptr[i] == 0x68 && ptr[i+1] == 0x74 && ptr[i+2] == 0x74 && ptr[i+3] == 0x70 && ptr[i+4] == 0x3a && ptr[i+5] == 0x2f && ptr[i+6] == 0x2f) {
+                            let start = i
+                            while i < len && ptr[i] >= 0x21 && ptr[i] <= 0x7e {
+                                i += 1
+                            }
+                            let sub = data.subdata(in: start..<i)
+                            if let urlStr = String(data: sub, encoding: .utf8),
+                               let url = URL(string: urlStr),
+                               let host = url.host,
+                               !seen.contains(urlStr) {
+                                seen.insert(urlStr)
+                                var title = host
+                                let comps = url.pathComponents.filter { $0 != "/" }
+                                if let last = comps.last {
+                                    title += " / " + last
+                                }
+                                items.append([
+                                    "type": "browser_tab",
+                                    "id": "\(browserName.lowercased())-\(dirName)-\(items.count)",
+                                    "browser": browserName,
+                                    "profile": profName,
+                                    "title": title,
+                                    "url": urlStr,
+                                    "label": "\(browserName): \(title)",
+                                    "subtitle": "\(browserName) (\(profName)) · \(host)",
+                                    "icon": "🌐"
+                                ])
+                            }
+                        } else {
+                            i += 1
+                        }
+                    }
+                }
+            }
+        }
+
+        parseChromium(folder: "Google/Chrome", browserName: "Google Chrome")
+        parseChromium(folder: "BraveSoftware/Brave-Browser", browserName: "Brave")
 
         let regularApps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
         for app in regularApps {
@@ -290,32 +438,41 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                     "id": "app-\(id)",
                     "app": name,
                     "title": name,
-                    "label": "💻 \(name)"
+                    "label": name,
+                    "subtitle": "Running Application",
+                    "icon": "💻"
                 ])
             }
         }
 
-        let fileDirs = [
-            NSHomeDirectory() + "/Downloads",
-            NSHomeDirectory() + "/Desktop"
-        ]
+        let downloadsDir = NSHomeDirectory() + "/Downloads"
+        let desktopDir = NSHomeDirectory() + "/Desktop"
         let fm = FileManager.default
-        for dir in fileDirs {
-            if let entries = try? fm.contentsOfDirectory(atPath: dir) {
-                for name in entries.prefix(25) {
-                    if name.hasPrefix(".") { continue }
-                    let fullPath = (dir as NSString).appendingPathComponent(name)
-                    var isDir: ObjCBool = false
-                    if fm.fileExists(atPath: fullPath, isDirectory: &isDir) {
-                        items.append([
-                            "type": "local_file",
-                            "id": "file-\(name)",
-                            "name": name,
-                            "path": fullPath,
-                            "isDir": isDir.boolValue,
-                            "label": "📄 \(name)"
-                        ])
-                    }
+        for dir in [downloadsDir, desktopDir] {
+            guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+            let folderName = (dir as NSString).lastPathComponent
+            let sortedEntries = entries.filter { !$0.hasPrefix(".") }.sorted { a, b in
+                let aP = (dir as NSString).appendingPathComponent(a)
+                let bP = (dir as NSString).appendingPathComponent(b)
+                let aT = (try? fm.attributesOfItem(atPath: aP)[.modificationDate] as? Date) ?? Date.distantPast
+                let bT = (try? fm.attributesOfItem(atPath: bP)[.modificationDate] as? Date) ?? Date.distantPast
+                return aT > bT
+            }
+            for name in sortedEntries.prefix(30) {
+                let fullPath = (dir as NSString).appendingPathComponent(name)
+                var isDir: ObjCBool = false
+                if fm.fileExists(atPath: fullPath, isDirectory: &isDir) {
+                    items.append([
+                        "type": "local_file",
+                        "id": "file-\(name)",
+                        "name": name,
+                        "path": fullPath,
+                        "isDir": isDir.boolValue,
+                        "folder": folderName,
+                        "label": name,
+                        "subtitle": "\(folderName) · \(name)",
+                        "icon": "📄"
+                    ])
                 }
             }
         }
@@ -340,6 +497,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                                 let url = t["url"] as? String ?? ""
                                 let id = t["id"] as? String ?? UUID().uuidString
                                 let tabIndex = t["tabIndex"] as? Int
+                                let domain = URL(string: url)?.host ?? ""
                                 var att: [String: Any] = [
                                     "type": "browser_tab",
                                     "id": id,
@@ -347,7 +505,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                                     "profile": pName,
                                     "title": title,
                                     "url": url,
-                                    "label": "🌐 \(bName): \(title)"
+                                    "label": "\(bName): \(title)",
+                                    "subtitle": domain.isEmpty ? "\(bName) (\(pName))" : "\(bName) (\(pName)) · \(domain)",
+                                    "icon": "🌐"
                                 ]
                                 if let idx = tabIndex {
                                     att["tabIndex"] = idx
@@ -371,7 +531,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                     "id": "app-\(aId)",
                     "app": aName,
                     "title": wTitle,
-                    "label": "💻 \(aName)"
+                    "label": aName,
+                    "subtitle": "Running Application",
+                    "icon": "💻"
                 ])
             }
         }
@@ -382,13 +544,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                 let fPath = f["path"] as? String ?? ""
                 let fId = f["id"] as? String ?? fName
                 let isDir = f["isDir"] as? Bool ?? false
+                let folderName = (fPath as NSString).deletingLastPathComponent.split(separator: "/").last.map(String.init) ?? "Files"
                 items.append([
                     "type": "local_file",
                     "id": fId,
                     "name": fName,
                     "path": fPath,
                     "isDir": isDir,
-                    "label": "📄 \(fName)"
+                    "folder": folderName,
+                    "label": fName,
+                    "subtitle": "\(folderName) · \(fName)",
+                    "icon": "📄"
                 ])
             }
         }
@@ -404,10 +570,140 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         }
 
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let parts = q.split(separator: "/").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+
         if q.isEmpty {
-            filteredContextItems = contextItems
+            var topList: [[String: Any]] = []
+
+            let currentAppLower = targetApp.lowercased()
+            let activeItems = contextItems.filter {
+                let b = ($0["browser"] as? String ?? "").lowercased()
+                let a = ($0["app"] as? String ?? "").lowercased()
+                return (!b.isEmpty && b.contains(currentAppLower)) || (!a.isEmpty && a.contains(currentAppLower))
+            }
+            for it in activeItems.prefix(4) {
+                var copy = it
+                copy["badge"] = "⚡ Active"
+                topList.append(copy)
+            }
+
+            let categories: [[String: Any]] = [
+                ["type": "category", "id": "cat:arc", "category": "Arc", "label": "Arc", "subtitle": "Open tabs & spaces", "icon": "🌐", "badge": "›"],
+                ["type": "category", "id": "cat:chrome", "category": "Chrome", "label": "Google Chrome", "subtitle": "Profiles & tabs", "icon": "🌐", "badge": "›"],
+                ["type": "category", "id": "cat:brave", "category": "Brave", "label": "Brave Browser", "subtitle": "Tabs", "icon": "🌐", "badge": "›"],
+                ["type": "category", "id": "cat:downloads", "category": "Downloads", "label": "Downloads", "subtitle": "Recent downloaded files", "icon": "📁", "badge": "›"],
+                ["type": "category", "id": "cat:desktop", "category": "Desktop", "label": "Desktop", "subtitle": "Desktop files & screenshots", "icon": "📁", "badge": "›"],
+                ["type": "category", "id": "cat:apps", "category": "Apps", "label": "Running Applications", "subtitle": "Switch or reference apps", "icon": "💻", "badge": "›"],
+            ]
+            topList.append(contentsOf: categories)
+            filteredContextItems = topList
+        } else if parts.count > 1 || q.hasSuffix("/") {
+            let cat = parts.first ?? ""
+            let filterTerm = parts.count > 1 ? parts[1] : ""
+
+            if cat.contains("arc") {
+                filteredContextItems = contextItems.filter {
+                    guard ($0["browser"] as? String ?? "").lowercased().contains("arc") else { return false }
+                    if filterTerm.isEmpty { return true }
+                    let title = ($0["title"] as? String ?? "").lowercased()
+                    let url = ($0["url"] as? String ?? "").lowercased()
+                    return title.contains(filterTerm) || url.contains(filterTerm)
+                }
+            } else if cat.contains("chrome") {
+                if parts.count > 2 {
+                    let prof = parts[1]
+                    let tabTerm = parts[2]
+                    filteredContextItems = contextItems.filter {
+                        guard ($0["browser"] as? String ?? "").lowercased().contains("chrome") else { return false }
+                        guard ($0["profile"] as? String ?? "").lowercased().contains(prof) else { return false }
+                        if tabTerm.isEmpty { return true }
+                        let title = ($0["title"] as? String ?? "").lowercased()
+                        let url = ($0["url"] as? String ?? "").lowercased()
+                        return title.contains(tabTerm) || url.contains(tabTerm)
+                    }
+                } else if filterTerm.isEmpty {
+                    var profilesSeen = Set<String>()
+                    var profItems: [[String: Any]] = []
+                    for it in contextItems where (it["browser"] as? String ?? "").lowercased().contains("chrome") {
+                        if let prof = it["profile"] as? String, !profilesSeen.contains(prof) {
+                            profilesSeen.insert(prof)
+                            profItems.append([
+                                "type": "category",
+                                "id": "cat:chrome:\(prof)",
+                                "category": "Chrome / \(prof)",
+                                "label": prof,
+                                "subtitle": "Profile",
+                                "icon": "👤",
+                                "badge": "›"
+                            ])
+                        }
+                    }
+                    filteredContextItems = profItems
+                } else {
+                    filteredContextItems = contextItems.filter {
+                        guard ($0["browser"] as? String ?? "").lowercased().contains("chrome") else { return false }
+                        let title = ($0["title"] as? String ?? "").lowercased()
+                        let url = ($0["url"] as? String ?? "").lowercased()
+                        let prof = ($0["profile"] as? String ?? "").lowercased()
+                        return title.contains(filterTerm) || url.contains(filterTerm) || prof.contains(filterTerm)
+                    }
+                }
+            } else if cat.contains("brave") {
+                filteredContextItems = contextItems.filter {
+                    guard ($0["browser"] as? String ?? "").lowercased().contains("brave") else { return false }
+                    if filterTerm.isEmpty { return true }
+                    let title = ($0["title"] as? String ?? "").lowercased()
+                    let url = ($0["url"] as? String ?? "").lowercased()
+                    return title.contains(filterTerm) || url.contains(filterTerm)
+                }
+            } else if cat.contains("download") || cat.contains("finder") {
+                filteredContextItems = contextItems.filter {
+                    guard ($0["folder"] as? String ?? "").lowercased().contains("download") else { return false }
+                    if filterTerm.isEmpty { return true }
+                    let name = ($0["name"] as? String ?? "").lowercased()
+                    return name.contains(filterTerm)
+                }
+            } else if cat.contains("desktop") {
+                filteredContextItems = contextItems.filter {
+                    guard ($0["folder"] as? String ?? "").lowercased().contains("desktop") else { return false }
+                    if filterTerm.isEmpty { return true }
+                    let name = ($0["name"] as? String ?? "").lowercased()
+                    return name.contains(filterTerm)
+                }
+            } else if cat.contains("app") {
+                filteredContextItems = contextItems.filter {
+                    guard $0["type"] as? String == "app_window" else { return false }
+                    if filterTerm.isEmpty { return true }
+                    let name = ($0["name"] as? String ?? "").lowercased()
+                    return name.contains(filterTerm)
+                }
+            } else {
+                filteredContextItems = contextItems.filter {
+                    let label = ($0["label"] as? String ?? "").lowercased()
+                    let title = ($0["title"] as? String ?? "").lowercased()
+                    let name = ($0["name"] as? String ?? "").lowercased()
+                    let url = ($0["url"] as? String ?? "").lowercased()
+                    return label.contains(q) || title.contains(q) || name.contains(q) || url.contains(q)
+                }
+            }
         } else {
-            filteredContextItems = contextItems.filter {
+            let catMatches = [
+                ("arc", ["type": "category", "id": "cat:arc", "category": "Arc", "label": "Arc", "subtitle": "Open tabs & spaces", "icon": "🌐", "badge": "›"]),
+                ("chrome", ["type": "category", "id": "cat:chrome", "category": "Chrome", "label": "Google Chrome", "subtitle": "Profiles & tabs", "icon": "🌐", "badge": "›"]),
+                ("brave", ["type": "category", "id": "cat:brave", "category": "Brave", "label": "Brave Browser", "subtitle": "Tabs", "icon": "🌐", "badge": "›"]),
+                ("download", ["type": "category", "id": "cat:downloads", "category": "Downloads", "label": "Downloads", "subtitle": "Recent downloaded files", "icon": "📁", "badge": "›"]),
+                ("finder", ["type": "category", "id": "cat:downloads", "category": "Downloads", "label": "Downloads", "subtitle": "Recent downloaded files", "icon": "📁", "badge": "›"]),
+                ("desktop", ["type": "category", "id": "cat:desktop", "category": "Desktop", "label": "Desktop", "subtitle": "Desktop files & screenshots", "icon": "📁", "badge": "›"]),
+                ("app", ["type": "category", "id": "cat:apps", "category": "Apps", "label": "Running Applications", "subtitle": "Switch or reference apps", "icon": "💻", "badge": "›"]),
+            ]
+            var matchedCats: [[String: Any]] = []
+            for (key, dict) in catMatches {
+                if key.contains(q) || q.contains(key) {
+                    matchedCats.append(dict)
+                }
+            }
+
+            let itemMatches = contextItems.filter {
                 let label = ($0["label"] as? String ?? "").lowercased()
                 let title = ($0["title"] as? String ?? "").lowercased()
                 let name = ($0["name"] as? String ?? "").lowercased()
@@ -416,6 +712,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                 let browser = ($0["browser"] as? String ?? "").lowercased()
                 return label.contains(q) || title.contains(q) || name.contains(q) || url.contains(q) || app.contains(q) || browser.contains(q)
             }
+
+            var merged = matchedCats
+            merged.append(contentsOf: itemMatches)
+            filteredContextItems = merged
         }
 
         if filteredContextItems.isEmpty {
@@ -423,8 +723,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             return
         }
 
-        let rowCount = min(6, filteredContextItems.count)
-        let targetHeight: CGFloat = CGFloat(rowCount * 34 + 14)
+        let rowCount = min(7, filteredContextItems.count)
+        let targetHeight: CGFloat = CGFloat(rowCount * 38 + 14)
         let panelFrame = panel.frame
         let popoverRect = NSRect(x: panelFrame.origin.x, y: panelFrame.origin.y - targetHeight - 6, width: panelFrame.width, height: targetHeight)
 
@@ -440,15 +740,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             p.backgroundColor = .clear
             p.hasShadow = true
 
-            let effect = NSVisualEffectView(frame: NSRect(origin: .zero, size: popoverRect.size))
-            effect.material = .hudWindow
-            effect.blendingMode = .behindWindow
-            effect.state = .active
+            let effect = NSView(frame: NSRect(origin: .zero, size: popoverRect.size))
             effect.wantsLayer = true
+            effect.layer?.backgroundColor = NSColor(red: 0.07, green: 0.07, blue: 0.09, alpha: 0.98).cgColor
             effect.layer?.cornerRadius = 14
             effect.layer?.masksToBounds = true
             effect.layer?.borderWidth = 1
-            effect.layer?.borderColor = NSColor(white: 1.0, alpha: 0.15).cgColor
+            effect.layer?.borderColor = NSColor(white: 1.0, alpha: 0.14).cgColor
 
             let scroll = NSScrollView(frame: NSRect(x: 6, y: 6, width: popoverRect.width - 12, height: targetHeight - 12))
             scroll.drawsBackground = false
@@ -459,7 +757,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             let table = NSTableView(frame: scroll.bounds)
             table.headerView = nil
             table.backgroundColor = .clear
-            table.rowHeight = 32
+            table.rowHeight = 38
             table.selectionHighlightStyle = .regular
             table.target = self
             table.action = #selector(onTableRowClicked)
@@ -503,13 +801,68 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
     }
 
     func attachItem(_ item: [String: Any]) {
+        let itemType = item["type"] as? String ?? ""
+        if itemType == "category" {
+            let catName = item["category"] as? String ?? ""
+            let cur = textField.stringValue
+            if let atRange = cur.range(of: "@", options: .backwards) {
+                let prefix = String(cur[..<atRange.lowerBound])
+                textField.stringValue = "\(prefix)@\(catName) / "
+                showContextPanel(query: "\(catName.lowercased()) / ")
+            }
+            return
+        }
+
         var cleanItem = item
         cleanItem.removeValue(forKey: "label")
-        selectedAttachments.append(cleanItem)
+        cleanItem.removeValue(forKey: "subtitle")
+        cleanItem.removeValue(forKey: "icon")
+        cleanItem.removeValue(forKey: "badge")
+        cleanItem.removeValue(forKey: "category")
+
+        var alreadyAttached = false
+        for existing in selectedAttachments {
+            if let id1 = existing["id"] as? String, let id2 = cleanItem["id"] as? String, id1 == id2 {
+                alreadyAttached = true
+                break
+            }
+            if let u1 = existing["url"] as? String, let u2 = cleanItem["url"] as? String, u1 == u2 {
+                alreadyAttached = true
+                break
+            }
+            if let p1 = existing["path"] as? String, let p2 = cleanItem["path"] as? String, p1 == p2 {
+                alreadyAttached = true
+                break
+            }
+        }
+        if !alreadyAttached {
+            selectedAttachments.append(cleanItem)
+        }
+
+        let token: String
+        if itemType == "browser_tab" {
+            let b = cleanItem["browser"] as? String ?? "Web"
+            let t = cleanItem["title"] as? String ?? "Tab"
+            let shortTitle = t.count > 30 ? String(t.prefix(28)) + "…" : t
+            token = "@[\(b): \(shortTitle)] "
+        } else if itemType == "app_window" {
+            let a = cleanItem["app"] as? String ?? "App"
+            token = "@[App: \(a)] "
+        } else if itemType == "local_file" {
+            let n = cleanItem["name"] as? String ?? "File"
+            let folder = cleanItem["folder"] as? String ?? "File"
+            token = "@[\(folder): \(n)] "
+        } else {
+            let l = item["label"] as? String ?? "Item"
+            token = "@[\(l)] "
+        }
 
         let cur = textField.stringValue
-        if let atIdx = cur.lastIndex(of: "@") {
-            textField.stringValue = String(cur[..<atIdx]).trimmingCharacters(in: .whitespaces)
+        if let atRange = cur.range(of: "@", options: .backwards) {
+            let prefix = String(cur[..<atRange.lowerBound])
+            textField.stringValue = "\(prefix)\(token)"
+        } else {
+            textField.stringValue += " \(token)"
         }
 
         updateChipsDisplay()
@@ -553,34 +906,40 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         return filteredContextItems.count
     }
 
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        return ContextTableRowView()
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        return 38
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard row < filteredContextItems.count else { return nil }
         let item = filteredContextItems[row]
         let label = item["label"] as? String ?? ""
+        let subtitle = item["subtitle"] as? String ?? ""
+        let icon = item["icon"] as? String ?? "🌐"
+        let badge = item["badge"] as? String ?? ""
 
         let cellId = NSUserInterfaceItemIdentifier("ContextCell")
-        var cell = tableView.makeView(withIdentifier: cellId, owner: self) as? NSTableCellView
+        var cell = tableView.makeView(withIdentifier: cellId, owner: self) as? ContextTableCell
         if cell == nil {
-            cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: tableView.bounds.width, height: 32))
+            cell = ContextTableCell(frame: NSRect(x: 0, y: 0, width: tableView.bounds.width, height: 38))
             cell?.identifier = cellId
-
-            let tf = NSTextField(labelWithString: "")
-            tf.isBordered = false
-            tf.drawsBackground = false
-            tf.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-            tf.textColor = .white
-            tf.lineBreakMode = .byTruncatingTail
-            tf.frame = NSRect(x: 10, y: 5, width: tableView.bounds.width - 20, height: 22)
-            tf.autoresizingMask = [.width]
-            cell?.textField = tf
-            cell?.addSubview(tf)
         }
-        cell?.textField?.stringValue = label
-        return cell
-    }
 
-    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        return 32
+        cell?.iconField.stringValue = icon
+        cell?.titleField.stringValue = label
+        cell?.subtitleField.stringValue = subtitle
+        cell?.badgeField.stringValue = badge
+        if badge == "⚡ Active" {
+            cell?.badgeField.textColor = NSColor.systemCyan
+        } else {
+            cell?.badgeField.textColor = NSColor(white: 0.50, alpha: 1.0)
+        }
+
+        return cell
     }
 
     func controlTextDidChange(_ obj: Notification) {
@@ -798,7 +1157,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
 
         badge.stringValue = targetApp.uppercased()
         badge.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
-        badge.textColor = NSColor(red: 0.23, green: 0.51, blue: 0.96, alpha: 1.0)
+        badge.textColor = NSColor(red: 0.25, green: 0.70, blue: 1.0, alpha: 1.0)
         badge.frame = NSRect(x: 20, y: newHeight - 32, width: 130, height: 18)
 
         attachmentChipsLabel.frame = NSRect(x: 160, y: newHeight - 32, width: width - 440, height: 18)
