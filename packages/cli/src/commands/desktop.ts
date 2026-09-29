@@ -143,10 +143,12 @@ export async function desktopCommand(
       return 0;
     }
 
-    if (sub === 'click') {
-      const target = args.slice(1).join(' ').trim();
+    if (sub === 'click' || sub === 'right-click') {
+      const isRight = sub === 'right-click' || args.includes('--right') || args.includes('-r');
+      const filtered = args.slice(1).filter((a) => a !== '--right' && a !== '-r');
+      const target = filtered.join(' ').trim();
       if (!target) {
-        stderr('Missing target. Usage: rh desktop click <index|x,y>');
+        stderr('Missing target. Usage: rh desktop click <index|x,y> [--right]');
         return 1;
       }
 
@@ -155,12 +157,16 @@ export async function desktopCommand(
         const x = parseInt(coordMatch[1], 10);
         const y = parseInt(coordMatch[2], 10);
         if (typeof (driver as any).clickAt === 'function') {
-          await (driver as any).clickAt(x, y);
+          if (isRight) {
+            await (driver as any).clickAt(x, y, 'right');
+          } else {
+            await (driver as any).clickAt(x, y);
+          }
         } else {
           const script = `tell application "System Events"\n  click at {${x}, ${y}}\nend tell`;
           driver.exec('osascript', ['-e', script]);
         }
-        stdout(`Clicked at ${x},${y}`);
+        stdout(`${isRight ? 'Right-clicked' : 'Clicked'} at ${x},${y}`);
         return 0;
       }
 
@@ -173,8 +179,8 @@ export async function desktopCommand(
           stderr(`Element [${targetIndex}] not found`);
           return 1;
         }
-        await engine.executeDecision({ action: 'CLICK', targetIndex }, elements);
-        stdout(`Clicked element [${targetIndex}]`);
+        await engine.executeDecision({ action: isRight ? 'RIGHT_CLICK' : 'CLICK', targetIndex }, elements);
+        stdout(`${isRight ? 'Right-clicked' : 'Clicked'} element [${targetIndex}]`);
         return 0;
       }
 
@@ -188,7 +194,9 @@ export async function desktopCommand(
         stderr('Missing text. Usage: rh desktop type <text>');
         return 1;
       }
-      if (typeof (driver as any).typeText === 'function') {
+      if (context.actEngine) {
+        await engine.executeDecision({ action: 'TYPE_TEXT', text }, []);
+      } else if (typeof (driver as any).typeText === 'function') {
         await (driver as any).typeText(text);
       } else {
         await engine.executeDecision({ action: 'TYPE_TEXT', text }, []);

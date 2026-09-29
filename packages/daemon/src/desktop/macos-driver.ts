@@ -219,6 +219,34 @@ export class MacOsDriver {
     this.exec('osascript', ['-e', script]);
   }
 
+  async clickAt(x: number, y: number, button: 'left' | 'right' = 'left'): Promise<void> {
+    if (button === 'right') {
+      if (process.platform === 'darwin') {
+        const swiftScript = `import CoreGraphics\nimport Foundation\nlet pt = CGPoint(x: ${x}, y: ${y})\nif let down = CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: pt, mouseButton: .right), let up = CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: pt, mouseButton: .right) {\ndown.post(tap: .cghidEventTap)\nusleep(50000)\nup.post(tap: .cghidEventTap)\n}`;
+        const res = this.exec('swift', ['-e', swiftScript]);
+        if (res.status === 0) return;
+      }
+    }
+    const script = `tell application "System Events"\n  click at {${x}, ${y}}\nend tell`;
+    const res = this.exec('osascript', ['-e', script]);
+    if (res.status !== 0 && process.platform === 'darwin') {
+      const isRight = button === 'right';
+      const swiftScript = `import CoreGraphics\nimport Foundation\nlet pt = CGPoint(x: ${x}, y: ${y})\nlet downType: CGEventType = ${isRight ? '.rightMouseDown' : '.leftMouseDown'}\nlet upType: CGEventType = ${isRight ? '.rightMouseUp' : '.leftMouseUp'}\nlet mouseBtn: CGMouseButton = ${isRight ? '.right' : '.left'}\nif let down = CGEvent(mouseEventSource: nil, mouseType: downType, mouseCursorPosition: pt, mouseButton: mouseBtn), let up = CGEvent(mouseEventSource: nil, mouseType: upType, mouseCursorPosition: pt, mouseButton: mouseBtn) {\ndown.post(tap: .cghidEventTap)\nusleep(50000)\nup.post(tap: .cghidEventTap)\n}`;
+      this.exec('swift', ['-e', swiftScript]);
+    }
+  }
+
+  async typeText(text: string): Promise<void> {
+    const escaped = escapeAppleScript(text);
+    const script = `tell application "System Events"\n  keystroke "${escaped}"\nend tell`;
+    const res = this.exec('osascript', ['-e', script]);
+    if (res.status !== 0 && process.platform === 'darwin') {
+      const swEscaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const swiftScript = `import CoreGraphics\nimport Foundation\nlet src = CGEventSource(stateID: .hidSystemState)\nfor char in "${swEscaped}".utf16 {\nvar unichar = char\nif let d = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true) {\nd.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unichar)\nd.post(tap: .cghidEventTap)\n}\nif let u = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) {\nu.keyboardSetUnicodeString(stringLength: 1, unicodeString: &unichar)\nu.post(tap: .cghidEventTap)\n}\nusleep(10000)\n}`;
+      this.exec('swift', ['-e', swiftScript]);
+    }
+  }
+
   async sendKeyCombo(keys: string[], modifiers: string[]): Promise<void> {
     const mods = modifiers
       .map((m) => {
@@ -234,7 +262,23 @@ export class MacOsDriver {
       keyCode !== undefined
         ? `tell application "System Events"\n  key code ${keyCode}${modString}\nend tell`
         : `tell application "System Events"\n  keystroke "${escapeAppleScript(key)}"${modString}\nend tell`;
-    this.exec('osascript', ['-e', script]);
+    const res = this.exec('osascript', ['-e', script]);
+    if (res.status !== 0 && process.platform === 'darwin' && keyCode !== undefined) {
+      let flagExpr = 'CGEventFlags()';
+      const flags: string[] = [];
+      for (const m of modifiers) {
+        const lm = m.toLowerCase();
+        if (lm.includes('cmd') || lm.includes('command')) flags.push('.maskCommand');
+        if (lm.includes('shift')) flags.push('.maskShift');
+        if (lm.includes('alt') || lm.includes('opt')) flags.push('.maskAlternate');
+        if (lm.includes('ctrl') || lm.includes('control')) flags.push('.maskControl');
+      }
+      if (flags.length > 0) {
+        flagExpr = `[${flags.map((f) => `CGEventFlags${f}`).join(', ')}]`;
+      }
+      const swiftScript = `import CoreGraphics\nimport Foundation\nlet src = CGEventSource(stateID: .hidSystemState)\nif let d = CGEvent(keyboardEventSource: src, virtualKey: ${keyCode}, keyDown: true), let u = CGEvent(keyboardEventSource: src, virtualKey: ${keyCode}, keyDown: false) {\nd.flags = ${flagExpr}\nu.flags = ${flagExpr}\nd.post(tap: .cghidEventTap)\nusleep(20000)\nu.post(tap: .cghidEventTap)\n}`;
+      this.exec('swift', ['-e', swiftScript]);
+    }
   }
 
   async captureScreenshot(options?: CaptureScreenshotOptions): Promise<Buffer | null> {

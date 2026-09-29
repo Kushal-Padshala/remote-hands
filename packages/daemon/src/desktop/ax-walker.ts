@@ -61,7 +61,7 @@ export class AxWalker {
       if (node.x < 0 || node.y < 0) continue;
 
       const trimmed = (node.label ?? '').trim();
-      if (!trimmed) {
+      if (!trimmed || trimmed.startsWith('<NSImage') || trimmed.startsWith('<wxCustomRendererObject')) {
         if (node.role !== 'AXTextField' && node.role !== 'AXTextArea') continue;
       }
       if (node.role === 'AXGroup' && !trimmed) continue;
@@ -239,8 +239,27 @@ func walk(el: AXUIElement, depth: Int) {
     }
 }
 
-if let winList = wins as? [AXUIElement], let w = winList.first {
-    walk(el: w, depth: 0)
+var rootWindow: AXUIElement?
+if let winList = wins as? [AXUIElement], !winList.isEmpty {
+    rootWindow = winList.first
+}
+if rootWindow == nil {
+    var mainVal: AnyObject?
+    if AXUIElementCopyAttributeValue(appEl, kAXMainWindowAttribute as CFString, &mainVal) == .success, let w = mainVal {
+        rootWindow = (w as! AXUIElement)
+    }
+}
+if rootWindow == nil {
+    var focVal: AnyObject?
+    if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
+        rootWindow = (w as! AXUIElement)
+    }
+}
+
+if let rw = rootWindow {
+    walk(el: rw, depth: 0)
+} else {
+    walk(el: appEl, depth: 0)
 }
 if let data = try? JSONEncoder().encode(nodes), let str = String(data: data, encoding: .utf8) {
     print(str)

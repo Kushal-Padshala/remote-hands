@@ -1,7 +1,7 @@
 import type { IndexedElement } from './ax-walker.js';
 import { MacOsDriver, type ExecFunction } from './macos-driver.js';
 
-export type MicroActionType = 'CLICK' | 'TYPE_TEXT' | 'KEY' | 'DONE';
+export type MicroActionType = 'CLICK' | 'RIGHT_CLICK' | 'TYPE_TEXT' | 'KEY' | 'DONE';
 
 export interface MicroDecision {
   action: MicroActionType;
@@ -144,6 +144,39 @@ export class DesktopActEngine {
       }
     }
 
+    const rightClickMatch = trimmed.match(/^(?:right[\s-]click|context[\s-]click)(?:\s+on)?\s+["']?(.+?)["']?$/i);
+    if (rightClickMatch && rightClickMatch[1]) {
+      const targetDesc = rightClickMatch[1].trim();
+      if (/^\[?(\d+)\]?$/.test(targetDesc)) {
+        const idx = parseInt(targetDesc.replace(/[\[\]]/g, ''), 10);
+        return {
+          action: 'RIGHT_CLICK',
+          targetIndex: idx,
+        };
+      }
+      const lowerTarget = targetDesc.toLowerCase();
+      let matched = elements.find((e) => e.label.toLowerCase() === lowerTarget);
+      if (!matched) {
+        const candidates = elements.filter(
+          (e) =>
+            e.label &&
+            (e.label.toLowerCase().includes(lowerTarget) || lowerTarget.includes(e.label.toLowerCase())),
+        );
+        if (candidates.length > 0) {
+          candidates.sort(
+            (a, b) =>
+              Math.abs(a.label.length - targetDesc.length) -
+              Math.abs(b.label.length - targetDesc.length),
+          );
+          matched = candidates[0];
+        }
+      }
+      return {
+        action: 'RIGHT_CLICK',
+        targetIndex: matched?.index,
+      };
+    }
+
     const clickMatch = trimmed.match(/^(?:click(?:\s+on)?|tap)\s+["']?(.+?)["']?$/i);
     if (clickMatch) {
       const targetDesc = clickMatch[1]!.trim();
@@ -191,14 +224,21 @@ export class DesktopActEngine {
   }
 
   async executeDecision(decision: MicroDecision, elements: IndexedElement[]): Promise<void> {
-    if (decision.action === 'CLICK') {
+    if (decision.action === 'CLICK' || decision.action === 'RIGHT_CLICK') {
       if (decision.targetIndex !== undefined) {
         const el = elements.find((e) => e.index === decision.targetIndex);
         if (el) {
           const cx = Math.round(el.bounds[0] + el.bounds[2] / 2);
           const cy = Math.round(el.bounds[1] + el.bounds[3] / 2);
-          const script = `tell application "System Events"\n  click at {${cx}, ${cy}}\nend tell`;
-          this.driver.exec('osascript', ['-e', script]);
+          if (decision.action === 'RIGHT_CLICK') {
+            await this.driver.clickAt(cx, cy, 'right');
+          } else {
+            const script = `tell application "System Events"\n  click at {${cx}, ${cy}}\nend tell`;
+            const res = this.driver.exec('osascript', ['-e', script]);
+            if (res.status !== 0 && typeof this.driver.clickAt === 'function') {
+              await this.driver.clickAt(cx, cy, 'left');
+            }
+          }
         }
       }
     } else if (decision.action === 'TYPE_TEXT') {
@@ -208,13 +248,19 @@ export class DesktopActEngine {
           const cx = Math.round(el.bounds[0] + el.bounds[2] / 2);
           const cy = Math.round(el.bounds[1] + el.bounds[3] / 2);
           const clickScript = `tell application "System Events"\n  click at {${cx}, ${cy}}\nend tell`;
-          this.driver.exec('osascript', ['-e', clickScript]);
+          const res = this.driver.exec('osascript', ['-e', clickScript]);
+          if (res.status !== 0 && typeof this.driver.clickAt === 'function') {
+            await this.driver.clickAt(cx, cy, 'left');
+          }
         }
       }
       if (decision.text !== undefined) {
         const escaped = escapeAppleScript(decision.text);
         const script = `tell application "System Events"\n  keystroke "${escaped}"\nend tell`;
-        this.driver.exec('osascript', ['-e', script]);
+        const res = this.driver.exec('osascript', ['-e', script]);
+        if (res.status !== 0 && typeof this.driver.typeText === 'function') {
+          await this.driver.typeText(decision.text);
+        }
       }
     } else if (decision.action === 'KEY') {
       if (decision.key) {
