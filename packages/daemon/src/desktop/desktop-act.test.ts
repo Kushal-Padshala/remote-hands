@@ -355,4 +355,81 @@ describe('DesktopActEngine', () => {
     expect(decision.targetIndex).toBe(1);
     expect(execMock).toHaveBeenCalledWith('osascript', ['-e', expect.stringContaining('click at {30, 20}')]);
   });
+
+  it('prioritizes direct AXPress over coordinate click when appName is provided and element has AXButton role', async () => {
+    const execMock = vi.fn().mockReturnValue({ stdout: '{"success":true}\n', stderr: '', status: 0 });
+    const engine = new DesktopActEngine({ exec: execMock });
+    const elements: IndexedElement[] = [
+      { index: 1, role: 'AXButton', label: 'Submit', bounds: [100, 200, 80, 40] },
+    ];
+    await engine.executeDecision({ action: 'CLICK', targetIndex: 1 }, elements, 'Bambu Studio');
+    expect(execMock).toHaveBeenCalledWith('swift', expect.arrayContaining(['-e', expect.stringContaining('AXUIElementPerformAction')]));
+    expect(execMock).not.toHaveBeenCalledWith('osascript', expect.anything());
+  });
+
+  it('supports direct AXPress for AXMenuItem, AXCheckBox, and AXRadioButton', async () => {
+    const execMock = vi.fn().mockReturnValue({ stdout: '{"success":true}\n', stderr: '', status: 0 });
+    const engine = new DesktopActEngine({ exec: execMock });
+    const roles = ['AXMenuItem', 'AXCheckBox', 'AXRadioButton'];
+    for (let i = 0; i < roles.length; i++) {
+      execMock.mockClear();
+      const elements: IndexedElement[] = [
+        { index: i + 1, role: roles[i]!, label: `Item ${i}`, bounds: [10, 10, 50, 20] },
+      ];
+      await engine.executeDecision({ action: 'CLICK', targetIndex: i + 1 }, elements, 'App');
+      expect(execMock).toHaveBeenCalledWith('swift', expect.arrayContaining(['-e', expect.stringContaining('AXUIElementPerformAction')]));
+      expect(execMock).not.toHaveBeenCalledWith('osascript', expect.anything());
+    }
+  });
+
+  it('falls back to coordinate click when performAxAction returns false', async () => {
+    const execMock = vi.fn().mockImplementation((cmd: string) => {
+      if (cmd === 'swift') {
+        return { stdout: '{"success":false}\n', stderr: '', status: 0 };
+      }
+      return { stdout: '', stderr: '', status: 0 };
+    });
+    const engine = new DesktopActEngine({ exec: execMock });
+    const elements: IndexedElement[] = [
+      { index: 1, role: 'AXButton', label: 'Submit', bounds: [100, 200, 80, 40] },
+    ];
+    await engine.executeDecision({ action: 'CLICK', targetIndex: 1 }, elements, 'Bambu Studio');
+    expect(execMock).toHaveBeenCalledWith('swift', expect.arrayContaining(['-e', expect.stringContaining('AXUIElementPerformAction')]));
+    expect(execMock).toHaveBeenCalledWith('osascript', ['-e', expect.stringContaining('click at {140, 220}')]);
+  });
+
+  it('falls back to coordinate click when appName is not provided', async () => {
+    const execMock = vi.fn().mockReturnValue({ stdout: '', stderr: '', status: 0 });
+    const engine = new DesktopActEngine({ exec: execMock });
+    const elements: IndexedElement[] = [
+      { index: 1, role: 'AXButton', label: 'Submit', bounds: [100, 200, 80, 40] },
+    ];
+    await engine.executeDecision({ action: 'CLICK', targetIndex: 1 }, elements);
+    expect(execMock).not.toHaveBeenCalledWith('swift', expect.anything());
+    expect(execMock).toHaveBeenCalledWith('osascript', ['-e', expect.stringContaining('click at {140, 220}')]);
+  });
+
+  it('falls back to coordinate click when element role is non-interactive for AXPress', async () => {
+    const execMock = vi.fn().mockReturnValue({ stdout: '', stderr: '', status: 0 });
+    const engine = new DesktopActEngine({ exec: execMock });
+    const elements: IndexedElement[] = [
+      { index: 1, role: 'AXStaticText', label: 'Text', bounds: [100, 200, 80, 40] },
+    ];
+    await engine.executeDecision({ action: 'CLICK', targetIndex: 1 }, elements, 'Bambu Studio');
+    expect(execMock).not.toHaveBeenCalledWith('swift', expect.anything());
+    expect(execMock).toHaveBeenCalledWith('osascript', ['-e', expect.stringContaining('click at {140, 220}')]);
+  });
+
+  it('passes appName from act method to executeDecision', async () => {
+    const execMock = vi.fn().mockReturnValue({ stdout: '{"success":true}\n', stderr: '', status: 0 });
+    const engine = new DesktopActEngine({ exec: execMock });
+    const elements: IndexedElement[] = [
+      { index: 1, role: 'AXButton', label: 'Save', bounds: [10, 10, 40, 20] },
+    ];
+    const decision = await engine.act('Click Save', elements, 'TextEdit');
+    expect(decision.action).toBe('CLICK');
+    expect(decision.targetIndex).toBe(1);
+    expect(execMock).toHaveBeenCalledWith('swift', expect.arrayContaining(['-e', expect.stringContaining('TextEdit')]));
+    expect(execMock).not.toHaveBeenCalledWith('osascript', expect.anything());
+  });
 });

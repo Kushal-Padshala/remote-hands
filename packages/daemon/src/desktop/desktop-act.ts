@@ -1,5 +1,6 @@
 import type { IndexedElement } from './ax-walker.js';
 import { MacOsDriver, type ExecFunction } from './macos-driver.js';
+import { performAxAction } from './ax-actions.js';
 
 export type MicroActionType = 'CLICK' | 'RIGHT_CLICK' | 'TYPE_TEXT' | 'KEY' | 'DONE';
 
@@ -223,11 +224,21 @@ export class DesktopActEngine {
     return { action: 'DONE' };
   }
 
-  async executeDecision(decision: MicroDecision, elements: IndexedElement[]): Promise<void> {
+  async executeDecision(decision: MicroDecision, elements: IndexedElement[], appName?: string): Promise<void> {
     if (decision.action === 'CLICK' || decision.action === 'RIGHT_CLICK') {
       if (decision.targetIndex !== undefined) {
         const el = elements.find((e) => e.index === decision.targetIndex);
         if (el) {
+          if (
+            appName &&
+            decision.action === 'CLICK' &&
+            (el.role === 'AXButton' || el.role === 'AXMenuItem' || el.role === 'AXCheckBox' || el.role === 'AXRadioButton')
+          ) {
+            const axSuccess = await performAxAction(appName, el.index, 'AXPress', this.driver.exec);
+            if (axSuccess) {
+              return;
+            }
+          }
           const cx = Math.round(el.bounds[0] + el.bounds[2] / 2);
           const cy = Math.round(el.bounds[1] + el.bounds[3] / 2);
           if (decision.action === 'RIGHT_CLICK') {
@@ -308,9 +319,9 @@ export class DesktopActEngine {
     }
   }
 
-  async act(goal: string, elements: IndexedElement[]): Promise<MicroDecision> {
+  async act(goal: string, elements: IndexedElement[], appName?: string): Promise<MicroDecision> {
     const decision = this.matchHeuristic(goal, elements);
-    await this.executeDecision(decision, elements);
+    await this.executeDecision(decision, elements, appName);
     return decision;
   }
 }
