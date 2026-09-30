@@ -43,6 +43,14 @@ Chrome is pre-launched and authenticated with the user's primary personal profil
 - If the required service or URL is already open in any window or tab, focus that existing tab directly in-place.
 - Never steal window focus unnecessarily; keep user workflows uninterrupted.
 - ZERO MOUSE MOVEMENT: `rh browser click <index>` and `rh browser type <index>` interact directly via CDP or native Accessibility without moving the physical mouse pointer. Never write ad-hoc Swift or Python scripts (such as `CGEvent`, `screencapture`, `pyautogui`, `Quartz`).
+- ZERO SCREENSHOTS: All web automation runs on structured DOM accessibility trees. Never take screenshots or write image recognition scripts.
+
+### Jev Ultrafast Decision Policy
+- **One operation per cycle:** Advance the user's goal from the CURRENT page with the single best operation.
+- **Page text context:** Read the page text returned by `rh browser snapshot` for state and questions; do not re-read or guess.
+- **Do not repeat satisfied steps:** If a radio button or checkbox is already `[checked]`, do NOT click it again.
+- **Fill required fields before submitting:** Type values into required inputs before clicking Next or Submit.
+- **Fast submission:** When Next, Continue, Search, or Submit is visible and inputs are ready, click it immediately.
 
 ### Browser Workflow
 

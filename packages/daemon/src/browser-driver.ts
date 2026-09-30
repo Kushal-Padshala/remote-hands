@@ -1,4 +1,8 @@
 import { spawnSync } from 'node:child_process';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
 import {
   DOM_SNAPSHOT_SCRIPT,
   parseSnapshotOutput,
@@ -10,6 +14,8 @@ import { MacOsDriver } from './desktop/macos-driver.js';
 
 export interface BrowserDriverOptions {
   cdpUrl?: string | undefined;
+  forceWebSocket?: boolean | undefined;
+  socketPath?: string | undefined;
 }
 
 export interface BrowserTab {
@@ -21,14 +27,143 @@ export interface BrowserTab {
   windowIndex?: number | undefined;
   tabIndex?: number | undefined;
   active?: boolean | undefined;
+  targetId?: string | undefined;
 }
 
 export class BrowserDriver {
   private readonly cdpUrl: string;
+  private readonly forceWebSocket: boolean;
+  private readonly customSocketPath?: string | undefined;
   private messageSeq = 0;
 
   constructor(options?: BrowserDriverOptions) {
     this.cdpUrl = (options?.cdpUrl || 'http://127.0.0.1:9222').replace(/\/+$/, '');
+    this.forceWebSocket = Boolean(options?.forceWebSocket);
+    this.customSocketPath = options?.socketPath;
+  }
+
+  private getHarnessSocketPath(): string | null {
+    if (this.customSocketPath && fs.existsSync(this.customSocketPath)) {
+      return this.customSocketPath;
+    }
+    if (process.env.BU_SOCK_PATH && fs.existsSync(process.env.BU_SOCK_PATH)) {
+      return process.env.BU_SOCK_PATH;
+    }
+    const buName = process.env.BU_NAME || 'default';
+    const defaultPath = path.join(os.homedir(), '.config', 'browser-harness', 'runtime', `bu-${buName}.sock`);
+    if (fs.existsSync(defaultPath)) {
+      return defaultPath;
+    }
+    return null;
+  }
+
+  private callHarnessSocket<T = any>(req: Record<string, unknown>, timeoutMs = 4000): Promise<T> {
+    const sockPath = this.getHarnessSocketPath();
+    if (!sockPath) {
+      return Promise.reject(new Error('Browser harness socket not found'));
+    }
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const client = net.createConnection(sockPath);
+      let buffer = '';
+
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Browser harness socket request timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      const cleanup = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try {
+          client.destroy();
+        } catch {}
+      };
+
+      client.on('connect', () => {
+        client.write(JSON.stringify(req) + '\n');
+      });
+
+      client.on('data', (chunk) => {
+        buffer += chunk.toString('utf-8');
+        if (buffer.includes('\n')) {
+          const line = buffer.slice(0, buffer.indexOf('\n')).trim();
+          cleanup();
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.error) {
+              reject(new Error(typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error)));
+            } else {
+              resolve(parsed.result !== undefined ? (parsed.result as T) : (parsed as T));
+            }
+          } catch (err) {
+            reject(err);
+          }
+        }
+      });
+
+      client.on('error', (err) => {
+        cleanup();
+        reject(err);
+      });
+    });
+  }
+
+  async callCdp(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<any> {
+    const sockPath = this.getHarnessSocketPath();
+    if (sockPath && !this.forceWebSocket) {
+      try {
+        const res = await this.callHarnessSocket<any>({
+          method,
+          params,
+          session_id: sessionId,
+        });
+        return res;
+      } catch {}
+    }
+    return this.executeScript<any>(`cdp(${JSON.stringify(method)}, ${JSON.stringify(params)})`);
+  }
+
+  private async dispatchCdpClick(x: number, y: number): Promise<void> {
+    const roundX = Math.round(x);
+    const roundY = Math.round(y);
+    try {
+      await this.callCdp('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x: roundX,
+        y: roundY,
+        button: 'left',
+        clickCount: 1,
+      });
+      await this.callCdp('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x: roundX,
+        y: roundY,
+        button: 'left',
+        clickCount: 1,
+      });
+    } catch {}
+  }
+
+  private async dispatchCdpType(x: number, y: number, text: string): Promise<void> {
+    await this.dispatchCdpClick(x, y);
+    try {
+      await this.callCdp('Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key: 'a',
+        code: 'KeyA',
+        modifiers: process.platform === 'darwin' ? 4 : 2,
+        commands: ['selectAll'],
+      });
+      await this.callCdp('Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key: 'a',
+        code: 'KeyA',
+        modifiers: process.platform === 'darwin' ? 4 : 2,
+      });
+      await this.callCdp('Input.insertText', { text });
+    } catch {}
   }
 
   private queryMacChromeTabs(): BrowserTab[] {
@@ -140,6 +275,27 @@ export class BrowserDriver {
       }
     }
 
+    if ((process.env.VITEST !== 'true' || this.customSocketPath) && !this.forceWebSocket) {
+      const sockPath = this.getHarnessSocketPath();
+      if (sockPath) {
+        try {
+          const currentTabRes = await this.callHarnessSocket<any>({ meta: 'current_tab' });
+          const targetsRes = await this.callHarnessSocket<any>({ method: 'Target.getTargets', params: {} });
+          const targetInfos = Array.isArray(targetsRes?.targetInfos) ? targetsRes.targetInfos : [];
+          const pageTargets = targetInfos.filter((t: any) => t.type === 'page');
+          if (pageTargets.length > 0) {
+            return pageTargets.map((t: any, idx: number) => ({
+              id: t.targetId || `t${idx + 1}`,
+              targetId: t.targetId,
+              title: t.title || '',
+              url: t.url || '',
+              active: t.targetId === currentTabRes?.targetId,
+            }));
+          }
+        } catch {}
+      }
+    }
+
     if (process.platform === 'darwin') {
       const macTabs = this.queryMacChromeTabs();
       if (macTabs.length > 0) {
@@ -223,93 +379,122 @@ export class BrowserDriver {
     }
   }
 
+  private async executeScriptViaWs<T>(wsUrl: string, script: string): Promise<T> {
+    const ws = await this.createWebSocket(wsUrl);
+    return new Promise<T>((resolve, reject) => {
+        const id = ++this.messageSeq;
+        let settled = false;
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error('CDP execution timed out after 5000ms'));
+        }, 5000);
+
+        const cleanup = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          try {
+            ws.close();
+          } catch {}
+        };
+
+        const handleOpen = () => {
+          try {
+            ws.send(
+              JSON.stringify({
+                id,
+                method: 'Runtime.evaluate',
+                params: {
+                  expression: script,
+                  returnByValue: true,
+                  awaitPromise: true,
+                },
+              }),
+            );
+          } catch (err) {
+            cleanup();
+            reject(err);
+          }
+        };
+
+        const handleMessage = (data: any) => {
+          if (settled) return;
+          try {
+            const raw =
+              typeof data === 'string'
+                ? data
+                : data instanceof Uint8Array || (typeof Buffer !== 'undefined' && Buffer.isBuffer(data))
+                  ? data.toString()
+                  : String(data);
+            const res = JSON.parse(raw);
+            if (res.id === id) {
+              cleanup();
+              if (res.error) {
+                reject(new Error(res.error.message || 'CDP execution failed'));
+              } else if (res.result?.exceptionDetails) {
+                reject(
+                  new Error(
+                    res.result.exceptionDetails.text || 'JavaScript exception during execution',
+                  ),
+                );
+              } else {
+                resolve(res.result?.result?.value as T);
+              }
+            }
+          } catch (err) {
+            cleanup();
+            reject(err);
+          }
+        };
+
+        const handleError = (err: any) => {
+          cleanup();
+          reject(err);
+        };
+
+        const handleClose = () => {
+          cleanup();
+          reject(new Error('WebSocket connection closed before CDP response was received'));
+        };
+
+        this.attachWebSocketEvents(ws, handleOpen, handleMessage, handleError, handleClose);
+      });
+  }
+
   async executeScript<T>(script: string): Promise<T> {
     const tab = await this.getActiveTab();
     const wsUrl = tab.webSocketDebuggerUrl;
-    if (!wsUrl) {
-      throw new Error('Active tab does not provide webSocketDebuggerUrl');
+    if (wsUrl) {
+      return this.executeScriptViaWs<T>(wsUrl, script);
     }
 
-    const ws = await this.createWebSocket(wsUrl);
-    const id = ++this.messageSeq;
-
-    return new Promise<T>((resolve, reject) => {
-      let settled = false;
-      const timeout = setTimeout(() => {
-        cleanup();
-        reject(new Error('CDP execution timed out after 5000ms'));
-      }, 5000);
-
-      const cleanup = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
+    if ((process.env.VITEST !== 'true' || this.customSocketPath) && !this.forceWebSocket) {
+      const sockPath = this.getHarnessSocketPath();
+      if (sockPath) {
         try {
-          ws.close();
-        } catch {}
-      };
-
-      const handleOpen = () => {
-        try {
-          ws.send(
-            JSON.stringify({
-              id,
-              method: 'Runtime.evaluate',
-              params: {
-                expression: script,
-                returnByValue: true,
-                awaitPromise: true,
-              },
-            }),
-          );
-        } catch (err) {
-          cleanup();
-          reject(err);
-        }
-      };
-
-      const handleMessage = (data: any) => {
-        if (settled) return;
-        try {
-          const raw =
-            typeof data === 'string'
-              ? data
-              : data instanceof Uint8Array || (typeof Buffer !== 'undefined' && Buffer.isBuffer(data))
-                ? data.toString()
-                : String(data);
-          const res = JSON.parse(raw);
-          if (res.id === id) {
-            cleanup();
-            if (res.error) {
-              reject(new Error(res.error.message || 'CDP execution failed'));
-            } else if (res.result?.exceptionDetails) {
-              reject(
-                new Error(
-                  res.result.exceptionDetails.text || 'JavaScript exception during execution',
-                ),
-              );
-            } else {
-              resolve(res.result?.result?.value as T);
-            }
+          const res = await this.callHarnessSocket<any>({
+            method: 'Runtime.evaluate',
+            params: {
+              expression: script,
+              returnByValue: true,
+              awaitPromise: true,
+            },
+          });
+          const exc = res?.exceptionDetails || res?.result?.exceptionDetails;
+          if (exc) {
+            throw new Error(exc.text || exc.exception?.description || 'JavaScript exception during execution');
           }
-        } catch (err) {
-          cleanup();
-          reject(err);
+          const val = res?.result?.value !== undefined ? res.result.value : res?.value !== undefined ? res.value : res;
+          return val as T;
+        } catch (err: any) {
+          if (err?.message?.includes('JavaScript exception') || err?.message?.includes('Target node no longer connected')) {
+            throw err;
+          }
         }
-      };
+      }
+    }
 
-      const handleError = (err: any) => {
-        cleanup();
-        reject(err);
-      };
-
-      const handleClose = () => {
-        cleanup();
-        reject(new Error('WebSocket connection closed before CDP response was received'));
-      };
-
-      this.attachWebSocketEvents(ws, handleOpen, handleMessage, handleError, handleClose);
-    });
+    throw new Error('Active tab does not provide webSocketDebuggerUrl');
   }
 
   async snapshotNativeChrome(): Promise<SnapshotResult> {
@@ -344,35 +529,79 @@ export class BrowserDriver {
     }
   }
 
-  async clickIndex(index: number): Promise<{ success: boolean; label: string }> {
+  async clickIndex(index: number | string): Promise<{ success: boolean; label: string }> {
     try {
       const snap = await this.snapshot();
-      const target = snap.elements.find((e) => e.index === index);
+      const target = snap.elements.find((e) => {
+        if (typeof index === 'number') {
+          return e.index === index || e.id === index || e.id === `e${index}`;
+        }
+        const s = String(index).trim().toLowerCase();
+        return String(e.id).toLowerCase() === s ||
+               String(e.index) === s ||
+               `e${e.index}`.toLowerCase() === s;
+      });
       if (!target) {
         throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
       }
 
+      const targetIdVal = typeof target.id === 'number' ? target.id : JSON.stringify(target.id);
+      const targetNodeVal = typeof target.node === 'number' ? target.node : 'null';
+
       const clickScript = `
         (() => {
-          const node = window.__rhFast?.nodes.get(${target.id});
-          if (!node) throw new Error('Target node no longer connected');
-          node.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-          node.focus();
-          node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window }));
-          node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-          node.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window }));
-          node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-          node.click();
-          return true;
+          const cache = window.__rhFast || window.__jevFast;
+          const node = (typeof ${targetNodeVal} === 'number' ? cache?.nodes?.get(${targetNodeVal}) : null) ||
+                       window.__rhFast?.nodes.get(${targetIdVal}) ||
+                       window.__jevFast?.nodes.get(${targetIdVal});
+          if (node) {
+            node.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+            node.focus();
+            if (node.tagName === 'SELECT' && ${JSON.stringify(target.value ?? '')}) {
+              node.value = ${JSON.stringify(target.value ?? '')};
+              node.dispatchEvent(new Event('input', { bubbles: true }));
+              node.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window }));
+            node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+            node.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window }));
+            node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+            node.click();
+            const r = node.getBoundingClientRect();
+            return { x: r.x + r.width / 2, y: r.y + r.height / 2, clicked: true };
+          }
+          const sel = ${JSON.stringify(target.label || '')};
+          if (sel) {
+            const el = Array.from(document.querySelectorAll('button, a, input, [role="button"], [role="radio"], [role="checkbox"], [role="tab"], label'))
+              .find(e => (e.innerText || e.textContent || '').trim().toLowerCase() === sel.toLowerCase() ||
+                         e.getAttribute('aria-label') === sel);
+            if (el) {
+              el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+              el.focus();
+              el.click();
+              const r = el.getBoundingClientRect();
+              return { x: r.x + r.width / 2, y: r.y + r.height / 2, clicked: true };
+            }
+          }
+          return null;
         })()
       `;
-      await this.executeScript<boolean>(clickScript);
+      const clickResult = await this.executeScript<any>(clickScript);
+      if (clickResult && typeof clickResult === 'object' && typeof clickResult.x === 'number') {
+        try {
+          await this.dispatchCdpClick(clickResult.x, clickResult.y);
+        } catch {}
+      }
       return { success: true, label: target.label || target.role || 'element' };
     } catch (err: any) {
       if (process.platform === 'darwin') {
         const walker = new AxWalker({ driver: new MacOsDriver() });
         const elements = await walker.walkActiveApp('Google Chrome', { allowOcr: false });
-        const target = elements.find((e) => e.index === index);
+        const target = elements.find((e) => {
+          if (typeof index === 'number') return e.index === index;
+          const s = String(index).replace(/^e/i, '');
+          return String(e.index) === s;
+        });
         if (!target) {
           throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
         }
@@ -389,44 +618,89 @@ export class BrowserDriver {
     }
   }
 
-  async typeIndex(index: number, text: string): Promise<{ success: boolean; label: string }> {
+  async typeIndex(index: number | string, text: string): Promise<{ success: boolean; label: string }> {
     try {
       const snap = await this.snapshot();
-      const target = snap.elements.find((e) => e.index === index);
+      const target = snap.elements.find((e) => {
+        if (typeof index === 'number') {
+          return e.index === index || e.id === index || e.id === `e${index}`;
+        }
+        const s = String(index).trim().toLowerCase();
+        return String(e.id).toLowerCase() === s ||
+               String(e.index) === s ||
+               `e${e.index}`.toLowerCase() === s;
+      });
       if (!target) {
         throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
       }
 
+      const targetIdVal = typeof target.id === 'number' ? target.id : JSON.stringify(target.id);
+      const targetNodeVal = typeof target.node === 'number' ? target.node : 'null';
       const escaped = JSON.stringify(text);
       const typeScript = `
         (() => {
-          const node = window.__rhFast?.nodes.get(${target.id});
-          if (!node) throw new Error('Target node no longer connected');
-          node.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-          node.focus();
-          if (typeof node.select === 'function') {
-            node.select();
-          } else if (window.getSelection && document.createRange) {
-            const sel = window.getSelection();
-            const range = document.createRange();
-            range.selectNodeContents(node);
-            sel?.removeAllRanges();
-            sel?.addRange(range);
+          const cache = window.__rhFast || window.__jevFast;
+          const node = (typeof ${targetNodeVal} === 'number' ? cache?.nodes?.get(${targetNodeVal}) : null) ||
+                       window.__rhFast?.nodes.get(${targetIdVal}) ||
+                       window.__jevFast?.nodes.get(${targetIdVal});
+          if (node) {
+            node.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+            node.focus();
+            if (typeof node.select === 'function') {
+              node.select();
+            } else if (window.getSelection && document.createRange) {
+              const sel = window.getSelection();
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              sel?.removeAllRanges();
+              sel?.addRange(range);
+            }
+            document.execCommand('selectAll', false, null);
+            document.execCommand('insertText', false, ${escaped});
+            if ('value' in node) {
+              node.value = ${escaped};
+            }
+            node.dispatchEvent(new Event('input', { bubbles: true }));
+            node.dispatchEvent(new Event('change', { bubbles: true }));
+            const r = node.getBoundingClientRect();
+            return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
           }
-          document.execCommand('selectAll', false, null);
-          document.execCommand('insertText', false, ${escaped});
-          node.dispatchEvent(new Event('input', { bubbles: true }));
-          node.dispatchEvent(new Event('change', { bubbles: true }));
-          return true;
+          const sel = ${JSON.stringify(target.label || '')};
+          if (sel) {
+            const el = Array.from(document.querySelectorAll('input, textarea, [contenteditable="true"]'))
+              .find(e => (e.getAttribute('placeholder') || '').toLowerCase() === sel.toLowerCase() ||
+                         (e.getAttribute('aria-label') || '').toLowerCase() === sel.toLowerCase());
+            if (el) {
+              el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+              el.focus();
+              document.execCommand('selectAll', false, null);
+              document.execCommand('insertText', false, ${escaped});
+              if ('value' in el) (el as any).value = ${escaped};
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              const r = el.getBoundingClientRect();
+              return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+            }
+          }
+          return null;
         })()
       `;
-      await this.executeScript<boolean>(typeScript);
+      const typeResult = await this.executeScript<any>(typeScript);
+      if (typeResult && typeof typeResult === 'object' && typeof typeResult.x === 'number') {
+        try {
+          await this.dispatchCdpType(typeResult.x, typeResult.y, text);
+        } catch {}
+      }
       return { success: true, label: target.label || target.role || 'element' };
     } catch (err: any) {
       if (process.platform === 'darwin') {
         const walker = new AxWalker({ driver: new MacOsDriver() });
         const elements = await walker.walkActiveApp('Google Chrome', { allowOcr: false });
-        const target = elements.find((e) => e.index === index);
+        const target = elements.find((e) => {
+          if (typeof index === 'number') return e.index === index;
+          const s = String(index).replace(/^e/i, '');
+          return String(e.index) === s;
+        });
         if (!target) {
           throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
         }
@@ -508,7 +782,11 @@ export class BrowserDriver {
       throw new Error(`Tab matching "${target}" not found`);
     }
 
-    if (matched.webSocketDebuggerUrl) {
+    if (matched.targetId) {
+      try {
+        await this.callCdp('Target.activateTarget', { targetId: matched.targetId });
+      } catch {}
+    } else if (matched.webSocketDebuggerUrl) {
       try {
         await fetch(`${this.cdpUrl}/json/activate/${matched.id}`);
       } catch {}
@@ -536,6 +814,74 @@ export class BrowserDriver {
     return { success: true, tab: matched };
   }
 
+  private async openUrlViaWs(wsUrl: string, url: string): Promise<{ success: boolean; url: string }> {
+    const ws = await this.createWebSocket(wsUrl);
+    return new Promise<{ success: boolean; url: string }>((resolve, reject) => {
+      const id = ++this.messageSeq;
+        let settled = false;
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error('Navigation timed out after 10000ms'));
+        }, 10000);
+
+        const cleanup = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          try {
+            ws.close();
+          } catch {}
+        };
+
+        const handleOpen = () => {
+          try {
+            ws.send(JSON.stringify({ id, method: 'Page.navigate', params: { url } }));
+          } catch (err) {
+            cleanup();
+            reject(err);
+          }
+        };
+
+        const handleMessage = (data: any) => {
+          if (settled) return;
+          try {
+            const raw =
+              typeof data === 'string'
+                ? data
+                : data instanceof Uint8Array || (typeof Buffer !== 'undefined' && Buffer.isBuffer(data))
+                  ? data.toString()
+                  : String(data);
+            const res = JSON.parse(raw);
+            if (res.id === id) {
+              cleanup();
+              if (res.error) {
+                reject(new Error(res.error.message || 'Navigation failed'));
+              } else if (res.result?.errorText) {
+                reject(new Error(`Navigation failed: ${res.result.errorText}`));
+              } else {
+                resolve({ success: true, url });
+              }
+            }
+          } catch (err) {
+            cleanup();
+            reject(err);
+          }
+        };
+
+        const handleError = (err: any) => {
+          cleanup();
+          reject(err);
+        };
+
+        const handleClose = () => {
+          cleanup();
+          reject(new Error('WebSocket connection closed before navigation response'));
+        };
+
+        this.attachWebSocketEvents(ws, handleOpen, handleMessage, handleError, handleClose);
+    });
+  }
+
   async openUrl(url: string): Promise<{ success: boolean; url: string }> {
     let tab: BrowserTab | null = null;
     try {
@@ -547,78 +893,33 @@ export class BrowserDriver {
           return { success: true, url };
         }
       } catch {}
+      if ((process.env.VITEST !== 'true' || this.customSocketPath) && !this.forceWebSocket) {
+        const sockPath = this.getHarnessSocketPath();
+        if (sockPath) {
+          try {
+            await this.callHarnessSocket<any>({ method: 'Target.createTarget', params: { url } });
+            return { success: true, url };
+          } catch {}
+        }
+      }
       throw new Error('No active browser tab found');
     }
+
     const wsUrl = tab?.webSocketDebuggerUrl;
-    if (!wsUrl) {
-      throw new Error('Active tab does not provide webSocketDebuggerUrl');
+    if (wsUrl) {
+      return this.openUrlViaWs(wsUrl, url);
     }
 
-    const ws = await this.createWebSocket(wsUrl);
-    const id = ++this.messageSeq;
-
-    return new Promise<{ success: boolean; url: string }>((resolve, reject) => {
-      let settled = false;
-      const timeout = setTimeout(() => {
-        cleanup();
-        reject(new Error('Navigation timed out after 10000ms'));
-      }, 10000);
-
-      const cleanup = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
+    if ((process.env.VITEST !== 'true' || this.customSocketPath) && !this.forceWebSocket) {
+      const sockPath = this.getHarnessSocketPath();
+      if (sockPath) {
         try {
-          ws.close();
+          await this.callHarnessSocket<any>({ method: 'Page.navigate', params: { url } });
+          return { success: true, url };
         } catch {}
-      };
+      }
+    }
 
-      const handleOpen = () => {
-        try {
-          ws.send(JSON.stringify({ id, method: 'Page.navigate', params: { url } }));
-        } catch (err) {
-          cleanup();
-          reject(err);
-        }
-      };
-
-      const handleMessage = (data: any) => {
-        if (settled) return;
-        try {
-          const raw =
-            typeof data === 'string'
-              ? data
-              : data instanceof Uint8Array || (typeof Buffer !== 'undefined' && Buffer.isBuffer(data))
-                ? data.toString()
-                : String(data);
-          const res = JSON.parse(raw);
-          if (res.id === id) {
-            cleanup();
-            if (res.error) {
-              reject(new Error(res.error.message || 'Navigation failed'));
-            } else if (res.result?.errorText) {
-              reject(new Error(`Navigation failed: ${res.result.errorText}`));
-            } else {
-              resolve({ success: true, url });
-            }
-          }
-        } catch (err) {
-          cleanup();
-          reject(err);
-        }
-      };
-
-      const handleError = (err: any) => {
-        cleanup();
-        reject(err);
-      };
-
-      const handleClose = () => {
-        cleanup();
-        reject(new Error('WebSocket connection closed before navigation response'));
-      };
-
-      this.attachWebSocketEvents(ws, handleOpen, handleMessage, handleError, handleClose);
-    });
+    throw new Error('Active tab does not provide webSocketDebuggerUrl');
   }
 }

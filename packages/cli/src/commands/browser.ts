@@ -83,15 +83,15 @@ export async function browserCommand(args: string[], context: CommandContext = {
 
   if (subcommand === 'click') {
     const indexArg = subArgs[0];
-    if (!indexArg || !/^\d+$/.test(indexArg)) {
+    if (!indexArg || !/^(?:e)?\d+$/i.test(indexArg)) {
       stderr('Usage: rh browser click <index>');
       return 1;
     }
-    const index = parseInt(indexArg, 10);
+    const index = parseInt(indexArg.replace(/^e/i, ''), 10);
     try {
       const driver = new BrowserDriver({ cdpUrl });
       const res = await driver.clickIndex(index);
-      stdout(`Clicked [${index}] ${res.label}`);
+      stdout(`Clicked [${indexArg}] ${res.label}`);
       return 0;
     } catch (err: any) {
       stderr(err?.message || String(err));
@@ -101,16 +101,16 @@ export async function browserCommand(args: string[], context: CommandContext = {
 
   if (subcommand === 'type') {
     const indexArg = subArgs[0];
-    if (!indexArg || !/^\d+$/.test(indexArg) || subArgs.length < 2) {
+    if (!indexArg || !/^(?:e)?\d+$/i.test(indexArg) || subArgs.length < 2) {
       stderr('Usage: rh browser type <index> <text>');
       return 1;
     }
-    const index = parseInt(indexArg, 10);
+    const index = parseInt(indexArg.replace(/^e/i, ''), 10);
     const textArg = subArgs.slice(1).join(' ');
     try {
       const driver = new BrowserDriver({ cdpUrl });
       const res = await driver.typeIndex(index, textArg);
-      stdout(`Typed "${textArg}" into [${index}] ${res.label}`);
+      stdout(`Typed "${textArg}" into [${indexArg}] ${res.label}`);
       return 0;
     } catch (err: any) {
       stderr(err?.message || String(err));

@@ -220,7 +220,7 @@ export class AxWalker {
       }
     } catch {}
 
-    if (options.allowOcr !== false) {
+    if (options.allowOcr === true) {
       return this.walkVisionOcr(execFunc);
     }
     return [];
