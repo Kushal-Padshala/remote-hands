@@ -616,6 +616,7 @@ describe('desktopCommand', () => {
     const code = await desktopCommand(['ax-action', 'Bambu Studio', '12'], {
       stdout,
       desktopDriver: driverMock as any,
+      walker: { walkActiveApp: vi.fn().mockResolvedValue([]) },
       performAxAction: axMock as any,
     });
     expect(code).toBe(0);
@@ -630,6 +631,7 @@ describe('desktopCommand', () => {
     const code = await desktopCommand(['ax-action', 'Slack', '[5]', 'AXShowMenu'], {
       stdout,
       desktopDriver: driverMock as any,
+      walker: { walkActiveApp: vi.fn().mockResolvedValue([]) },
       performAxAction: axMock as any,
     });
     expect(code).toBe(0);
@@ -661,6 +663,7 @@ describe('desktopCommand', () => {
     const stderr = vi.fn();
     const code = await desktopCommand(['ax-action', 'Slack', '3'], {
       stderr,
+      walker: { walkActiveApp: vi.fn().mockResolvedValue([]) },
       performAxAction: axMock as any,
     });
     expect(code).toBe(1);
@@ -710,4 +713,46 @@ describe('desktopCommand', () => {
     );
     expect(stdout).toHaveBeenCalledWith('Executed AXPress on element [5] in Bambu Studio');
   });
+
+  it('passes targetApp to engine.act when specified at the end of goal', async () => {
+    const mockElements = [
+      { index: 1, role: 'AXButton', label: 'Submit', bounds: [0, 0, 10, 10] },
+    ];
+    const walkerMock = { walkActiveApp: vi.fn().mockResolvedValue(mockElements) };
+    const engineMock = {
+      act: vi.fn().mockResolvedValue({ action: 'CLICK', targetIndex: 1 }),
+    };
+    const stdout = vi.fn();
+    const code = await desktopCommand(['act', 'click', 'Submit', 'in', 'Google Chrome'], {
+      stdout,
+      walker: walkerMock as any,
+      actEngine: engineMock as any,
+    });
+    expect(code).toBe(0);
+    expect(walkerMock.walkActiveApp).toHaveBeenCalledWith('Google Chrome', { allowOcr: false });
+    expect(engineMock.act).toHaveBeenCalledWith('click Submit in Google Chrome', mockElements, 'Google Chrome');
+    expect(stdout).toHaveBeenCalledWith('Executed: CLICK');
+  });
+
+  it('passes app to engine.executeDecision when app name follows index in click command', async () => {
+    const mockElements = [
+      { index: 2, role: 'AXButton', label: 'Save', bounds: [70, 10, 100, 30] },
+    ];
+    const walkerMock = { walkActiveApp: vi.fn().mockResolvedValue(mockElements) };
+    const engineMock = { executeDecision: vi.fn().mockResolvedValue(undefined) };
+    const stdout = vi.fn();
+    const code = await desktopCommand(['click', '2', 'Bambu Studio'], {
+      stdout,
+      walker: walkerMock as any,
+      actEngine: engineMock as any,
+    });
+    expect(code).toBe(0);
+    expect(engineMock.executeDecision).toHaveBeenCalledWith(
+      { action: 'CLICK', targetIndex: 2 },
+      mockElements,
+      'Bambu Studio',
+    );
+    expect(stdout).toHaveBeenCalledWith('Clicked element [2]');
+  });
 });
+

@@ -59,7 +59,7 @@ export async function browserCommand(args: string[], context: CommandContext = {
   const cdpUrl = process.env.BU_CDP_URL || 'http://127.0.0.1:9222';
 
   const ready = await ensureChromeAutomationReady({ headless: isHeadless, cdpUrl });
-  if (!ready) {
+  if (!ready && !(process.platform === 'darwin' && ChromeManager.isSystemChromeRunning())) {
     stderr(`Warning: Chrome CDP at ${cdpUrl} is not responding`);
   }
   const subcommand = cleanArgs[0];

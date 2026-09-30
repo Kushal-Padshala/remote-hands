@@ -445,4 +445,42 @@ describe('DesktopActEngine', () => {
       expect.stringContaining('targetX = 50'),
     ]));
   });
+
+  it('supports direct AXPress for AXLink, AXPopUpButton, and AXTab', async () => {
+    const execMock = vi.fn().mockReturnValue({ stdout: '{"success":true}\n', stderr: '', status: 0 });
+    const engine = new DesktopActEngine({ exec: execMock });
+    const roles = ['AXLink', 'AXPopUpButton', 'AXTab'];
+    for (let i = 0; i < roles.length; i++) {
+      execMock.mockClear();
+      const elements: IndexedElement[] = [
+        { index: i + 1, role: roles[i]!, label: `Control ${i}`, bounds: [20, 20, 60, 25] },
+      ];
+      await engine.executeDecision({ action: 'CLICK', targetIndex: i + 1 }, elements, 'Google Chrome');
+      expect(execMock).toHaveBeenCalledWith('swift', expect.arrayContaining(['-e', expect.stringContaining('AXUIElementPerformAction')]));
+      expect(execMock).not.toHaveBeenCalledWith('osascript', expect.anything());
+    }
+  });
+
+  it('prioritizes interactive role over static text with identical label in matchHeuristic', () => {
+    const engine = new DesktopActEngine();
+    const elements: IndexedElement[] = [
+      { index: 1, role: 'AXStaticText', label: 'Strong Democrat', bounds: [100, 100, 100, 20] },
+      { index: 2, role: 'AXRadioButton', label: 'Strong Democrat', bounds: [80, 100, 20, 20] },
+    ];
+    const decision = engine.matchHeuristic('Click Strong Democrat', elements);
+    expect(decision.action).toBe('CLICK');
+    expect(decision.targetIndex).toBe(2);
+  });
+
+  it('uses setAxElementValue directly for TYPE_TEXT when appName is provided', async () => {
+    const execMock = vi.fn().mockReturnValue({ stdout: '{"success":true}\n', stderr: '', status: 0 });
+    const engine = new DesktopActEngine({ exec: execMock });
+    const elements: IndexedElement[] = [
+      { index: 1, role: 'AXTextField', label: 'Search', bounds: [10, 10, 100, 30] },
+    ];
+    await engine.executeDecision({ action: 'TYPE_TEXT', targetIndex: 1, text: 'Remote Hands' }, elements, 'App');
+    expect(execMock).toHaveBeenCalledWith('swift', expect.arrayContaining(['-e', expect.stringContaining('AXUIElementSetAttributeValue')]));
+    expect(execMock).not.toHaveBeenCalledWith('osascript', expect.anything());
+  });
 });
+

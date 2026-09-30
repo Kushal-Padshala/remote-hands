@@ -42,6 +42,7 @@ Chrome is pre-launched and authenticated with the user's primary personal profil
 - Always inspect existing open tabs before navigating to avoid opening duplicate windows or tabs.
 - If the required service or URL is already open in any window or tab, focus that existing tab directly in-place.
 - Never steal window focus unnecessarily; keep user workflows uninterrupted.
+- ZERO MOUSE MOVEMENT: `rh browser click <index>` and `rh browser type <index>` interact directly via CDP or native Accessibility without moving the physical mouse pointer. Never write ad-hoc Swift or Python scripts (such as `CGEvent`, `screencapture`, `pyautogui`, `Quartz`).
 
 ### Browser Workflow
 
@@ -104,10 +105,10 @@ Control native macOS software using accessibility-driven inspection, native acce
 
 ### Zero Screenshots & Instant Accessibility Mandate
 
-Never capture screenshots or run vision loops for desktop automation. Screen capture is strictly prohibited during autonomous execution. Speak directly to the application layer using Accessibility APIs and native menu commands:
+Never capture screenshots or run vision loops for desktop automation. Screen capture is strictly prohibited during autonomous execution. Never write ad-hoc Swift or Python automation scripts (`CGEvent`, `screencapture`, `pyautogui`, `Quartz`) and never move the physical mouse cursor. Speak directly to the application layer using Accessibility APIs and native menu commands:
 - `rh desktop menu-search <app> "<item>"`: Trigger any application menu item instantly (<5ms)
 - `rh desktop menu-list <app>`: Inspect available native application menus
-- `rh desktop ax-action <app> <index> [action]`: Execute accessibility action directly on a control (e.g. `AXPress`)
+- `rh desktop ax-action <app> <index> [action]`: Execute accessibility action directly on a control (e.g. `AXPress`) with zero mouse movement
 - `rh desktop key <combo>`: Send native keyboard shortcuts
 - `rh desktop snapshot [--no-ocr]`: Fast semantic inspection of the UI element hierarchy (use `--no-ocr` for pure native AX)
 
@@ -251,3 +252,5 @@ rh approve "Post announcement tweet to @account: Launching Remote Hands 2.0" --r
 | "I will click the button for the user when they asked 'where is'." | When asked 'where is' or 'how do I', use `rh guide show` to project an interactive arrow. |
 | "I can post or delete without approval if the prompt said 'do it'." | Irreversible or public actions strictly require `rh approve` before execution. |
 | "The user rejected my approval so I should retry the exact same request." | Read the rejection reason from stderr, revise the content or approach, and re-request approval. |
+| "I should write a Swift or Python script with CGEvent or pyautogui to click." | Strictly prohibited. Never move the physical mouse pointer. Use `rh browser click` for web elements and `rh desktop ax-action` for desktop controls. |
+

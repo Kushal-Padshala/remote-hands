@@ -178,8 +178,41 @@ guard let found = targetEl ?? fallbackEl else {
 }
 
 let action = "${escapedAction}" as CFString
-let res = AXUIElementPerformAction(found, action)
-print("{\\"success\\":\\(res == .success)}")
+var res = AXUIElementPerformAction(found, action)
+if res != .success && action as String == "AXPress" {
+    var cur = found
+    for _ in 0..<4 {
+        var parentVal: AnyObject?
+        if AXUIElementCopyAttributeValue(cur, kAXParentAttribute as CFString, &parentVal) == .success, let p = parentVal {
+            let pEl = p as! AXUIElement
+            var actListVal: CFArray?
+            if AXUIElementCopyActionNames(pEl, &actListVal) == .success, let acts = actListVal as? [String], acts.contains("AXPress") {
+                if AXUIElementPerformAction(pEl, "AXPress" as CFString) == .success {
+                    res = .success
+                    break
+                }
+            }
+            cur = pEl
+        } else {
+            break
+        }
+    }
+}
+if res != .success && action as String == "AXPress" {
+    var chListVal: AnyObject?
+    if AXUIElementCopyAttributeValue(found, kAXChildrenAttribute as CFString, &chListVal) == .success, let chList = chListVal as? [AXUIElement] {
+        for c in chList {
+            var actListVal: CFArray?
+            if AXUIElementCopyActionNames(c, &actListVal) == .success, let acts = actListVal as? [String], acts.contains("AXPress") {
+                if AXUIElementPerformAction(c, "AXPress" as CFString) == .success {
+                    res = .success
+                    break
+                }
+            }
+        }
+    }
+}
+print("{\\"success\\":\(res == .success)}")
 `;
 
   try {
@@ -531,8 +564,19 @@ guard let found = targetEl ?? fallbackEl else {
 }
 
 let val = "${escapedValue}" as CFTypeRef
-let res = AXUIElementSetAttributeValue(found, kAXValueAttribute as CFString, val)
-print("{\\"success\\":\\(res == .success)}")
+var res = AXUIElementSetAttributeValue(found, kAXValueAttribute as CFString, val)
+if res != .success {
+    var childrenVal: AnyObject?
+    if AXUIElementCopyAttributeValue(found, kAXChildrenAttribute as CFString, &childrenVal) == .success, let children = childrenVal as? [AXUIElement] {
+        for c in children {
+            if AXUIElementSetAttributeValue(c, kAXValueAttribute as CFString, val) == .success {
+                res = .success
+                break
+            }
+        }
+    }
+}
+print("{\\"success\\":\(res == .success)}")
 `;
 
   try {

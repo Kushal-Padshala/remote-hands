@@ -191,16 +191,19 @@ export async function desktopCommand(
         return 0;
       }
 
-      const indexMatch = target.match(/^\[?(\d+)\]?$/);
+      const indexMatch = target.match(/^\[?(\d+)\]?(?:\s+(.+))?$/);
       if (indexMatch && indexMatch[1]) {
         const targetIndex = parseInt(indexMatch[1], 10);
-        const elements = await walker.walkActiveApp(undefined, { allowOcr: false });
+        const appArg = indexMatch[2]?.trim() || undefined;
+        const elements = await walker.walkActiveApp(appArg, { allowOcr: false });
         const el = elements.find((e) => e.index === targetIndex);
         if (!el && !context.actEngine) {
           stderr(`Element [${targetIndex}] not found`);
           return 1;
         }
-        await engine.executeDecision({ action: isRight ? 'RIGHT_CLICK' : 'CLICK', targetIndex }, elements);
+        await (appArg
+          ? engine.executeDecision({ action: isRight ? 'RIGHT_CLICK' : 'CLICK', targetIndex }, elements, appArg)
+          : engine.executeDecision({ action: isRight ? 'RIGHT_CLICK' : 'CLICK', targetIndex }, elements));
         stdout(`${isRight ? 'Right-clicked' : 'Clicked'} element [${targetIndex}]`);
         return 0;
       }
@@ -332,7 +335,9 @@ export async function desktopCommand(
         stderr('Missing goal. Usage: rh desktop act <goal>');
         return 1;
       }
-      const appMatch = goal.match(/(?:in|on)\s+["']?([A-Za-z0-9\s]+?)["']?(?:\s*,\s*|\s+(?:select|click|right|type|press)\b)/i);
+      const appMatch =
+        goal.match(/(?:in|on)\s+["']?([A-Za-z0-9\s]+?)["']?(?:\s*,\s*|\s+(?:select|click|right|type|press)\b)/i) ||
+        goal.match(/\b(?:in|on)\s+["']?([A-Za-z0-9\s]+?)["']?$/i);
       const targetApp = appMatch && appMatch[1] ? appMatch[1].trim() : undefined;
       if (targetApp && typeof driver.focusWindow === 'function') {
         try {

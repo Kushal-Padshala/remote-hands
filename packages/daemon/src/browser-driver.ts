@@ -4,6 +4,9 @@ import {
   parseSnapshotOutput,
   type SnapshotResult,
 } from './browser-snapshot.js';
+import { AxWalker } from './desktop/ax-walker.js';
+import { performAxAction, setAxElementValue } from './desktop/ax-actions.js';
+import { MacOsDriver } from './desktop/macos-driver.js';
 
 export interface BrowserDriverOptions {
   cdpUrl?: string | undefined;
@@ -108,26 +111,31 @@ export class BrowserDriver {
     try {
       const res = await fetch(`${this.cdpUrl}/json`);
       if (!res.ok) {
-        throw new Error(`Failed to list CDP targets: ${res.statusText}`);
+        if (res.status === 404 || res.statusText === 'Not Found') {
+          cdpError = new Error(`Failed to list CDP targets: ${res.statusText}`);
+        } else {
+          throw new Error(`Failed to list CDP targets: ${res.statusText}`);
+        }
+      } else {
+        const data = (await res.json()) as Array<Record<string, unknown>>;
+        const cdpTabs = data
+          .filter((t) => t.type === 'page')
+          .map((t) => {
+            const tab: BrowserTab = {
+              id: String(t.id || ''),
+              title: String(t.title || ''),
+              url: String(t.url || ''),
+            };
+            if (typeof t.webSocketDebuggerUrl === 'string') {
+              tab.webSocketDebuggerUrl = t.webSocketDebuggerUrl;
+            }
+            return tab;
+          });
+        return cdpTabs;
       }
-      const data = (await res.json()) as Array<Record<string, unknown>>;
-      const cdpTabs = data
-        .filter((t) => t.type === 'page')
-        .map((t) => {
-          const tab: BrowserTab = {
-            id: String(t.id || ''),
-            title: String(t.title || ''),
-            url: String(t.url || ''),
-          };
-          if (typeof t.webSocketDebuggerUrl === 'string') {
-            tab.webSocketDebuggerUrl = t.webSocketDebuggerUrl;
-          }
-          return tab;
-        });
-      return cdpTabs;
     } catch (err: any) {
       cdpError = err;
-      if (err.message && err.message.startsWith('Failed to list CDP targets:')) {
+      if (err.message && err.message.startsWith('Failed to list CDP targets:') && !err.message.includes('Not Found')) {
         throw err;
       }
     }
@@ -304,68 +312,145 @@ export class BrowserDriver {
     });
   }
 
+  async snapshotNativeChrome(): Promise<SnapshotResult> {
+    const walker = new AxWalker({ driver: new MacOsDriver() });
+    const elements = await walker.walkActiveApp('Google Chrome', { allowOcr: false });
+    const activeTab = this.queryFrontmostActiveTabAppleScript();
+    const mapped = elements.map((e) => ({
+      index: e.index,
+      id: e.index,
+      role: e.role,
+      label: e.label,
+      tag: e.role,
+    }));
+    const rawText = mapped.map((e) => `[${e.index}] ${e.role} "${e.label}"`).join('\n');
+    return {
+      url: activeTab?.url || '',
+      title: activeTab?.title || 'Google Chrome',
+      elements: mapped,
+      formattedTable: rawText,
+    };
+  }
+
   async snapshot(): Promise<SnapshotResult> {
-    const raw = await this.executeScript<unknown>(DOM_SNAPSHOT_SCRIPT);
-    return parseSnapshotOutput(raw);
+    try {
+      const raw = await this.executeScript<unknown>(DOM_SNAPSHOT_SCRIPT);
+      return parseSnapshotOutput(raw);
+    } catch (err) {
+      if (process.platform === 'darwin') {
+        return this.snapshotNativeChrome();
+      }
+      throw err;
+    }
   }
 
   async clickIndex(index: number): Promise<{ success: boolean; label: string }> {
-    const snap = await this.snapshot();
-    const target = snap.elements.find((e) => e.index === index);
-    if (!target) {
-      throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
-    }
+    try {
+      const snap = await this.snapshot();
+      const target = snap.elements.find((e) => e.index === index);
+      if (!target) {
+        throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
+      }
 
-    const clickScript = `
-      (() => {
-        const node = window.__rhFast?.nodes.get(${target.id});
-        if (!node) throw new Error('Target node no longer connected');
-        node.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-        node.focus();
-        node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window }));
-        node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-        node.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window }));
-        node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-        node.click();
-        return true;
-      })()
-    `;
-    await this.executeScript<boolean>(clickScript);
-    return { success: true, label: target.label || target.role || 'element' };
+      const clickScript = `
+        (() => {
+          const node = window.__rhFast?.nodes.get(${target.id});
+          if (!node) throw new Error('Target node no longer connected');
+          node.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+          node.focus();
+          node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window }));
+          node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+          node.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window }));
+          node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+          node.click();
+          return true;
+        })()
+      `;
+      await this.executeScript<boolean>(clickScript);
+      return { success: true, label: target.label || target.role || 'element' };
+    } catch (err: any) {
+      if (process.platform === 'darwin') {
+        const walker = new AxWalker({ driver: new MacOsDriver() });
+        const elements = await walker.walkActiveApp('Google Chrome', { allowOcr: false });
+        const target = elements.find((e) => e.index === index);
+        if (!target) {
+          throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
+        }
+        const success = await performAxAction(
+          'Google Chrome',
+          { index: target.index, bounds: target.bounds, role: target.role, label: target.label },
+          'AXPress',
+        );
+        if (success) {
+          return { success: true, label: target.label || target.role || 'element' };
+        }
+      }
+      throw err;
+    }
   }
 
   async typeIndex(index: number, text: string): Promise<{ success: boolean; label: string }> {
-    const snap = await this.snapshot();
-    const target = snap.elements.find((e) => e.index === index);
-    if (!target) {
-      throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
-    }
+    try {
+      const snap = await this.snapshot();
+      const target = snap.elements.find((e) => e.index === index);
+      if (!target) {
+        throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
+      }
 
-    const escaped = JSON.stringify(text);
-    const typeScript = `
-      (() => {
-        const node = window.__rhFast?.nodes.get(${target.id});
-        if (!node) throw new Error('Target node no longer connected');
-        node.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-        node.focus();
-        if (typeof node.select === 'function') {
-          node.select();
-        } else if (window.getSelection && document.createRange) {
-          const sel = window.getSelection();
-          const range = document.createRange();
-          range.selectNodeContents(node);
-          sel?.removeAllRanges();
-          sel?.addRange(range);
+      const escaped = JSON.stringify(text);
+      const typeScript = `
+        (() => {
+          const node = window.__rhFast?.nodes.get(${target.id});
+          if (!node) throw new Error('Target node no longer connected');
+          node.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+          node.focus();
+          if (typeof node.select === 'function') {
+            node.select();
+          } else if (window.getSelection && document.createRange) {
+            const sel = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+          }
+          document.execCommand('selectAll', false, null);
+          document.execCommand('insertText', false, ${escaped});
+          node.dispatchEvent(new Event('input', { bubbles: true }));
+          node.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        })()
+      `;
+      await this.executeScript<boolean>(typeScript);
+      return { success: true, label: target.label || target.role || 'element' };
+    } catch (err: any) {
+      if (process.platform === 'darwin') {
+        const walker = new AxWalker({ driver: new MacOsDriver() });
+        const elements = await walker.walkActiveApp('Google Chrome', { allowOcr: false });
+        const target = elements.find((e) => e.index === index);
+        if (!target) {
+          throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
         }
-        document.execCommand('selectAll', false, null);
-        document.execCommand('insertText', false, ${escaped});
-        node.dispatchEvent(new Event('input', { bubbles: true }));
-        node.dispatchEvent(new Event('change', { bubbles: true }));
-        return true;
-      })()
-    `;
-    await this.executeScript<boolean>(typeScript);
-    return { success: true, label: target.label || target.role || 'element' };
+        const success = await setAxElementValue(
+          'Google Chrome',
+          { index: target.index, bounds: target.bounds, role: target.role, label: target.label },
+          text,
+        );
+        if (success) {
+          return { success: true, label: target.label || target.role || 'element' };
+        }
+        const pressSuccess = await performAxAction(
+          'Google Chrome',
+          { index: target.index, bounds: target.bounds, role: target.role, label: target.label },
+          'AXPress',
+        );
+        if (pressSuccess) {
+          const driver = new MacOsDriver();
+          await driver.typeText(text);
+          return { success: true, label: target.label || target.role || 'element' };
+        }
+      }
+      throw err;
+    }
   }
 
   async findTab(query: string): Promise<BrowserTab | undefined> {

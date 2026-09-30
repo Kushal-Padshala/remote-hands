@@ -1,6 +1,6 @@
 import type { IndexedElement } from './ax-walker.js';
 import { MacOsDriver, type ExecFunction } from './macos-driver.js';
-import { performAxAction } from './ax-actions.js';
+import { performAxAction, setAxElementValue } from './ax-actions.js';
 
 export type MicroActionType = 'CLICK' | 'RIGHT_CLICK' | 'TYPE_TEXT' | 'KEY' | 'DONE';
 
@@ -189,7 +189,22 @@ export class DesktopActEngine {
         };
       }
       const lowerTarget = targetDesc.toLowerCase();
-      let matched = elements.find((e) => e.label.toLowerCase() === lowerTarget);
+      const interactiveRoles = new Set([
+        'AXButton',
+        'AXMenuItem',
+        'AXCheckBox',
+        'AXRadioButton',
+        'AXLink',
+        'AXPopUpButton',
+        'AXTab',
+        'AXTextField',
+        'AXTextArea',
+        'AXComboBox',
+        'AXCell',
+        'AXRow',
+      ]);
+      let matched = elements.find((e) => e.label.toLowerCase() === lowerTarget && interactiveRoles.has(e.role))
+        ?? elements.find((e) => e.label.toLowerCase() === lowerTarget);
       if (!matched) {
         const candidates = elements.filter(
           (e) =>
@@ -197,11 +212,15 @@ export class DesktopActEngine {
             (e.label.toLowerCase().includes(lowerTarget) || lowerTarget.includes(e.label.toLowerCase())),
         );
         if (candidates.length > 0) {
-          candidates.sort(
-            (a, b) =>
+          candidates.sort((a, b) => {
+            const aInt = interactiveRoles.has(a.role) ? 1 : 0;
+            const bInt = interactiveRoles.has(b.role) ? 1 : 0;
+            if (aInt !== bInt) return bInt - aInt;
+            return (
               Math.abs(a.label.length - targetDesc.length) -
-              Math.abs(b.label.length - targetDesc.length),
-          );
+              Math.abs(b.label.length - targetDesc.length)
+            );
+          });
           matched = candidates[0];
         }
       }
@@ -212,9 +231,28 @@ export class DesktopActEngine {
     }
 
     const lowerGoal = trimmed.toLowerCase();
+    const interactiveRoles = new Set([
+      'AXButton',
+      'AXMenuItem',
+      'AXCheckBox',
+      'AXRadioButton',
+      'AXLink',
+      'AXPopUpButton',
+      'AXTab',
+      'AXTextField',
+      'AXTextArea',
+      'AXComboBox',
+      'AXCell',
+      'AXRow',
+    ]);
     const matches = elements.filter((el) => el.label && lowerGoal.includes(el.label.toLowerCase()));
     if (matches.length > 0) {
-      matches.sort((a, b) => b.label.length - a.label.length);
+      matches.sort((a, b) => {
+        const aInt = interactiveRoles.has(a.role) ? 1 : 0;
+        const bInt = interactiveRoles.has(b.role) ? 1 : 0;
+        if (aInt !== bInt) return bInt - aInt;
+        return b.label.length - a.label.length;
+      });
       return {
         action: 'CLICK',
         targetIndex: matches[0]!.index,
@@ -225,6 +263,18 @@ export class DesktopActEngine {
   }
 
   async executeDecision(decision: MicroDecision, elements: IndexedElement[], appName?: string): Promise<void> {
+    const interactiveRoles = new Set([
+      'AXButton',
+      'AXMenuItem',
+      'AXCheckBox',
+      'AXRadioButton',
+      'AXLink',
+      'AXPopUpButton',
+      'AXTab',
+      'AXComboBox',
+      'AXCell',
+      'AXRow',
+    ]);
     if (decision.action === 'CLICK' || decision.action === 'RIGHT_CLICK') {
       if (decision.targetIndex !== undefined) {
         const el = elements.find((e) => e.index === decision.targetIndex);
@@ -232,7 +282,8 @@ export class DesktopActEngine {
           if (
             appName &&
             decision.action === 'CLICK' &&
-            (el.role === 'AXButton' || el.role === 'AXMenuItem' || el.role === 'AXCheckBox' || el.role === 'AXRadioButton')
+            el.role &&
+            interactiveRoles.has(el.role)
           ) {
             const axSuccess = await performAxAction(
               appName,
@@ -261,12 +312,32 @@ export class DesktopActEngine {
       if (decision.targetIndex !== undefined) {
         const el = elements.find((e) => e.index === decision.targetIndex);
         if (el) {
-          const cx = Math.round(el.bounds[0] + el.bounds[2] / 2);
-          const cy = Math.round(el.bounds[1] + el.bounds[3] / 2);
-          const clickScript = `tell application "System Events"\n  click at {${cx}, ${cy}}\nend tell`;
-          const res = this.driver.exec('osascript', ['-e', clickScript]);
-          if (res.status !== 0 && typeof this.driver.clickAt === 'function') {
-            await this.driver.clickAt(cx, cy, 'left');
+          if (appName && decision.text !== undefined) {
+            const setValSuccess = await setAxElementValue(
+              appName,
+              { index: el.index, bounds: el.bounds, role: el.role, label: el.label },
+              decision.text,
+              this.driver.exec,
+            );
+            if (setValSuccess) {
+              return;
+            }
+          }
+          if (appName && interactiveRoles.has(el.role)) {
+            await performAxAction(
+              appName,
+              { index: el.index, bounds: el.bounds, role: el.role, label: el.label },
+              'AXPress',
+              this.driver.exec,
+            );
+          } else {
+            const cx = Math.round(el.bounds[0] + el.bounds[2] / 2);
+            const cy = Math.round(el.bounds[1] + el.bounds[3] / 2);
+            const clickScript = `tell application "System Events"\n  click at {${cx}, ${cy}}\nend tell`;
+            const res = this.driver.exec('osascript', ['-e', clickScript]);
+            if (res.status !== 0 && typeof this.driver.clickAt === 'function') {
+              await this.driver.clickAt(cx, cy, 'left');
+            }
           }
         }
       }
