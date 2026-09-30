@@ -86,7 +86,7 @@ export class AxWalker {
         continue;
       }
       if (!trimmed || trimmed.startsWith('<NSImage') || trimmed.startsWith('<wxCustomRendererObject') || trimmed.includes('RendererObject')) {
-        if (node.role !== 'AXTextField' && node.role !== 'AXTextArea') continue;
+        if (node.role !== 'AXTextField' && node.role !== 'AXTextArea' && node.role !== 'AXRadioButton' && node.role !== 'AXCheckBox') continue;
         if (trimmed.startsWith('<wxCustomRendererObject') || trimmed.includes('RendererObject')) continue;
       }
       if (node.role === 'AXGroup' && !trimmed) continue;
@@ -275,8 +275,9 @@ AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBool
 
 func getAttr(_ el: AXUIElement, _ attr: String) -> String {
     var val: AnyObject?
-    if AXUIElementCopyAttributeValue(el, attr as CFString, &val) == .success, let s = val as? String {
-        return s
+    if AXUIElementCopyAttributeValue(el, attr as CFString, &val) == .success, let v = val {
+        if let s = v as? String { return s }
+        if let n = v as? NSNumber { return n.stringValue }
     }
     return ""
 }
@@ -298,19 +299,37 @@ func getBounds(_ el: AXUIElement) -> (Int, Int, Int, Int)? {
 
 var nodes: [Node] = []
 func walk(el: AXUIElement, depth: Int) {
-    if depth > 24 || nodes.count >= 300 { return }
+    if depth > 64 || nodes.count >= 500 { return }
     var children: AnyObject?
     if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &children) == .success,
        let list = children as? [AXUIElement] {
         for c in list {
-            if nodes.count >= 300 { break }
+            if nodes.count >= 500 { break }
             let role = getAttr(c, kAXRoleAttribute)
             let title = getAttr(c, kAXTitleAttribute)
             let desc = getAttr(c, kAXDescriptionAttribute)
             let val = getAttr(c, kAXValueAttribute)
-            let label = !title.isEmpty ? title : (!desc.isEmpty ? desc : val)
+            var label = !title.isEmpty ? title : (!desc.isEmpty ? desc : (val != "0" && val != "1" ? val : ""))
+            if label.isEmpty {
+                var cChildren: AnyObject?
+                if AXUIElementCopyAttributeValue(c, kAXChildrenAttribute as CFString, &cChildren) == .success,
+                   let cList = cChildren as? [AXUIElement] {
+                    for ch in cList {
+                        let ct = getAttr(ch, kAXTitleAttribute)
+                        let cd = getAttr(ch, kAXDescriptionAttribute)
+                        let cv = getAttr(ch, kAXValueAttribute)
+                        if !ct.isEmpty { label = ct; break }
+                        if !cd.isEmpty { label = cd; break }
+                        if !cv.isEmpty && cv != "0" && cv != "1" { label = cv; break }
+                    }
+                }
+            }
+            if (role == "AXRadioButton" || role == "AXCheckBox") && val == "1" && !label.contains("[checked]") {
+                label = label.isEmpty ? "[checked]" : "\(label) [checked]"
+            }
             if let (x, y, w, h) = getBounds(c), w > 4, h > 4 {
-                if !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || role.contains("Button") || role.contains("Text") || role.contains("Radio") || role.contains("Check") || role.contains("Heading") || role.contains("Area") {
+                let isInteractive = role.contains("Button") || role.contains("Text") || role.contains("Radio") || role.contains("Check") || role.contains("Link") || role.contains("PopUp") || role.contains("Menu") || role.contains("Combo") || role.contains("Tab") || role.contains("Heading") || role.contains("Area")
+                if !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isInteractive {
                     nodes.append(Node(role: role, label: label, x: x, y: y, width: w, height: h))
                 }
             }

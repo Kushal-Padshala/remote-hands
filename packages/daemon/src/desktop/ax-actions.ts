@@ -154,7 +154,7 @@ var targetEl: AXUIElement?
 var fallbackEl: AXUIElement?
 
 func checkElement(_ el: AXUIElement, depth: Int) {
-    if depth > 24 || targetEl != nil { return }
+    if depth > 64 || targetEl != nil { return }
     var children: AnyObject?
     if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &children) == .success,
        let list = children as? [AXUIElement] {
@@ -176,7 +176,8 @@ func checkElement(_ el: AXUIElement, depth: Int) {
                             trimmed.contains("• EXECUTING") || trimmed.contains("• WORKING") ||
                             trimmed.contains("✔ COMPLETE") || trimmed.contains("⏹ STOPPED")
                 let isRender = trimmed.hasPrefix("<wxCustomRendererObject") || trimmed.contains("RendererObject")
-                isAllowed = !isHud && !isRender && (!trimmed.isEmpty || role == "AXTextField" || role == "AXTextArea")
+                let isInteractive = role.contains("Button") || role.contains("Text") || role.contains("Radio") || role.contains("Check") || role.contains("Link") || role.contains("PopUp") || role.contains("Menu") || role.contains("Combo") || role.contains("Tab")
+                isAllowed = !isHud && !isRender && (!trimmed.isEmpty || isInteractive)
             }
             if isAllowed {
                 currentCounter += 1
@@ -233,28 +234,7 @@ guard let found = targetEl ?? fallbackEl else {
 }
 
 let action = "${escapedAction}" as CFString
-var res: AXError = .failure
-if action as String == "AXPress" {
-    if let (x, y, w, h) = getBounds(found), w > 0, h > 0 {
-        let pt = CGPoint(x: Double(x + w / 2), y: Double(y + h / 2))
-        CGWarpMouseCursorPosition(pt)
-        if let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: pt, mouseButton: .left) {
-            move.post(tap: .cghidEventTap)
-        }
-        usleep(40000)
-        if let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: pt, mouseButton: .left),
-           let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: pt, mouseButton: .left) {
-            down.post(tap: .cghidEventTap)
-            usleep(60000)
-            up.post(tap: .cghidEventTap)
-            res = .success
-        }
-    } else {
-        res = AXUIElementPerformAction(found, action)
-    }
-} else {
-    res = AXUIElementPerformAction(found, action)
-}
+var res: AXError = AXUIElementPerformAction(found, action)
 if res != .success && action as String == "AXPress" {
     var cur = found
     for _ in 0..<4 {
@@ -286,6 +266,22 @@ if res != .success && action as String == "AXPress" {
                 }
             }
         }
+    }
+}
+let foundRole = getAttr(found, kAXRoleAttribute)
+if res != .success && (foundRole == "AXRadioButton" || foundRole == "AXCheckBox") {
+    if AXUIElementSetAttributeValue(found, kAXValueAttribute as CFString, 1 as CFTypeRef) == .success {
+        res = .success
+    }
+}
+if res != .success && action as String == "AXPress", let (x, y, w, h) = getBounds(found), w > 0, h > 0 {
+    let pt = CGPoint(x: Double(x + w / 2), y: Double(y + h / 2))
+    if let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: pt, mouseButton: .left),
+       let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: pt, mouseButton: .left) {
+        down.post(tap: .cghidEventTap)
+        usleep(30000)
+        up.post(tap: .cghidEventTap)
+        res = .success
     }
 }
 if res == .success {
@@ -619,7 +615,7 @@ var targetEl: AXUIElement?
 var fallbackEl: AXUIElement?
 
 func checkElement(_ el: AXUIElement, depth: Int) {
-    if depth > 24 || targetEl != nil { return }
+    if depth > 64 || targetEl != nil { return }
     var children: AnyObject?
     if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &children) == .success,
        let list = children as? [AXUIElement] {
@@ -705,6 +701,12 @@ if res != .success {
             }
         }
     }
+}
+if res != .success {
+    _ = AXUIElementSetAttributeValue(found, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    _ = AXUIElementPerformAction(found, "AXPress" as CFString)
+    res = AXUIElementSetAttributeValue(found, kAXValueAttribute as CFString, val)
+}
 if res == .success {
     print("{\\"success\\":true}")
 } else {

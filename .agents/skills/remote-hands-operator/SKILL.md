@@ -48,6 +48,7 @@ Chrome is pre-launched and authenticated with the user's primary personal profil
 ### Jev Ultrafast Decision Policy
 - **One operation per cycle:** Advance the user's goal from the CURRENT page with the single best operation.
 - **Page text context:** Read the page text returned by `rh browser snapshot` for state and questions; do not re-read or guess.
+- **Autonomous survey & form filling:** When asked to complete a survey, form, questionnaire, or multi-step web workflow, drive it autonomously to 100% completion. Inspect each step (`rh browser snapshot`), pick the best answer matching user instructions with `rh browser click <index>`, fill text inputs with `rh browser type <index> "<text>"`, and click Next/Submit until the survey is completely done.
 - **Do not repeat satisfied steps:** If a radio button or checkbox is already `[checked]`, do NOT click it again.
 - **Fill required fields before submitting:** Type values into required inputs before clicking Next or Submit.
 - **Fast submission:** When Next, Continue, Search, or Submit is visible and inputs are ready, click it immediately.
