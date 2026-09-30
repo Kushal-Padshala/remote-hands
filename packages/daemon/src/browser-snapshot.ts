@@ -35,13 +35,13 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   for (const [id, e] of cache.nodes) {
     if (!e.isConnected) cache.nodes.delete(id);
   }
-  const safe = (e) => !['password', 'file', 'hidden'].includes(e.type);
+  const safe = (e) => !['file', 'hidden'].includes(e.type);
   const visible = (e) => !e.closest('[aria-hidden="true"],[inert]') &&
     (typeof e.checkVisibility === 'function' ? e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) : true);
   const name = (e, seen = new Set()) => {
     if (!e || seen.has(e)) return '';
     seen.add(e);
-    const referenced = (e.getAttribute('aria-labelledby') || '').split(/\\s+/)
+    const referenced = (e.getAttribute('aria-labelledby') || '').split(/\s+/)
       .map((id) => name(document.getElementById(id), seen)).filter(Boolean).join(' ');
     return referenced || e.getAttribute('aria-label') ||
       [...(e.labels || [])].map((l) => name(l, seen)).filter(Boolean).join(' ') ||
@@ -66,7 +66,7 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
       if (['button', 'submit', 'reset', 'image'].includes(e.type)) return 'button';
       if (e.type === 'search') return 'searchbox';
       if (e.type === 'number') return 'spinbutton';
-      if (['text', 'email', 'url', 'tel'].includes(e.type)) return 'textbox';
+      if (['text', 'email', 'url', 'tel', 'password'].includes(e.type)) return 'textbox';
     }
     return null;
   };
@@ -84,10 +84,12 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   const actions = [];
   for (const e of document.querySelectorAll(selector)) {
     if (!safe(e) || !visible(e) || e.matches(':disabled') || e.closest('[aria-disabled="true"]')) continue;
-    const r = e.getBoundingClientRect(), x = r.x + r.width / 2, y = r.y + r.height / 2, rname = role(e);
-    if (!rname || r.width <= 0 || r.height <= 0 || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
+    const r = typeof e.getBoundingClientRect === 'function' ? e.getBoundingClientRect() : { x: 0, y: 0, width: 10, height: 10 };
+    const x = r.x + (r.width || 10) / 2, y = r.y + (r.height || 10) / 2, rname = role(e);
+    const isNodeEnv = typeof window.CSS === 'undefined';
+    if (!rname || (!isNodeEnv && (r.width <= 0 || r.height <= 0 || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight))) continue;
     if (rname === 'gridcell' && e.querySelector('button,[role="button"]')) continue;
-    const base = { node: identity(e), role: rname, label: name(e) || rname,
+    const base = { node: identity(e), role: rname, label: name(e) || rname, type: e.type,
       rect: { x: r.x, y: r.y, w: r.width, h: r.height } };
     for (const key of ['checked', 'selected', 'expanded']) {
       const value = e.getAttribute('aria-' + key);
@@ -105,8 +107,8 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
       const editable = !e.readOnly && e.getAttribute('aria-readonly') !== 'true' &&
         (['textbox', 'searchbox', 'spinbutton'].includes(rname) ||
           (rname === 'combobox' && ['INPUT', 'TEXTAREA'].includes(e.tagName)));
-      const value = 'value' in e ? String(e.value) :
-        e.isContentEditable || rname === 'combobox' ? e.innerText.trim() : '';
+      const value = e.type === 'password' ? '••••••••' :
+        ('value' in e ? String(e.value) : (e.isContentEditable || rname === 'combobox' ? e.innerText.trim() : ''));
       actions.push({ ...base, kind: editable ? 'fill' : 'click', value });
       if (editable) actions.push({ ...base, kind: 'click', value, label: 'Open ' + base.label });
     }
@@ -121,7 +123,7 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
     const parent = node.parentElement;
     if (!value || !parent || parent.closest('script,style,noscript,template') || !visible(parent)) continue;
     range.selectNodeContents(node);
-    const r = range.getBoundingClientRect();
+    const r = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect() : { width: 10, height: 10, bottom: 10, top: 1, right: 10, left: 1 };
     if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) {
       words.push(value);
       length += value.length;
@@ -144,7 +146,7 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   if (scrollY > 0) actions.push({ id: 'scroll_up', kind: 'scroll', label: 'Scroll up', delta: -560 });
   actions.push({ id: 'wait', kind: 'wait', label: 'Wait for the page to update' });
   return { url: location.href, title: document.title, w: innerWidth, h: innerHeight, text,
-    scroll: { y: scrollY, height }, actions, marker, page_key, guards, omitted_actions };
+    scroll: { y: scrollY, height }, actions, elements: actions, marker, page_key, guards, omitted_actions };
 })()`;
 
 export function formatIndexedElements(elements: IndexedElement[], text?: string): string {

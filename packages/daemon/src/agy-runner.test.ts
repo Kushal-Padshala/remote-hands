@@ -333,12 +333,13 @@ describe('ProcessAgentRunner with HermesBrain', () => {
 });
 
 describe('remote hands system prompt and reminder', () => {
-  it('includes indexed browser commands and browser-harness in DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT', () => {
+  it('includes indexed browser commands and excludes browser-harness from DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT', () => {
     expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh browser open "<url>"');
     expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh browser snapshot');
     expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh browser click <index>');
     expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain('rh browser type <index> "<text>"');
-    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).toContain("browser-harness <<'PY' ... PY");
+    expect(DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT).not.toContain("browser-harness");
+    expect(DEFAULT_REMOTE_HANDS_REMINDER).not.toContain("browser-harness");
   });
 
   it('includes desktop software automation commands in DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT', () => {

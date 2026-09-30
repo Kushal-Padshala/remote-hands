@@ -195,11 +195,12 @@ export function grantMacAutomationPermissions(): boolean {
     'com.mitchellh.ghostty',
     'com.todesktop.230313mzl4w4u92',
     'com.microsoft.VSCode',
+    'com.apple.osascript',
   ];
 
   const knownPathClients = new Set<string>();
   if (process.execPath) knownPathClients.add(process.execPath);
-  for (const p of ['/usr/local/bin/node', '/opt/homebrew/bin/node']) {
+  for (const p of ['/usr/local/bin/node', '/opt/homebrew/bin/node', '/usr/bin/osascript', '/bin/zsh', '/bin/bash']) {
     if (fs.existsSync(p)) knownPathClients.add(p);
   }
   const rhSpotlight = path.join(os.homedir(), '.remote-hands', 'bin', 'rh-spotlight');

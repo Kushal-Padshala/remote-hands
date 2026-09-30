@@ -28,6 +28,7 @@ export interface AxWalkerOptions {
 
 export interface WalkOptions {
   allowOcr?: boolean;
+  windowTitle?: string | undefined;
 }
 
 function escapeAppleScript(str: string): string {
@@ -232,6 +233,7 @@ export class AxWalker {
     options: WalkOptions = { allowOcr: this.allowOcr },
   ): Promise<IndexedElement[]> {
     const escapedApp = (appName ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const escapedWinTitle = (options.windowTitle ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const swiftScript = `
 import Cocoa
 import ApplicationServices
@@ -247,6 +249,7 @@ struct Node: Codable {
 }
 
 let query = "${escapedApp}"
+let targetWinTitle = "${escapedWinTitle}"
 let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
 let targetApp: NSRunningApplication?
 if !query.isEmpty {
@@ -316,10 +319,26 @@ func walk(el: AXUIElement, depth: Int) {
     }
 }
 
+var wins: AnyObject?
+_ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
+let winList = (wins as? [AXUIElement]) ?? []
+
 var rootWindow: AXUIElement?
-var focVal: AnyObject?
-if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
-    rootWindow = (w as! AXUIElement)
+if !targetWinTitle.isEmpty {
+    for w in winList {
+        let title = getAttr(w, kAXTitleAttribute)
+        if title.localizedCaseInsensitiveContains(targetWinTitle) || targetWinTitle.localizedCaseInsensitiveContains(title) {
+            rootWindow = w
+            break
+        }
+    }
+}
+
+if rootWindow == nil {
+    var focVal: AnyObject?
+    if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
+        rootWindow = (w as! AXUIElement)
+    }
 }
 if rootWindow == nil {
     var mainVal: AnyObject?
@@ -328,17 +347,31 @@ if rootWindow == nil {
     }
 }
 if rootWindow == nil {
-    var wins: AnyObject?
-    _ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
-    if let winList = wins as? [AXUIElement], !winList.isEmpty {
-        rootWindow = winList.first
+    for w in winList {
+        let sub = getAttr(w, kAXSubroleAttribute)
+        let title = getAttr(w, kAXTitleAttribute)
+        if sub == "AXStandardWindow" && !title.isEmpty {
+            rootWindow = w
+            break
+        }
     }
+}
+if rootWindow == nil && !winList.isEmpty {
+    rootWindow = winList.first
 }
 
 if let rw = rootWindow {
     walk(el: rw, depth: 0)
 } else {
     walk(el: appEl, depth: 0)
+}
+
+if nodes.isEmpty && winList.count > 1 {
+    for w in winList {
+        if let rw = rootWindow, CFEqual(w, rw) { continue }
+        walk(el: w, depth: 0)
+        if !nodes.isEmpty { break }
+    }
 }
 if let data = try? JSONEncoder().encode(nodes), let str = String(data: data, encoding: .utf8) {
     print(str)

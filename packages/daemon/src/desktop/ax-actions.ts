@@ -6,6 +6,7 @@ export interface AxElementTarget {
   bounds?: [number, number, number, number];
   role?: string;
   label?: string;
+  windowTitle?: string | undefined;
 }
 
 const defaultExec: ExecFunction = (cmd, args) => {
@@ -34,6 +35,7 @@ export async function performAxAction(
   const targetH = hasBounds ? normTarget.bounds![3] : 0;
   const escapedRole = (normTarget.role ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const escapedLabel = (normTarget.label ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const escapedWinTitle = (normTarget.windowTitle ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
   const swiftScript = `
 import Cocoa
@@ -62,10 +64,28 @@ guard let app = targetApp else {
 let appEl = AXUIElementCreateApplication(app.processIdentifier)
 AXUIElementSetAttributeValue(appEl, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
 AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+_ = app.activate(options: [])
+
+let targetWinTitle = "${escapedWinTitle}"
+var wins: AnyObject?
+_ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
+let winList = (wins as? [AXUIElement]) ?? []
+
 var rootWindow: AXUIElement?
-var focVal: AnyObject?
-if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
-    rootWindow = (w as! AXUIElement)
+if !targetWinTitle.isEmpty {
+    for w in winList {
+        let title = getAttr(w, kAXTitleAttribute)
+        if title.localizedCaseInsensitiveContains(targetWinTitle) || targetWinTitle.localizedCaseInsensitiveContains(title) {
+            rootWindow = w
+            break
+        }
+    }
+}
+if rootWindow == nil {
+    var focVal: AnyObject?
+    if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
+        rootWindow = (w as! AXUIElement)
+    }
 }
 if rootWindow == nil {
     var mainVal: AnyObject?
@@ -74,9 +94,22 @@ if rootWindow == nil {
     }
 }
 if rootWindow == nil {
-    var wins: AnyObject?
-    _ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
-    if let winList = wins as? [AXUIElement], !winList.isEmpty { rootWindow = winList.first }
+    for w in winList {
+        let sub = getAttr(w, kAXSubroleAttribute)
+        let title = getAttr(w, kAXTitleAttribute)
+        if sub == "AXStandardWindow" && !title.isEmpty {
+            rootWindow = w
+            break
+        }
+    }
+}
+if rootWindow == nil && !winList.isEmpty {
+    rootWindow = winList.first
+}
+
+if let rw = rootWindow {
+    AXUIElementSetAttributeValue(rw, kAXMainAttribute as CFString, kCFBooleanTrue)
+    _ = AXUIElementPerformAction(rw, "AXRaise" as CFString)
 }
 
 guard let rw = rootWindow ?? appEl as AXUIElement? else {
@@ -127,41 +160,55 @@ func checkElement(_ el: AXUIElement, depth: Int) {
        let list = children as? [AXUIElement] {
         for c in list {
             if targetEl != nil { return }
-            if hasBounds {
-                if let (x, y, w, h) = getBounds(c) {
-                    if abs(x - targetX) <= 6 && abs(y - targetY) <= 6 && abs(w - targetW) <= 6 && abs(h - targetH) <= 6 {
-                        let role = getAttr(c, kAXRoleAttribute)
-                        if targetRole.isEmpty || role == targetRole || role.contains(targetRole) || targetRole.contains(role) {
-                            targetEl = c
-                            return
-                        }
-                    }
-                }
-            }
-            if let (x, y, w, h) = getBounds(c), w >= 4, h >= 4, x >= -20000, y >= -20000 {
-                let role = getAttr(c, kAXRoleAttribute)
-                let title = getAttr(c, kAXTitleAttribute)
-                let desc = getAttr(c, kAXDescriptionAttribute)
-                let val = getAttr(c, kAXValueAttribute)
-                let label = !title.isEmpty ? title : (!desc.isEmpty ? desc : val)
-                let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+            let role = getAttr(c, kAXRoleAttribute)
+            let title = getAttr(c, kAXTitleAttribute)
+            let desc = getAttr(c, kAXDescriptionAttribute)
+            let val = getAttr(c, kAXValueAttribute)
+            let label = !title.isEmpty ? title : (!desc.isEmpty ? desc : val)
+            let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let bounds = getBounds(c)
+            var isAllowed = false
+            if let (x, y, w, h) = bounds, w >= 4, h >= 4, x >= -20000, y >= -20000 {
                 let isHud = trimmed.contains("Type follow-up instruction") ||
                             trimmed.contains("press Esc to stop") ||
                             trimmed == "⏹ Stop" || trimmed == "✕" ||
                             trimmed.contains("• EXECUTING") || trimmed.contains("• WORKING") ||
                             trimmed.contains("✔ COMPLETE") || trimmed.contains("⏹ STOPPED")
-                let isGroupEmpty = (role == "AXGroup" && trimmed.isEmpty)
                 let isRender = trimmed.hasPrefix("<wxCustomRendererObject") || trimmed.contains("RendererObject")
-                let isAllowed = !isHud && !isGroupEmpty && !isRender && (!trimmed.isEmpty || role.contains("Button") || role.contains("Text"))
-                if isAllowed {
-                    currentCounter += 1
-                    if currentCounter == targetIndex {
-                        if !hasBounds {
+                isAllowed = !isHud && !isRender && (!trimmed.isEmpty || role == "AXTextField" || role == "AXTextArea")
+            }
+            if isAllowed {
+                currentCounter += 1
+                if targetIndex > 0 && currentCounter == targetIndex {
+                    targetEl = c
+                    return
+                }
+            }
+
+            if hasBounds, let (x, y, w, h) = bounds {
+                if abs(x - targetX) <= 6 && abs(y - targetY) <= 6 && abs(w - targetW) <= 6 && abs(h - targetH) <= 6 {
+                    if targetRole.isEmpty || role == targetRole || role.contains(targetRole) || targetRole.contains(role) {
+                        targetEl = c
+                        return
+                    }
+                }
+            }
+
+            if !targetLabel.isEmpty && !trimmed.isEmpty {
+                let roleMatches = targetRole.isEmpty || role == targetRole || role.contains(targetRole) || targetRole.contains(role)
+                if trimmed.caseInsensitiveCompare(targetLabel) == .orderedSame {
+                    if roleMatches {
+                        if targetIndex <= 0 || (isAllowed && currentCounter == targetIndex) {
                             targetEl = c
                             return
-                        } else {
+                        } else if fallbackEl == nil {
                             fallbackEl = c
                         }
+                    }
+                } else if roleMatches && (trimmed.localizedCaseInsensitiveContains(targetLabel) || targetLabel.localizedCaseInsensitiveContains(trimmed)) {
+                    if fallbackEl == nil {
+                        fallbackEl = c
                     }
                 }
             }
@@ -172,13 +219,42 @@ func checkElement(_ el: AXUIElement, depth: Int) {
 
 checkElement(rw, depth: 0)
 
+if targetEl == nil && fallbackEl == nil && winList.count > 1 {
+    for w in winList {
+        if let rw = rootWindow, CFEqual(w, rw) { continue }
+        checkElement(w, depth: 0)
+        if targetEl != nil || fallbackEl != nil { break }
+    }
+}
+
 guard let found = targetEl ?? fallbackEl else {
     print("{\\"success\\":false,\\"error\\":\\"Element not found\\"}")
     exit(0)
 }
 
 let action = "${escapedAction}" as CFString
-var res = AXUIElementPerformAction(found, action)
+var res: AXError = .failure
+if action as String == "AXPress" {
+    if let (x, y, w, h) = getBounds(found), w > 0, h > 0 {
+        let pt = CGPoint(x: Double(x + w / 2), y: Double(y + h / 2))
+        CGWarpMouseCursorPosition(pt)
+        if let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: pt, mouseButton: .left) {
+            move.post(tap: .cghidEventTap)
+        }
+        usleep(40000)
+        if let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: pt, mouseButton: .left),
+           let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: pt, mouseButton: .left) {
+            down.post(tap: .cghidEventTap)
+            usleep(60000)
+            up.post(tap: .cghidEventTap)
+            res = .success
+        }
+    } else {
+        res = AXUIElementPerformAction(found, action)
+    }
+} else {
+    res = AXUIElementPerformAction(found, action)
+}
 if res != .success && action as String == "AXPress" {
     var cur = found
     for _ in 0..<4 {
@@ -212,7 +288,11 @@ if res != .success && action as String == "AXPress" {
         }
     }
 }
-print("{\\"success\\":\(res == .success)}")
+if res == .success {
+    print("{\\"success\\":true}")
+} else {
+    print("{\\"success\\":false}")
+}
 `;
 
   try {
@@ -420,6 +500,7 @@ export async function setAxElementValue(
   const targetH = hasBounds ? normTarget.bounds![3] : 0;
   const escapedRole = (normTarget.role ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const escapedLabel = (normTarget.label ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const escapedWinTitle = (normTarget.windowTitle ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
   const swiftScript = `
 import Cocoa
@@ -448,10 +529,28 @@ guard let app = targetApp else {
 let appEl = AXUIElementCreateApplication(app.processIdentifier)
 AXUIElementSetAttributeValue(appEl, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
 AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+_ = app.activate(options: [])
+
+let targetWinTitle = "${escapedWinTitle}"
+var wins: AnyObject?
+_ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
+let winList = (wins as? [AXUIElement]) ?? []
+
 var rootWindow: AXUIElement?
-var focVal: AnyObject?
-if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
-    rootWindow = (w as! AXUIElement)
+if !targetWinTitle.isEmpty {
+    for w in winList {
+        let title = getAttr(w, kAXTitleAttribute)
+        if title.localizedCaseInsensitiveContains(targetWinTitle) || targetWinTitle.localizedCaseInsensitiveContains(title) {
+            rootWindow = w
+            break
+        }
+    }
+}
+if rootWindow == nil {
+    var focVal: AnyObject?
+    if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal {
+        rootWindow = (w as! AXUIElement)
+    }
 }
 if rootWindow == nil {
     var mainVal: AnyObject?
@@ -460,9 +559,22 @@ if rootWindow == nil {
     }
 }
 if rootWindow == nil {
-    var wins: AnyObject?
-    _ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
-    if let winList = wins as? [AXUIElement], !winList.isEmpty { rootWindow = winList.first }
+    for w in winList {
+        let sub = getAttr(w, kAXSubroleAttribute)
+        let title = getAttr(w, kAXTitleAttribute)
+        if sub == "AXStandardWindow" && !title.isEmpty {
+            rootWindow = w
+            break
+        }
+    }
+}
+if rootWindow == nil && !winList.isEmpty {
+    rootWindow = winList.first
+}
+
+if let rw = rootWindow {
+    AXUIElementSetAttributeValue(rw, kAXMainAttribute as CFString, kCFBooleanTrue)
+    _ = AXUIElementPerformAction(rw, "AXRaise" as CFString)
 }
 
 guard let rw = rootWindow ?? appEl as AXUIElement? else {
@@ -513,10 +625,28 @@ func checkElement(_ el: AXUIElement, depth: Int) {
        let list = children as? [AXUIElement] {
         for c in list {
             if targetEl != nil { return }
+            let role = getAttr(c, kAXRoleAttribute)
+            let title = getAttr(c, kAXTitleAttribute)
+            let desc = getAttr(c, kAXDescriptionAttribute)
+            let val = getAttr(c, kAXValueAttribute)
+            let label = !title.isEmpty ? title : (!desc.isEmpty ? desc : val)
+            let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if !targetLabel.isEmpty && !trimmed.isEmpty {
+                let roleMatches = targetRole.isEmpty || role == targetRole || role.contains(targetRole) || targetRole.contains(role)
+                if trimmed.caseInsensitiveCompare(targetLabel) == .orderedSame {
+                    if roleMatches {
+                        targetEl = c
+                        return
+                    }
+                } else if roleMatches && (trimmed.localizedCaseInsensitiveContains(targetLabel) || targetLabel.localizedCaseInsensitiveContains(trimmed)) {
+                    fallbackEl = c
+                }
+            }
+
             if hasBounds {
                 if let (x, y, w, h) = getBounds(c) {
                     if abs(x - targetX) <= 6 && abs(y - targetY) <= 6 && abs(w - targetW) <= 6 && abs(h - targetH) <= 6 {
-                        let role = getAttr(c, kAXRoleAttribute)
                         if targetRole.isEmpty || role == targetRole || role.contains(targetRole) || targetRole.contains(role) {
                             targetEl = c
                             return
@@ -525,12 +655,6 @@ func checkElement(_ el: AXUIElement, depth: Int) {
                 }
             }
             if let (x, y, w, h) = getBounds(c), w >= 4, h >= 4, x >= -20000, y >= -20000 {
-                let role = getAttr(c, kAXRoleAttribute)
-                let title = getAttr(c, kAXTitleAttribute)
-                let desc = getAttr(c, kAXDescriptionAttribute)
-                let val = getAttr(c, kAXValueAttribute)
-                let label = !title.isEmpty ? title : (!desc.isEmpty ? desc : val)
-                let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
                 let isHud = trimmed.contains("Type follow-up instruction") ||
                             trimmed.contains("press Esc to stop") ||
                             trimmed == "⏹ Stop" || trimmed == "✕" ||
@@ -538,15 +662,13 @@ func checkElement(_ el: AXUIElement, depth: Int) {
                             trimmed.contains("✔ COMPLETE") || trimmed.contains("⏹ STOPPED")
                 let isGroupEmpty = (role == "AXGroup" && trimmed.isEmpty)
                 let isRender = trimmed.hasPrefix("<wxCustomRendererObject") || trimmed.contains("RendererObject")
-                let isAllowed = !isHud && !isGroupEmpty && !isRender && (!trimmed.isEmpty || role.contains("Button") || role.contains("Text"))
+                let isAllowed = !isHud && !isGroupEmpty && !isRender && (!trimmed.isEmpty || role.contains("Button") || role.contains("Text") || role.contains("Radio") || role.contains("Check") || role.contains("Heading") || role.contains("Area"))
                 if isAllowed {
                     currentCounter += 1
                     if currentCounter == targetIndex {
-                        if !hasBounds {
+                        if targetEl == nil {
                             targetEl = c
                             return
-                        } else {
-                            fallbackEl = c
                         }
                     }
                 }
@@ -557,6 +679,14 @@ func checkElement(_ el: AXUIElement, depth: Int) {
 }
 
 checkElement(rw, depth: 0)
+
+if targetEl == nil && fallbackEl == nil && winList.count > 1 {
+    for w in winList {
+        if let rw = rootWindow, CFEqual(w, rw) { continue }
+        checkElement(w, depth: 0)
+        if targetEl != nil || fallbackEl != nil { break }
+    }
+}
 
 guard let found = targetEl ?? fallbackEl else {
     print("{\\"success\\":false}")
@@ -575,8 +705,11 @@ if res != .success {
             }
         }
     }
+if res == .success {
+    print("{\\"success\\":true}")
+} else {
+    print("{\\"success\\":false}")
 }
-print("{\\"success\\":\(res == .success)}")
 `;
 
   try {

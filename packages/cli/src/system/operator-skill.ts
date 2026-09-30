@@ -88,28 +88,11 @@ rh browser click 14
 rh browser type 3 "Antigravity Remote Hands"
 \`\`\`
 
-### Advanced In-Place Browser Scripting
+### Browser Automation Principles
 
-For complex sequences, table scraping, or custom multi-step actions:
-\`\`\`bash
-browser-harness <<'PY'
-print(page_info())
-PY
-\`\`\`
-
-Available pre-imported helpers in \`browser-harness\`:
-- \`page_info()\`
-- \`list_tabs()\`
-- \`switch_tab(id)\`
-- \`goto_url(url)\`
-- \`click_at_xy(x, y)\`
-- \`fill_input(selector, text)\`
-- \`type_text(text)\`
-- \`press_key(key)\`
-- \`scroll(x, y, dy)\`
-- \`js("expression")\`
-- \`wait_for_load()\`
-- \`wait_for_element(selector)\`
+- Strictly use \`rh browser snapshot\`, \`rh browser click <index>\`, and \`rh browser type <index> "<text>"\`.
+- NEVER run external debugger scripts or CDP WebSocket attach tools (such as browser-harness).
+- Native accessibility and direct CDP events are triggered seamlessly with zero mouse movements and zero debug popups.
 
 ## Native Desktop & Window Management
 

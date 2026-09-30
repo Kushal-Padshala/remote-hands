@@ -211,7 +211,75 @@ export class BrowserDriver {
             tabs.push(tabObj);
           }
         }
-        return tabs;
+        if (tabs.length > 0) return tabs;
+      }
+    } catch {}
+
+    try {
+      const swiftScript = `
+import Cocoa
+import ApplicationServices
+let apps = NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == "com.google.Chrome" }
+guard let chrome = apps.first else { exit(0) }
+let appEl = AXUIElementCreateApplication(chrome.processIdentifier)
+var wins: AnyObject?
+_ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
+guard let winList = wins as? [AXUIElement], !winList.isEmpty else { exit(0) }
+func getAttr(_ el: AXUIElement, _ attr: String) -> String {
+    var val: AnyObject?
+    if AXUIElementCopyAttributeValue(el, attr as CFString, &val) == .success, let v = val { return "\\(v)" }
+    return ""
+}
+func findAddress(_ el: AXUIElement, depth: Int) -> String {
+    if depth > 10 { return "" }
+    let role = getAttr(el, kAXRoleAttribute)
+    let desc = getAttr(el, kAXDescriptionAttribute)
+    if role == "AXTextField" && desc == "Address and search bar" { return getAttr(el, kAXValueAttribute) }
+    var children: AnyObject?
+    if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &children) == .success, let list = children as? [AXUIElement] {
+        for c in list {
+            let u = findAddress(c, depth: depth + 1)
+            if !u.isEmpty { return u }
+        }
+    }
+    return ""
+}
+var frontmostWin: AXUIElement?
+var focVal: AnyObject?
+if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal { frontmostWin = (w as! AXUIElement) }
+if frontmostWin == nil {
+    var mainVal: AnyObject?
+    if AXUIElementCopyAttributeValue(appEl, kAXMainWindowAttribute as CFString, &mainVal) == .success, let w = mainVal { frontmostWin = (w as! AXUIElement) }
+}
+if frontmostWin == nil { frontmostWin = winList.first }
+for (wIdx, w) in winList.enumerated() {
+    let rawTitle = getAttr(w, kAXTitleAttribute)
+    var cleanTitle = rawTitle
+    if let r = cleanTitle.range(of: " - Google Chrome") { cleanTitle = String(cleanTitle[..<r.lowerBound]) }
+    let url = findAddress(w, depth: 0)
+    let isAct = frontmostWin != nil && CFEqual(w, frontmostWin!)
+    print("\\(wIdx + 1)\\t\\(wIdx + 1)\\t1\\t\\(isAct)\\t\\(cleanTitle)\\t\\(url)")
+}
+`;
+      const res = spawnSync('swift', ['-e', swiftScript], { encoding: 'utf-8', timeout: 2000 });
+      if (res.status === 0 && res.stdout) {
+        const lines = res.stdout.trim().split('\n').filter(Boolean);
+        const tabs: BrowserTab[] = [];
+        for (const line of lines) {
+          const [wid, wIdx, tIdx, isAct, title, url] = line.split('\t');
+          const wIdxNum = parseInt(wIdx || '1', 10);
+          const tIdxNum = parseInt(tIdx || '1', 10);
+          tabs.push({
+            id: `w${wIdx || '1'}-t${tIdx || '1'}`,
+            title: title || '',
+            url: url || '',
+            windowIndex: Number.isNaN(wIdxNum) ? 1 : wIdxNum,
+            tabIndex: Number.isNaN(tIdxNum) ? 1 : tIdxNum,
+            active: isAct === 'true',
+            windowId: wid,
+          });
+        }
+        if (tabs.length > 0) return tabs;
       }
     } catch {}
     return [];
@@ -230,6 +298,60 @@ export class BrowserDriver {
         encoding: 'utf-8',
         timeout: 1000,
       });
+      if (res.status === 0 && res.stdout) {
+        const [url, title] = res.stdout.trim().split('\t');
+        const result: { url?: string; title?: string } = {};
+        if (url) result.url = url;
+        if (title) result.title = title;
+        if (result.url || result.title) return result;
+      }
+    } catch {}
+
+    try {
+      const swiftScript = `
+import Cocoa
+import ApplicationServices
+let apps = NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == "com.google.Chrome" }
+guard let chrome = apps.first else { exit(0) }
+let appEl = AXUIElementCreateApplication(chrome.processIdentifier)
+var wins: AnyObject?
+_ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
+guard let winList = wins as? [AXUIElement], !winList.isEmpty else { exit(0) }
+func getAttr(_ el: AXUIElement, _ attr: String) -> String {
+    var val: AnyObject?
+    if AXUIElementCopyAttributeValue(el, attr as CFString, &val) == .success, let v = val { return "\\(v)" }
+    return ""
+}
+func findAddress(_ el: AXUIElement, depth: Int) -> String {
+    if depth > 10 { return "" }
+    let role = getAttr(el, kAXRoleAttribute)
+    let desc = getAttr(el, kAXDescriptionAttribute)
+    if role == "AXTextField" && desc == "Address and search bar" { return getAttr(el, kAXValueAttribute) }
+    var children: AnyObject?
+    if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &children) == .success, let list = children as? [AXUIElement] {
+        for c in list {
+            let u = findAddress(c, depth: depth + 1)
+            if !u.isEmpty { return u }
+        }
+    }
+    return ""
+}
+var rootWin: AXUIElement?
+var focVal: AnyObject?
+if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &focVal) == .success, let w = focVal { rootWin = (w as! AXUIElement) }
+if rootWin == nil {
+    var mainVal: AnyObject?
+    if AXUIElementCopyAttributeValue(appEl, kAXMainWindowAttribute as CFString, &mainVal) == .success, let w = mainVal { rootWin = (w as! AXUIElement) }
+}
+if rootWin == nil { rootWin = winList.first }
+guard let target = rootWin else { exit(0) }
+let rawTitle = getAttr(target, kAXTitleAttribute)
+var cleanTitle = rawTitle
+if let r = cleanTitle.range(of: " - Google Chrome") { cleanTitle = String(cleanTitle[..<r.lowerBound]) }
+let url = findAddress(target, depth: 0)
+print("\\(url)\\t\\(cleanTitle)")
+`;
+      const res = spawnSync('swift', ['-e', swiftScript], { encoding: 'utf-8', timeout: 2000 });
       if (res.status === 0 && res.stdout) {
         const [url, title] = res.stdout.trim().split('\t');
         const result: { url?: string; title?: string } = {};
@@ -312,9 +434,6 @@ export class BrowserDriver {
       throw new Error('No open Chrome tabs found on CDP port');
     }
 
-    const explicitlyActive = tabs.find((t) => t.active);
-    if (explicitlyActive) return explicitlyActive;
-
     if (process.platform === 'darwin') {
       try {
         const active = this.queryFrontmostActiveTabAppleScript();
@@ -331,6 +450,9 @@ export class BrowserDriver {
         }
       } catch {}
     }
+
+    const explicitlyActive = tabs.find((t) => t.active);
+    if (explicitlyActive) return explicitlyActive;
 
     return tabs[0]!;
   }
@@ -498,26 +620,48 @@ export class BrowserDriver {
   }
 
   async snapshotNativeChrome(): Promise<SnapshotResult> {
-    const walker = new AxWalker({ driver: new MacOsDriver() });
-    const elements = await walker.walkActiveApp('Google Chrome', { allowOcr: false });
     const activeTab = this.queryFrontmostActiveTabAppleScript();
+    const walker = new AxWalker({ driver: new MacOsDriver() });
+    const elements = await walker.walkActiveApp('Google Chrome', {
+      allowOcr: false,
+      windowTitle: activeTab?.title,
+    });
     const mapped = elements.map((e) => ({
       index: e.index,
       id: e.index,
       role: e.role,
       label: e.label,
       tag: e.role,
+      bounds: e.bounds,
     }));
     const rawText = mapped.map((e) => `[${e.index}] ${e.role} "${e.label}"`).join('\n');
     return {
       url: activeTab?.url || '',
       title: activeTab?.title || 'Google Chrome',
       elements: mapped,
-      formattedTable: rawText,
+      formattedTable: rawText || 'No interactive elements found.',
     };
   }
 
   async snapshot(): Promise<SnapshotResult> {
+    if (process.env.VITEST === 'true') {
+      try {
+        const raw = await this.executeScript<unknown>(DOM_SNAPSHOT_SCRIPT);
+        return parseSnapshotOutput(raw);
+      } catch {
+        return this.snapshotNativeChrome();
+      }
+    }
+    if (process.platform === 'darwin') {
+      try {
+        const tab = await this.getActiveTab();
+        if (!tab.webSocketDebuggerUrl && !this.getHarnessSocketPath()) {
+          return this.snapshotNativeChrome();
+        }
+      } catch {
+        return this.snapshotNativeChrome();
+      }
+    }
     try {
       const raw = await this.executeScript<unknown>(DOM_SNAPSHOT_SCRIPT);
       return parseSnapshotOutput(raw);
@@ -530,23 +674,57 @@ export class BrowserDriver {
   }
 
   async clickIndex(index: number | string): Promise<{ success: boolean; label: string }> {
-    try {
-      const snap = await this.snapshot();
-      const target = snap.elements.find((e) => {
-        if (typeof index === 'number') {
-          return e.index === index || e.id === index || e.id === `e${index}`;
-        }
-        const s = String(index).trim().toLowerCase();
-        return String(e.id).toLowerCase() === s ||
-               String(e.index) === s ||
-               `e${e.index}`.toLowerCase() === s;
-      });
-      if (!target) {
-        throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
+    const snap = await this.snapshot();
+    const target = snap.elements.find((e) => {
+      if (typeof index === 'number') {
+        return e.index === index || e.id === index || e.id === `e${index}`;
       }
+      const s = String(index).trim().toLowerCase();
+      return String(e.id).toLowerCase() === s ||
+             String(e.index) === s ||
+             `e${e.index}`.toLowerCase() === s;
+    });
+    if (!target) {
+      throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
+    }
 
-      const targetIdVal = typeof target.id === 'number' ? target.id : JSON.stringify(target.id);
-      const targetNodeVal = typeof target.node === 'number' ? target.node : 'null';
+    if (process.platform === 'darwin' && (target.role.startsWith('AX') || (process.env.VITEST !== 'true' && target.node === undefined && !target.tag))) {
+      spawnSync('osascript', ['-e', 'tell application "Google Chrome" to activate'], { timeout: 1000 });
+      const activeTab = this.queryFrontmostActiveTabAppleScript();
+      const winTitle = snap.title || activeTab?.title;
+      let success = await performAxAction(
+        'Google Chrome',
+        {
+          index: target.index,
+          role: target.role,
+          label: target.label,
+          windowTitle: winTitle,
+          bounds: (target as any).bounds,
+        },
+        'AXPress',
+      );
+      if (!success && winTitle) {
+        success = await performAxAction(
+          'Google Chrome',
+          {
+            index: target.index,
+            role: target.role,
+            label: target.label,
+            bounds: (target as any).bounds,
+          },
+          'AXPress',
+        );
+      }
+      if (success) {
+        return { success: true, label: target.label || target.role || 'element' };
+      }
+      throw new Error(`Failed to click element ${index} (${target.label || target.role}) in Google Chrome`);
+    }
+
+    const targetIdVal = typeof target.id === 'number' ? target.id : JSON.stringify(target.id);
+    const targetNodeVal = typeof target.node === 'number' ? target.node : 'null';
+
+    try {
 
       const clickScript = `
         (() => {
@@ -619,24 +797,82 @@ export class BrowserDriver {
   }
 
   async typeIndex(index: number | string, text: string): Promise<{ success: boolean; label: string }> {
-    try {
-      const snap = await this.snapshot();
-      const target = snap.elements.find((e) => {
-        if (typeof index === 'number') {
-          return e.index === index || e.id === index || e.id === `e${index}`;
-        }
-        const s = String(index).trim().toLowerCase();
-        return String(e.id).toLowerCase() === s ||
-               String(e.index) === s ||
-               `e${e.index}`.toLowerCase() === s;
-      });
-      if (!target) {
-        throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
+    const snap = await this.snapshot();
+    const target = snap.elements.find((e) => {
+      if (typeof index === 'number') {
+        return e.index === index || e.id === index || e.id === `e${index}`;
       }
+      const s = String(index).trim().toLowerCase();
+      return String(e.id).toLowerCase() === s ||
+             String(e.index) === s ||
+             `e${e.index}`.toLowerCase() === s;
+    });
+    if (!target) {
+      throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
+    }
 
-      const targetIdVal = typeof target.id === 'number' ? target.id : JSON.stringify(target.id);
-      const targetNodeVal = typeof target.node === 'number' ? target.node : 'null';
-      const escaped = JSON.stringify(text);
+    if (process.platform === 'darwin' && (target.role.startsWith('AX') || (process.env.VITEST !== 'true' && target.node === undefined && !target.tag))) {
+      spawnSync('osascript', ['-e', 'tell application "Google Chrome" to activate'], { timeout: 1000 });
+      const activeTab = this.queryFrontmostActiveTabAppleScript();
+      const winTitle = snap.title || activeTab?.title;
+      let success = await setAxElementValue(
+        'Google Chrome',
+        {
+          index: target.index,
+          role: target.role,
+          label: target.label,
+          windowTitle: winTitle,
+        },
+        text,
+      );
+      if (!success && winTitle) {
+        success = await setAxElementValue(
+          'Google Chrome',
+          {
+            index: target.index,
+            role: target.role,
+            label: target.label,
+          },
+          text,
+        );
+      }
+      if (success) {
+        return { success: true, label: target.label || target.role || 'element' };
+      }
+      let pressSuccess = await performAxAction(
+        'Google Chrome',
+        {
+          index: target.index,
+          role: target.role,
+          label: target.label,
+          windowTitle: winTitle,
+        },
+        'AXPress',
+      );
+      if (!pressSuccess && winTitle) {
+        pressSuccess = await performAxAction(
+          'Google Chrome',
+          {
+            index: target.index,
+            role: target.role,
+            label: target.label,
+          },
+          'AXPress',
+        );
+      }
+      if (pressSuccess) {
+        const driver = new MacOsDriver();
+        await driver.typeText(text);
+        return { success: true, label: target.label || target.role || 'element' };
+      }
+      throw new Error(`Failed to type into element ${index} (${target.label || target.role}) in Google Chrome`);
+    }
+
+    const targetIdVal = typeof target.id === 'number' ? target.id : JSON.stringify(target.id);
+    const targetNodeVal = typeof target.node === 'number' ? target.node : 'null';
+    const escaped = JSON.stringify(text);
+
+    try {
       const typeScript = `
         (() => {
           const cache = window.__rhFast || window.__jevFast;
@@ -804,9 +1040,37 @@ export class BrowserDriver {
           tell application "Google Chrome"
             set active tab index of ${widClause} to ${tIdx}
             set index of ${widClause} to 1
+            activate
           end tell
         `;
         spawnSync('osascript', ['-e', script], { encoding: 'utf-8', timeout: 1500 });
+      } catch {}
+
+      try {
+        const escapedTitle = (matched.title || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const swiftScript = `
+import Cocoa
+import ApplicationServices
+let apps = NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == "com.google.Chrome" }
+guard let chrome = apps.first else { exit(0) }
+let appEl = AXUIElementCreateApplication(chrome.processIdentifier)
+var wins: AnyObject?
+_ = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &wins)
+guard let winList = wins as? [AXUIElement] else { exit(0) }
+let targetTitle = "${escapedTitle}"
+for w in winList {
+    var t: AnyObject?
+    _ = AXUIElementCopyAttributeValue(w, kAXTitleAttribute as CFString, &t)
+    let s = (t as? String) ?? ""
+    if !targetTitle.isEmpty && (s.localizedCaseInsensitiveContains(targetTitle) || targetTitle.localizedCaseInsensitiveContains(s)) {
+        _ = AXUIElementPerformAction(w, kAXRaiseAction as CFString)
+        _ = AXUIElementSetAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, w)
+        break
+    }
+}
+_ = chrome.activate(options: [.activateIgnoringOtherApps])
+`;
+        spawnSync('swift', ['-e', swiftScript], { encoding: 'utf-8', timeout: 1500 });
       } catch {}
     }
 

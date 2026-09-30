@@ -62,7 +62,7 @@ export class DefaultFrameSource implements FrameSource {
     this.candidatePaths = options?.candidatePaths ?? CANDIDATE_FRAME_PATHS;
     this.desktopDriver = options?.desktopDriver ?? new MacOsDriver();
     this.desktopCaptureFn = options?.desktopCaptureFn;
-    this.enableDesktopCapture = options?.enableDesktopCapture ?? (options?.candidatePaths === undefined);
+    this.enableDesktopCapture = options?.enableDesktopCapture ?? (options?.candidatePaths === undefined && !this.browserActive);
     if (!options?.candidatePaths) {
       cleanupStaleFrameFiles(this.taskStartTime);
     }
@@ -89,7 +89,7 @@ export class DefaultFrameSource implements FrameSource {
     const cdpResult = await this.captureFromCdp();
     if (cdpResult !== undefined) return cdpResult;
 
-    if (this.enableDesktopCapture) {
+    if (this.enableDesktopCapture && !this.browserActive) {
       const desktopResult = await this.captureFromDesktop();
       if (desktopResult !== undefined) return desktopResult;
     }

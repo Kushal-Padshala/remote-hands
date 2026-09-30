@@ -72,8 +72,14 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
   const taskStartTime = Date.now();
   cleanupStaleFrameFiles(taskStartTime);
 
-  const isBrowserKind = running.kind === 'browser';
-  if (isBrowserKind || running.prompt.includes('http://') || running.prompt.includes('https://')) {
+  const promptLower = running.prompt.toLowerCase();
+  const isBrowserKind = running.kind === 'browser' ||
+    promptLower.includes('survey') ||
+    promptLower.includes('http://') ||
+    promptLower.includes('https://') ||
+    promptLower.includes('chrome') ||
+    promptLower.includes('browser');
+  if (isBrowserKind) {
     if (input.chromeManager) {
       await input.chromeManager.ensureRunning().catch(() => {});
     }
@@ -84,7 +90,7 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
   const frameSource = input.frameSource ?? new DefaultFrameSource({
     taskStartTime,
     browserActive: isBrowserKind,
-    enableDesktopCapture: true,
+    enableDesktopCapture: !isBrowserKind,
   });
 
   if (canCaptureFrames) {
