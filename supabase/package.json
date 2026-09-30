@@ -10,7 +10,7 @@
     "typecheck:tests": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.0",
+    "@supabase/supabase-js": "^2.117.2",
     "@types/pg": "^8.23.1",
     "pg": "^8.23.0"
   }
