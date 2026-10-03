@@ -65,6 +65,8 @@ export function hoistSwiftParams(script: string): {
 }
 
 export function defaultSwiftCacheDir(): string {
+  const override = process.env.RH_SWIFT_CACHE_DIR;
+  if (override) return override;
   return path.join(os.homedir(), '.remote-hands', 'swift-cache');
 }
 
@@ -75,9 +77,9 @@ export interface FastExecOptions {
 
 export function createFastExec(options: FastExecOptions = {}): ExecFunction {
   const run = options.spawn ?? realSpawn;
-  const cacheDir = options.cacheDir ?? defaultSwiftCacheDir();
 
   return (command, args) => {
+    const cacheDir = options.cacheDir ?? defaultSwiftCacheDir();
     if (command !== 'swift' || args[0] !== '-e' || typeof args[1] !== 'string') {
       return run(command, args);
     }

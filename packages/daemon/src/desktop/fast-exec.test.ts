@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { hoistSwiftParams, createFastExec, type SpawnFn } from './fast-exec.js';
+import { hoistSwiftParams, createFastExec, defaultSwiftCacheDir, type SpawnFn } from './fast-exec.js';
 
 const SCRIPT = [
   'import Cocoa',
@@ -167,5 +167,37 @@ describe('createFastExec', () => {
     exec('swift', ['-e', 'let query = "A"\n']);
     exec('swift', ['-e', 'let query = "B"\n']);
     expect(calls).toEqual(['swiftc', 'swift', 'swift']);
+  });
+});
+
+describe('defaultSwiftCacheDir', () => {
+  it('honours RH_SWIFT_CACHE_DIR so tests never write into the real home cache', () => {
+    const previous = process.env.RH_SWIFT_CACHE_DIR;
+    try {
+      process.env.RH_SWIFT_CACHE_DIR = '/tmp/rh-swift-cache-test';
+      expect(defaultSwiftCacheDir()).toBe('/tmp/rh-swift-cache-test');
+      delete process.env.RH_SWIFT_CACHE_DIR;
+      expect(defaultSwiftCacheDir()).toBe(path.join(os.homedir(), '.remote-hands', 'swift-cache'));
+    } finally {
+      if (previous === undefined) delete process.env.RH_SWIFT_CACHE_DIR;
+      else process.env.RH_SWIFT_CACHE_DIR = previous;
+    }
+  });
+
+  it('resolves the cache directory per call, not once at creation', () => {
+    const previous = process.env.RH_SWIFT_CACHE_DIR;
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fx-env-'));
+    try {
+      const exec = createFastExec({ spawn: (command, args) => {
+        if (command === 'swiftc') fs.writeFileSync(args[args.indexOf('-o') + 1]!, '');
+        return { stdout: '', stderr: '', status: 0 };
+      } });
+      process.env.RH_SWIFT_CACHE_DIR = cacheDir;
+      exec('swift', ['-e', 'let query = "A"\n']);
+      expect(fs.readdirSync(cacheDir)).toHaveLength(1);
+    } finally {
+      if (previous === undefined) delete process.env.RH_SWIFT_CACHE_DIR;
+      else process.env.RH_SWIFT_CACHE_DIR = previous;
+    }
   });
 });
