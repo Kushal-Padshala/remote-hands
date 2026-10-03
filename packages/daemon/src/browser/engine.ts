@@ -386,6 +386,8 @@ export class FastBrowserEngine implements BrowserPort {
     if (!v || typeof v !== 'object') return null;
     const o = v as { snap?: unknown; probe?: unknown };
     const snap = o.snap as Record<string, unknown> | null | undefined;
+    // A failed snapshot (e.g. mid-navigation) is not final: let the slow path retry.
+    if (snap && typeof snap === 'object' && 'error' in snap) return null;
     const { state, origin } = snapshotOf(snap ?? null);
     state.browser = ctx.browser.name;
     return {

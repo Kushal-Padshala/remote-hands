@@ -250,6 +250,24 @@ describe('snapshot and actions', () => {
     expect(t.evals.filter((e) => !e.js.includes('const op = ')).map((e) => e.js === buildSnapshotWithProbe())).toEqual([true]);
   });
 
+  it('a combined read whose snapshot errored falls back to the slow path (fix pass 5 B)', async () => {
+    await engine.snapshot();
+    t.evals = [];
+    let combinedCalls = 0;
+    const ev = t.evaluate.bind(t);
+    t.evaluate = async (b, target, js) => {
+      if (js === buildSnapshotWithProbe() && combinedCalls++ === 0) {
+        t.evals.push({ browser: b.name, target, js });
+        return JSON.stringify({ snap: { error: 'snapshot failed: boom' }, probe: { u: 'https://example.com/signup', r: 'complete', t: 'Sign up', o: null, p: false } });
+      }
+      return ev(b, target, js);
+    };
+    const out = await engine.click(12);
+    expect(out).not.toContain('state unavailable');
+    expect(out).toContain('page: Sign up');
+    expect(t.snapshotEvals()).toBe(2); // the failed combined read + the slow-path snapshot
+  });
+
   it('a navigating action takes the slow path and renders the new page (I3)', async () => {
     t.snapshots = [JSON.stringify(page({ page_key: [1, 'x'] }))];
     await engine.snapshot();
