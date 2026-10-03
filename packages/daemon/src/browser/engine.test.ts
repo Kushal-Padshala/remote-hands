@@ -538,6 +538,20 @@ describe('open url allow-list (fix round 1)', () => {
     expect(normalizeOpenUrl('HTTPS://Example.com/A')).toBe('HTTPS://Example.com/A');
   });
 
+  it('handles bare localhost, IDN hosts, bad ports and explains whitespace (final fix pass)', () => {
+    expect(normalizeOpenUrl('localhost')).toBe('http://localhost');
+    expect(normalizeOpenUrl('localhost/x')).toBe('http://localhost/x');
+    expect(normalizeOpenUrl('https://bücher.de/x')).toBe('https://bücher.de/x');
+    expect(normalizeOpenUrl('bücher.de')).toBe('https://bücher.de');
+    expect(new URL(normalizeOpenUrl('bücher.de')).host).toBe('xn--bcher-kva.de');
+    expect(() => normalizeOpenUrl('example.com:8080abc')).toThrow(/^Not a valid URL: example\.com:8080abc$/);
+    expect(() => normalizeOpenUrl('a b.com')).toThrow(
+      'Refusing to open a URL containing whitespace or control characters (spaces and control characters must be percent-encoded)',
+    );
+    expect(() => normalizeOpenUrl('javascript:alert(1)')).toThrow('Refusing to open javascript: URLs');
+    expect(() => normalizeOpenUrl('localhost:javascript:alert(1)')).toThrow();
+  });
+
   it('the engine transports nothing for a rejected URL and opens the normalised one', async () => {
     t.tabList = [];
     for (const url of ['java\tscript:alert(1)', 'java\nscript:alert(1)', '\u0001javascript:alert(1)', 'JaVaScRiPt:alert(1)']) {

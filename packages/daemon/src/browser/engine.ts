@@ -109,33 +109,42 @@ function hostPath(url: string): string | null {
   }
 }
 
-const HOST_PORT = /^(?:[a-z0-9-]+(?:\.[a-z0-9-]+)*|\[[0-9a-f:.]+\]):\d+(?:[/?#]|$)/i;
-const BARE_HOST = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[/?#]|$)/i;
+// Host labels accept Unicode letters so IDN hosts (bücher.de) work; `new URL` punycodes them.
+const LABEL = String.raw`[\p{L}\p{N}-]+`;
+const HOST_PORT = new RegExp(String.raw`^(?:${LABEL}(?:\.${LABEL})*|\[[0-9a-f:.]+\]):\d+(?:[/?#]|$)`, 'iu');
+const BARE_HOST = new RegExp(String.raw`^${LABEL}(?:\.${LABEL})+(?:[/?#]|$)`, 'iu');
 const LOCAL_HOST = /^(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-f:.]+\])(?:[:/?#]|$)/i;
+/** `example.com:8080abc`: a host with a broken port, which `new URL` would read as a scheme. */
+const BAD_PORT = /^(?:localhost|[^:/?#]*\.[^:/?#]*):\d/i;
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:', 'file:', 'data:']);
 
 /**
  * Normalises a URL for `open` and enforces the allow-list: http(s), file, data and exactly
  * `about:blank`. Whitespace or control characters anywhere are refused (they let
- * `java\tscript:` slip past naive scheme checks). `host:port` and bare hosts get `https://`
- * (`http://` for localhost and IP literals).
+ * `java\tscript:` slip past naive scheme checks). `host:port` and bare hosts (IDN included)
+ * get `https://` (`http://` for localhost, bare or not, and IP literals).
  */
 export function normalizeOpenUrl(url: string): string {
   const trimmed = url.trim();
   if (!trimmed) throw new Error('Refusing to open an empty URL');
   // eslint-disable-next-line no-control-regex
   if (/[\u0000- \u007f]/.test(trimmed)) {
-    throw new Error('Refusing to open a URL containing whitespace or control characters');
+    throw new Error(
+      'Refusing to open a URL containing whitespace or control characters (spaces and control characters must be percent-encoded)',
+    );
   }
   let candidate = trimmed;
-  if (HOST_PORT.test(trimmed) || (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed) && BARE_HOST.test(trimmed))) {
+  const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed);
+  if (HOST_PORT.test(trimmed) || (!hasScheme && (BARE_HOST.test(trimmed) || LOCAL_HOST.test(trimmed)))) {
     candidate = `${LOCAL_HOST.test(trimmed) ? 'http' : 'https'}://${trimmed}`;
+  } else if (BAD_PORT.test(trimmed)) {
+    throw new Error(`Not a valid URL: ${clean(trimmed, 200)}`);
   }
   let parsed: URL;
   try {
     parsed = new URL(candidate);
   } catch {
-    throw new Error(`Invalid URL: ${clean(trimmed, 200)}`);
+    throw new Error(`Not a valid URL: ${clean(trimmed, 200)}`);
   }
   const protocol = parsed.protocol.toLowerCase();
   if (ALLOWED_PROTOCOLS.has(protocol)) return candidate;
