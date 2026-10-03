@@ -1,16 +1,22 @@
 import { describe, it, expect, vi } from 'vitest';
 import * as childProcess from 'node:child_process';
 import { ComputerSession, createDefaultComputerSession, type ComputerSessionDeps } from './session.js';
+import { FastBrowserEngine } from '../browser/engine.js';
+import { AppleScriptTransport } from '../browser/transport.js';
+import { LegacyBrowserPort } from '../browser/legacy-port.js';
 
+// Inert stubs: nothing real is ever spawned, and every call is recorded.
 vi.mock('node:child_process', async (orig) => {
   const actual = await orig<typeof import('node:child_process')>();
   return {
     ...actual,
-    spawn: vi.fn(actual.spawn),
-    spawnSync: vi.fn(actual.spawnSync),
-    execFile: vi.fn(actual.execFile),
-    execFileSync: vi.fn(actual.execFileSync),
-    exec: vi.fn(actual.exec),
+    spawn: vi.fn(() => ({ on: () => {}, stdout: null, stderr: null, kill: () => {} })),
+    spawnSync: vi.fn(() => ({ status: 1, stdout: '', stderr: '', error: new Error('stubbed') })),
+    execFile: vi.fn(() => ({ on: () => {}, kill: () => {} })),
+    execFileSync: vi.fn(() => {
+      throw new Error('stubbed');
+    }),
+    exec: vi.fn(() => ({ on: () => {}, kill: () => {} })),
   };
 });
 
@@ -293,26 +299,29 @@ describe('ComputerSession browser (delegates to the BrowserPort)', () => {
 });
 
 describe('createDefaultComputerSession', () => {
-  it('constructs real drivers without performing any I/O', () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
-    const session = createDefaultComputerSession();
-    expect(session).toBeInstanceOf(ComputerSession);
-    expect(fetchSpy).not.toHaveBeenCalled();
-    fetchSpy.mockRestore();
-  });
-
-  it('builds the fast browser engine and spawns no process (no osascript) at construction', () => {
-    const spies = [
+  it('builds the fast engine over AppleScript with the legacy port, performing no I/O', () => {
+    const procs = [
       childProcess.spawn,
       childProcess.spawnSync,
       childProcess.execFile,
       childProcess.execFileSync,
       childProcess.exec,
     ].map((f) => vi.mocked(f));
-    spies.forEach((f) => f.mockClear());
-    const session = createDefaultComputerSession();
-    const browser = (session as unknown as { deps: ComputerSessionDeps }).deps.browser;
-    expect(browser.constructor.name).toBe('FastBrowserEngine');
-    for (const sp of spies) expect(sp).not.toHaveBeenCalled();
+    procs.forEach((f) => f.mockClear());
+    const fetchStub = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('{}'));
+    try {
+      const session = createDefaultComputerSession();
+      expect(session).toBeInstanceOf(ComputerSession);
+      const browser = (session as unknown as { deps: ComputerSessionDeps }).deps.browser;
+      expect(browser).toBeInstanceOf(FastBrowserEngine);
+      // Wiring is read from the engine's private fields (no public hook exists to inject the environment).
+      const engine = browser as unknown as { t: unknown; legacy: unknown };
+      expect(engine.t).toBeInstanceOf(AppleScriptTransport);
+      expect(engine.legacy).toBeInstanceOf(LegacyBrowserPort);
+      for (const sp of procs) expect(sp).not.toHaveBeenCalled();
+      expect(fetchStub).not.toHaveBeenCalled();
+    } finally {
+      fetchStub.mockRestore();
+    }
   });
 });

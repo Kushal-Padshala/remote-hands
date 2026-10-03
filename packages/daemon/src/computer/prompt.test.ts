@@ -23,7 +23,7 @@ describe('SLIM_COMPUTER_PROMPT', () => {
   });
 
   it('tells the model to pass the turn task id to rh approve', () => {
-    const rule7 = SLIM_COMPUTER_PROMPT.split('\n').find((l) => l.startsWith('7.')) ?? '';
+    const rule7 = SLIM_COMPUTER_PROMPT.split('\n').find((l) => l.startsWith('8.')) ?? '';
     expect(rule7).toContain('rh approve');
     expect(rule7).toContain('--task=');
     expect(rule7).toMatch(/--task=<Task id from the turn>/);
@@ -37,7 +37,7 @@ describe('SLIM_COMPUTER_PROMPT', () => {
   });
 
   it('has a concise browser rule block covering stable ids, no re-snapshot, browser_do/find/extract and the fallback note', () => {
-    const rule = SLIM_COMPUTER_PROMPT.split('\n').find((l) => l.startsWith('4b.')) ?? '';
+    const rule = SLIM_COMPUTER_PROMPT.split('\n').find((l) => l.startsWith('5. Browser')) ?? '';
     expect(rule).toMatch(/stable numbers/);
     expect(rule).toMatch(/never (call )?(browser_)?snapshot|never re-snapshot/i);
     expect(rule).toContain('browser_do');
@@ -47,5 +47,18 @@ describe('SLIM_COMPUTER_PROMPT', () => {
     expect(rule).toContain('note: fast browser path unavailable');
     expect(rule).toContain('rh browser doctor');
     expect(rule.length).toBeLessThan(900);
+  });
+
+  it('numbers the rules contiguously and keeps desktop indexes distinct from stable browser ids', () => {
+    const nums = SLIM_COMPUTER_PROMPT.split('\n')
+      .map((l) => /^(\d+)\. /.exec(l)?.[1])
+      .filter(Boolean)
+      .map(Number);
+    expect(nums).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(SLIM_COMPUTER_PROMPT).not.toMatch(/\b4b\./);
+    const rule1 = SLIM_COMPUTER_PROMPT.split('\n').find((l) => l.startsWith('1.')) ?? '';
+    expect(rule1).toMatch(/desktop indexes come from the latest/i);
+    expect(rule1).toMatch(/browser ids are stable numbers/i);
+    expect(rule1).not.toMatch(/^1\. .*Indexes come from the latest state only/);
   });
 });
