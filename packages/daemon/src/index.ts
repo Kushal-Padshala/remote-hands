@@ -18,6 +18,7 @@ export * from './runtime.js';
 export * from './screen-capture.js';
 export * from './task-store.js';
 export * from './desktop/macos-driver.js';
+export * from './desktop/fast-exec.js';
 export {
   AxWalker,
   type RawAxNode,
