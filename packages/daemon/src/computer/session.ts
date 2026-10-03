@@ -4,7 +4,11 @@ import { performAxActionDetailed } from '../desktop/ax-actions.js';
 import { searchAndTriggerMenu } from '../desktop/menu-crawler.js';
 import { MacOsDriver } from '../desktop/macos-driver.js';
 import { BrowserDriver } from '../browser-driver.js';
-import { capLines, compactDesktopElements } from './compact.js';
+import { FastBrowserEngine } from '../browser/engine.js';
+import { AppleScriptTransport } from '../browser/transport.js';
+import { LegacyBrowserPort } from '../browser/legacy-port.js';
+import type { BrowserPort, DoStep } from '../browser/port.js';
+import { compactDesktopElements } from './compact.js';
 
 export interface ComputerSessionDeps {
   desktop: Pick<
@@ -14,7 +18,7 @@ export interface ComputerSessionDeps {
   walker: Pick<AxWalker, 'walkActiveApp'>;
   axAction: typeof performAxActionDetailed;
   menuSearch: typeof searchAndTriggerMenu;
-  browser: Pick<BrowserDriver, 'listTabs' | 'focusTab' | 'openUrl' | 'snapshot' | 'clickIndex' | 'typeIndex'>;
+  browser: BrowserPort;
   settleMs?: number;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -29,8 +33,6 @@ const MODIFIER_NAMES: Record<string, string> = {
   ctrl: 'control',
   control: 'control',
 };
-
-const BROWSER_MAX_LINES = 120;
 
 export class ComputerSession {
   private cache: { app: string; elements: IndexedElement[] } | null = null;
@@ -68,14 +70,6 @@ export class ComputerSession {
       return await this.state(app);
     } catch (err) {
       return `(state unavailable: ${err instanceof Error ? err.message : String(err)}; call desktop_snapshot)`;
-    }
-  }
-
-  private async safeBrowserState(): Promise<string> {
-    try {
-      return await this.browserSnapshot();
-    } catch (err) {
-      return `(state unavailable: ${err instanceof Error ? err.message : String(err)}; call browser_snapshot)`;
     }
   }
 
@@ -157,38 +151,40 @@ export class ComputerSession {
     return wins.map((w) => `${w.app} - ${w.title}`).join('\n') || '(no windows)';
   }
 
-  async browserTabs(): Promise<string> {
-    const tabs = await this.deps.browser.listTabs();
-    return tabs
-      .map((t) => `[w${t.windowIndex ?? 1}-t${t.tabIndex ?? '?'}] ${t.active ? '(active) ' : ''}${t.title} - ${t.url}`)
-      .join('\n');
+  browserTabs(): Promise<string> {
+    return this.deps.browser.tabs();
   }
 
-  async browserFocus(target: string | number): Promise<string> {
-    const res = await this.deps.browser.focusTab(target);
-    return `focused ${res.tab.title} - ${res.tab.url}\n${await this.browserSnapshot()}`;
+  browserFocus(target: string | number): Promise<string> {
+    return this.deps.browser.focus(target);
   }
 
-  async browserOpen(url: string): Promise<string> {
-    const res = await this.deps.browser.openUrl(url);
-    return `opened ${res.url}\n${await this.browserSnapshot()}`;
+  browserOpen(url: string): Promise<string> {
+    return this.deps.browser.open(url);
   }
 
-  async browserSnapshot(): Promise<string> {
-    const snap = await this.deps.browser.snapshot();
-    return capLines(snap.formattedTable, BROWSER_MAX_LINES);
+  browserSnapshot(): Promise<string> {
+    return this.deps.browser.snapshot();
   }
 
-  async browserClick(index: number): Promise<string> {
-    const res = await this.deps.browser.clickIndex(index);
-    await this.settle();
-    return `clicked [${index}] ${res.label}\n${await this.safeBrowserState()}`;
+  browserClick(index: number): Promise<string> {
+    return this.deps.browser.click(index);
   }
 
-  async browserType(index: number, text: string): Promise<string> {
-    const res = await this.deps.browser.typeIndex(index, text);
-    await this.settle();
-    return `typed into [${index}] ${res.label}\n${await this.safeBrowserState()}`;
+  browserType(index: number, text: string, submit?: boolean): Promise<string> {
+    return this.deps.browser.type(index, text, submit === undefined ? undefined : { submit });
+  }
+
+  browserFind(query: string, limit?: number): Promise<string> {
+    return this.deps.browser.find(query, limit);
+  }
+
+  browserDo(steps: DoStep[]): Promise<string> {
+    return this.deps.browser.do(steps);
+  }
+
+  browserExtract(maxChars?: number): Promise<string> {
+    return this.deps.browser.extract(maxChars);
   }
 }
 
@@ -199,6 +195,11 @@ export function createDefaultComputerSession(): ComputerSession {
     walker: new AxWalker({ driver: desktop }),
     axAction: performAxActionDetailed,
     menuSearch: searchAndTriggerMenu,
-    browser: new BrowserDriver({ cdpUrl: process.env.BU_CDP_URL || 'http://127.0.0.1:9222' }),
+    browser: new FastBrowserEngine({
+      transport: new AppleScriptTransport(),
+      legacy: new LegacyBrowserPort({
+        driver: new BrowserDriver({ cdpUrl: process.env.BU_CDP_URL || 'http://127.0.0.1:9222' }),
+      }),
+    }),
   });
 }

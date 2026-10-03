@@ -35,4 +35,17 @@ describe('SLIM_COMPUTER_PROMPT', () => {
     const rule3 = SLIM_COMPUTER_PROMPT.split('\n').find((l) => l.startsWith('3.')) ?? '';
     expect(rule3).toContain('except the physical-click fallback that desktop_click reports in its result');
   });
+
+  it('has a concise browser rule block covering stable ids, no re-snapshot, browser_do/find/extract and the fallback note', () => {
+    const rule = SLIM_COMPUTER_PROMPT.split('\n').find((l) => l.startsWith('4b.')) ?? '';
+    expect(rule).toMatch(/stable numbers/);
+    expect(rule).toMatch(/never (call )?(browser_)?snapshot|never re-snapshot/i);
+    expect(rule).toContain('browser_do');
+    expect(rule).toMatch(/whole form in one call/);
+    expect(rule).toContain('browser_find');
+    expect(rule).toContain('browser_extract');
+    expect(rule).toContain('note: fast browser path unavailable');
+    expect(rule).toContain('rh browser doctor');
+    expect(rule.length).toBeLessThan(900);
+  });
 });

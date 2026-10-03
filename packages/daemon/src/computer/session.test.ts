@@ -1,5 +1,18 @@
 import { describe, it, expect, vi } from 'vitest';
+import * as childProcess from 'node:child_process';
 import { ComputerSession, createDefaultComputerSession, type ComputerSessionDeps } from './session.js';
+
+vi.mock('node:child_process', async (orig) => {
+  const actual = await orig<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    spawn: vi.fn(actual.spawn),
+    spawnSync: vi.fn(actual.spawnSync),
+    execFile: vi.fn(actual.execFile),
+    execFileSync: vi.fn(actual.execFileSync),
+    exec: vi.fn(actual.exec),
+  };
+});
 
 function makeDeps(overrides: Partial<ComputerSessionDeps> = {}) {
   const elements = [
@@ -19,14 +32,15 @@ function makeDeps(overrides: Partial<ComputerSessionDeps> = {}) {
     axAction: vi.fn().mockResolvedValue({ success: true, method: 'ax' }),
     menuSearch: vi.fn().mockResolvedValue({ success: true, triggeredPath: ['File', 'Save'] }),
     browser: {
-      listTabs: vi.fn().mockResolvedValue([
-        { id: 't1', title: 'Inbox', url: 'https://mail.example', active: true, windowIndex: 1, tabIndex: 2 },
-      ]),
-      focusTab: vi.fn().mockResolvedValue({ success: true, tab: { title: 'Inbox', url: 'https://mail.example' } }),
-      openUrl: vi.fn().mockResolvedValue({ success: true, url: 'https://x.test' }),
-      snapshot: vi.fn().mockResolvedValue({ url: 'u', title: 't', elements: [], formattedTable: '[1] button "Go"' }),
-      clickIndex: vi.fn().mockResolvedValue({ success: true, label: 'Go' }),
-      typeIndex: vi.fn().mockResolvedValue({ success: true, label: 'Email' }),
+      tabs: vi.fn().mockResolvedValue('tabs text'),
+      focus: vi.fn().mockResolvedValue('focused text'),
+      open: vi.fn().mockResolvedValue('opened text'),
+      snapshot: vi.fn().mockResolvedValue('snapshot text'),
+      click: vi.fn().mockResolvedValue('click text'),
+      type: vi.fn().mockResolvedValue('type text'),
+      find: vi.fn().mockResolvedValue('find text'),
+      do: vi.fn().mockResolvedValue('do text'),
+      extract: vi.fn().mockResolvedValue('extract text'),
     },
     settleMs: 0,
     sleep: async () => {},
@@ -211,14 +225,6 @@ describe('ComputerSession post-action state is best-effort', () => {
     expect(await s.desktopMenu('Finder', 'save')).toBe(`menu File > Save\n${note}`);
   });
 
-  it('browser click and type still report the action when the snapshot fails', async () => {
-    const deps = makeDeps();
-    deps.browser.snapshot = vi.fn().mockRejectedValue(new Error('cdp gone'));
-    const s = new ComputerSession(deps);
-    expect(await s.browserClick(1)).toBe('clicked [1] Go\n(state unavailable: cdp gone; call browser_snapshot)');
-    expect(await s.browserType(2, 'x')).toBe('typed into [2] Email\n(state unavailable: cdp gone; call browser_snapshot)');
-  });
-
   it('never performs a session-level physical click', async () => {
     const deps = makeDeps({ axAction: vi.fn().mockResolvedValue({ success: false, error: 'AXPress failed' }) });
     const clickAt = vi.fn();
@@ -231,34 +237,58 @@ describe('ComputerSession post-action state is best-effort', () => {
   });
 });
 
-describe('ComputerSession browser', () => {
-  it('tabs lists window/tab ids, active marker, title and url', async () => {
-    const s = new ComputerSession(makeDeps());
-    expect(await s.browserTabs()).toBe('[w1-t2] (active) Inbox - https://mail.example');
-  });
-
-  it('click returns the page state after the click', async () => {
+describe('ComputerSession browser (delegates to the BrowserPort)', () => {
+  it('tabs, focus, open and snapshot return the port text unchanged', async () => {
     const deps = makeDeps();
     const s = new ComputerSession(deps);
-    const out = await s.browserClick(1);
-    expect(deps.browser.clickIndex).toHaveBeenCalledWith(1);
-    expect(out).toBe('clicked [1] Go\n[1] button "Go"');
+    expect(await s.browserTabs()).toBe('tabs text');
+    expect(await s.browserFocus('mail')).toBe('focused text');
+    expect(deps.browser.focus).toHaveBeenCalledWith('mail');
+    expect(await s.browserFocus(3)).toBe('focused text');
+    expect(deps.browser.focus).toHaveBeenLastCalledWith(3);
+    expect(await s.browserOpen('https://x.test')).toBe('opened text');
+    expect(deps.browser.open).toHaveBeenCalledWith('https://x.test');
+    expect(await s.browserSnapshot()).toBe('snapshot text');
+    expect(deps.browser.snapshot).toHaveBeenCalledWith();
   });
 
-  it('type returns the page state after typing', async () => {
+  it('click passes the index and returns the port text', async () => {
     const deps = makeDeps();
-    const out = await new ComputerSession(deps).browserType(2, 'a@b.c');
-    expect(deps.browser.typeIndex).toHaveBeenCalledWith(2, 'a@b.c');
-    expect(out).toBe('typed into [2] Email\n[1] button "Go"');
+    expect(await new ComputerSession(deps).browserClick(7)).toBe('click text');
+    expect(deps.browser.click).toHaveBeenCalledWith(7);
   });
 
-  it('snapshot caps very long tables', async () => {
-    const table = Array.from({ length: 300 }, (_, i) => `[${i}] link "l${i}"`).join('\n');
+  it('type passes index, text and submit (omitted when not given)', async () => {
     const deps = makeDeps();
-    deps.browser.snapshot = vi.fn().mockResolvedValue({ url: 'u', title: 't', elements: [], formattedTable: table });
-    const out = await new ComputerSession(deps).browserSnapshot();
-    expect(out.split('\n')).toHaveLength(121);
-    expect(out).toContain('… 180 more lines hidden');
+    const s = new ComputerSession(deps);
+    expect(await s.browserType(2, 'a@b.c')).toBe('type text');
+    expect(deps.browser.type).toHaveBeenLastCalledWith(2, 'a@b.c', undefined);
+    await s.browserType(2, 'q', true);
+    expect(deps.browser.type).toHaveBeenLastCalledWith(2, 'q', { submit: true });
+    await s.browserType(2, 'q', false);
+    expect(deps.browser.type).toHaveBeenLastCalledWith(2, 'q', { submit: false });
+  });
+
+  it('find, do and extract delegate with exact args', async () => {
+    const deps = makeDeps();
+    const s = new ComputerSession(deps);
+    expect(await s.browserFind('sign in', 5)).toBe('find text');
+    expect(deps.browser.find).toHaveBeenCalledWith('sign in', 5);
+    await s.browserFind('x');
+    expect(deps.browser.find).toHaveBeenLastCalledWith('x', undefined);
+    const steps = [{ op: 'type' as const, index: 3, text: 'hi', submit: true }, { op: 'press' as const, key: 'Enter' }];
+    expect(await s.browserDo(steps)).toBe('do text');
+    expect(deps.browser.do).toHaveBeenCalledWith(steps);
+    expect(await s.browserExtract(900)).toBe('extract text');
+    expect(deps.browser.extract).toHaveBeenCalledWith(900);
+    await s.browserExtract();
+    expect(deps.browser.extract).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it('propagates port errors', async () => {
+    const deps = makeDeps();
+    deps.browser.click = vi.fn().mockRejectedValue(new Error('stale id'));
+    await expect(new ComputerSession(deps).browserClick(1)).rejects.toThrow('stale id');
   });
 });
 
@@ -269,5 +299,20 @@ describe('createDefaultComputerSession', () => {
     expect(session).toBeInstanceOf(ComputerSession);
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+
+  it('builds the fast browser engine and spawns no process (no osascript) at construction', () => {
+    const spies = [
+      childProcess.spawn,
+      childProcess.spawnSync,
+      childProcess.execFile,
+      childProcess.execFileSync,
+      childProcess.exec,
+    ].map((f) => vi.mocked(f));
+    spies.forEach((f) => f.mockClear());
+    const session = createDefaultComputerSession();
+    const browser = (session as unknown as { deps: ComputerSessionDeps }).deps.browser;
+    expect(browser.constructor.name).toBe('FastBrowserEngine');
+    for (const sp of spies) expect(sp).not.toHaveBeenCalled();
   });
 });
