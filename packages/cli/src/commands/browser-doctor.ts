@@ -53,7 +53,8 @@ function line(r: BrowserReport): string {
   if (r.ready) return `✔ ${r.name}  fast path ready (checked on the front tab)`;
   if (r.code === 'no_window') return `✖ ${r.name}  ${r.message} Open a window to test it (setting unknown).`;
   if (r.code === 'script_error') return `✖ ${r.name}  ${r.message}${SCRIPT_ERROR_HINT}`;
-  if (r.code === 'timeout') return `✖ ${r.name}  ${r.message}${TIMEOUT_HINT}`;
+  // The daemon's timeout message may already name the prompt; do not repeat it.
+  if (r.code === 'timeout') return `✖ ${r.name}  ${r.message}${r.message?.includes('permission prompt') ? '' : TIMEOUT_HINT}`;
   return `✖ ${r.name}  ${r.message}`;
 }
 

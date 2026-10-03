@@ -54,7 +54,7 @@ function messageFor(code: BrowserErrorCode, b: BrowserApp, detail: string): stri
     case 'no_tab':
       return 'The target tab is gone. Call browser_tabs and focus a tab again.';
     case 'timeout':
-      return `${n} did not answer in time.`;
+      return `${n} did not answer in time (a dialog such as an alert or a macOS permission prompt may be open).`;
     case 'script_error':
       return `${n} automation failed: ${detail}`;
   }

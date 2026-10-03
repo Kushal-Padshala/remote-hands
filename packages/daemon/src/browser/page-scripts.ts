@@ -112,7 +112,7 @@ const NAV_HOOK = String.raw`
 `;
 
 /** A navigation flag older than this is treated as stale (the navigation never happened). */
-export const NAV_PENDING_MS = 3000;
+export const NAV_PENDING_MS = 1500; // shorter than the engine's 3 s settle cap
 
 // Resolves `el` and verifies the label; runs for every op that targets a node.
 const RESOLVE = String.raw`

@@ -125,6 +125,9 @@ describe('fix round 1', () => {
 
   it('treats only a null status as timeout', () => {
     expect(classifyOsascriptError(brave, '', null).code).toBe('timeout');
+    expect(classifyOsascriptError(brave, '', null).message).toBe(
+      'Brave Browser did not answer in time (a dialog such as an alert or a macOS permission prompt may be open).',
+    );
     const err = classifyOsascriptError(brave, '', 3);
     expect(err.code).toBe('script_error');
     expect(err.message).toContain('osascript exited with status 3');

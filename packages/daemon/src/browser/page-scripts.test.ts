@@ -7,6 +7,7 @@ import {
   buildNavigateScript,
   buildReadyProbe,
   buildSnapshotWithProbe,
+  NAV_PENDING_MS,
   buildSnapshotCall,
   type PageOp,
   type PageOpResult,
@@ -770,6 +771,10 @@ describe('fix round 1: identity guard, navigation flag, navigate script', () => 
     expect(Object.keys(probe).sort()).toEqual(['o', 'p', 'r', 't', 'u']);
     page.win.__rhNavPending = Date.now() - 500;
     expect(page.evalJson(buildReadyProbe()).p).toBe(true);
+    // minor 5: the expiry (1.5 s) is shorter than the engine's 3 s settle cap
+    expect(NAV_PENDING_MS).toBe(1500);
+    page.win.__rhNavPending = Date.now() - 2000;
+    expect(page.evalJson(buildReadyProbe()).p).toBe(false);
   });
 
   it('every op clears a leftover navigation flag (select, check, scroll included)', () => {

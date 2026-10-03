@@ -62,6 +62,8 @@ interface Probe {
   o: number | string | null;
   p: boolean;
 }
+/** The value the snapshot shows for password fields. */
+const PASSWORD_MASK = '•'.repeat(8);
 const UNCONFIRMED = 'note: could not confirm the state change';
 
 /** Url without its hash (hash-only changes are in-page navigation). */
@@ -315,7 +317,10 @@ export class FastBrowserEngine implements BrowserPort {
     const r = await this.resolve();
     if (r.kind === 'legacy') return this.useLegacy(fallback, r.reason, markShown);
     try {
-      return await fast(r.ctx);
+      const out = await fast(r.ctx);
+      // The fast path works again: a later breakage deserves a fresh note.
+      this.noteShown = false;
+      return out;
     } catch (err) {
       if (!(err instanceof BrowserAutomationError)) throw err;
       if (err.code === 'js_disabled' || err.code === 'automation_denied') {
@@ -536,8 +541,14 @@ export class FastBrowserEngine implements BrowserPort {
         throw new Error(`${subject} changed (now "${clean(res.current ?? '')}"). Call browser_snapshot.`);
       case 'no_snapshot':
         throw new Error('The page was reloaded since the last snapshot. Call browser_snapshot.');
-      default:
-        throw new Error(res.message ?? `action failed (${res.error})`);
+      default: {
+        const base = res.message ?? `action failed (${res.error})`;
+        // The page reports what the field kept (never for passwords).
+        if (res.error === 'failed' && typeof res.current === 'string') {
+          throw new Error(`${base} (field now: "${clean(res.current, 200)}")`);
+        }
+        throw new Error(base);
+      }
     }
   }
 
@@ -547,6 +558,7 @@ export class FastBrowserEngine implements BrowserPort {
     prev: PageState | null,
     unverified: boolean,
     origin: number | string | null = null,
+    passwordTyped = false,
   ): Promise<string> {
     let loading: string | null = null;
     let next: PageState;
@@ -577,7 +589,8 @@ export class FastBrowserEngine implements BrowserPort {
       return `(state unavailable: ${err instanceof Error ? err.message : String(err)}; call browser_snapshot)`;
     }
     const lines = [renderDelta(prev, next)];
-    if (unverified && lines[0]!.endsWith('no visible change')) lines.push(UNCONFIRMED);
+    if (passwordTyped && lines[0]!.endsWith('no visible change')) lines[0] = `${lines[0]} (password field: value hidden)`;
+    else if (unverified && lines[0]!.endsWith('no visible change')) lines.push(UNCONFIRMED);
     if (loading) lines.push(loading);
     return lines.join('\n');
   }
@@ -624,7 +637,7 @@ export class FastBrowserEngine implements BrowserPort {
       ? { op: 'type', node: el.node, label: el.label, text, submit: true }
       : { op: 'type', node: el.node, label: el.label, text };
     await this.act(ctx, this.guarded(op, shown.origin), index);
-    return `typed into [${index}] ${clean(el.label)}\n${await this.after(ctx, shown.state, false, shown.origin)}`;
+    return `typed into [${index}] ${clean(el.label)}\n${await this.after(ctx, shown.state, false, shown.origin, el.value === PASSWORD_MASK)}`;
   }
 
   async find(query: string, limit = 8): Promise<string> {
@@ -817,13 +830,16 @@ export class FastBrowserEngine implements BrowserPort {
         }
       }
     }
-    const body = await this.after(ctx, shown?.state ?? null, unverified, origin);
+    const passwordTyped = plan.some((p) => p.masked);
+    const body = await this.after(ctx, shown?.state ?? null, unverified, origin, passwordTyped);
     return [`did: ${done.join(', ')}`, ...(navigated ? [navigated] : []), body].join('\n');
   }
 }
 
 interface PlannedStep {
   name: string;
+  /** A type step into a field the snapshot shows masked (password). */
+  masked?: boolean;
   op: PageOp | null;
   index: number | null;
   ms: number;
@@ -843,7 +859,7 @@ function planStep(step: DoStep, n: number, state: PageState | null): PlannedStep
     }
     el = found as PageElement & { node: number };
   }
-  const base = { name, index: el ? (step.index as number) : null, ms: 0 };
+  const base = { name, index: el ? (step.index as number) : null, ms: 0, masked: step.op === 'type' && el?.value === PASSWORD_MASK };
   switch (step.op) {
     case 'click':
       return { ...base, op: { op: 'click', node: el!.node, label: el!.label } };

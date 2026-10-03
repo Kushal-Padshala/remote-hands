@@ -272,6 +272,26 @@ describe('snapshot and actions', () => {
     expect(out.endsWith('note: page still loading')).toBe(true);
   });
 
+  it('typing into a password field says the value is hidden instead of a bare "no visible change" (minor 2)', async () => {
+    const pw = page({ actions: [{ node: 5, role: 'textbox', label: 'Password', kind: 'fill', value: '••••••••' }] });
+    t.snapshots = [JSON.stringify(pw)];
+    await engine.snapshot();
+    const out = await engine.type(5, 'secret');
+    expect(out.split('\n').at(-1)).toBe('no visible change (password field: value hidden)');
+    const out2 = await engine.do([{ op: 'type', index: 5, text: 'secret' }]);
+    expect(out2.split('\n').at(-1)).toBe('no visible change (password field: value hidden)');
+    const out3 = await engine.do([{ op: 'scroll', delta: 5 }]);
+    expect(out3.split('\n').at(-1)).toBe('no visible change');
+  });
+
+  it('passes the field read-back through "value did not stick" (minor 3)', async () => {
+    await engine.snapshot();
+    t.actions = [JSON.stringify({ ok: false, error: 'failed', message: 'value did not stick', current: '555-12' })];
+    await expect(engine.type(7, '555-1234')).rejects.toThrow('value did not stick (field now: "555-12")');
+    t.actions = [JSON.stringify({ ok: false, error: 'failed', message: 'value did not stick' })];
+    await expect(engine.type(7, 'x')).rejects.toThrow(/^value did not stick$/);
+  });
+
   it('types hostile text as an argv-safe JSON literal', async () => {
     await engine.snapshot();
     const text = 'a"b\'c`d${x}\n</script>\\';
@@ -358,6 +378,16 @@ describe('fast-path availability cache', () => {
     t.fail = new BrowserAutomationError('js_disabled', 'Google Chrome', 'JS off in Chrome.');
     await expect(engine.snapshot()).rejects.toThrow('(fast browser path unavailable: JS off in Chrome.)');
     await expect(engine.snapshot()).rejects.toThrow('CDP unreachable (fast browser path unavailable: JS off in Chrome.)');
+  });
+
+  it('re-arms the fallback note after a successful fast-path call (minor 4)', async () => {
+    t.fail = new BrowserAutomationError('js_disabled', 'Google Chrome', 'off-1');
+    expect(await engine.snapshot()).toContain('note: fast browser path unavailable (off-1)');
+    clock += 61_000;
+    t.fail = null;
+    expect(await engine.snapshot()).toContain('page: Sign up');
+    t.fail = new BrowserAutomationError('automation_denied', 'Google Chrome', 'off-2');
+    expect(await engine.snapshot()).toContain('note: fast browser path unavailable (off-2)');
   });
 
   it('reset() clears the cache', async () => {
