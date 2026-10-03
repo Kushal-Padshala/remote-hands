@@ -4,7 +4,7 @@ import { BrowserAutomationError, type TabTarget } from './applescript.js';
 import type { TabInfo } from './transport.js';
 import type { BrowserApp } from './browsers.js';
 import type { BrowserPort, DoStep } from './port.js';
-import { buildReadyProbe } from './page-scripts.js';
+import { buildReadyProbe, buildSnapshotWithProbe } from './page-scripts.js';
 
 type Responder = string | Error | ((js: string) => string);
 
@@ -51,7 +51,29 @@ class FakeTransport {
     this.evals.push({ browser: b.name, target, js });
     if (this.fail) throw this.fail;
     let r: Responder;
-    if (js === buildReadyProbe()) {
+    if (js === buildSnapshotWithProbe()) {
+      // One evaluate: snapshot + readiness probe. Consumes a scripted probe when present,
+      // else reports the snapshot's own page as complete and not navigating.
+      const snapR = (this.snapshots.length > 1 ? this.snapshots.shift() : this.snapshots[0])!;
+      const probeR = this.probes.shift();
+      if (snapR instanceof Error) throw snapR;
+      if (probeR instanceof Error) throw probeR;
+      const snapText = typeof snapR === 'function' ? snapR(js) : snapR;
+      const snap = JSON.parse(snapText) as Record<string, unknown> | null;
+      const probeText =
+        probeR === undefined
+          ? JSON.stringify({
+              u: snap?.url ?? '',
+              r: 'complete',
+              t: snap?.title ?? '',
+              o: Array.isArray(snap?.page_key) ? (snap!.page_key as unknown[])[0] : null,
+              p: false,
+            })
+          : typeof probeR === 'function'
+            ? probeR(buildReadyProbe())
+            : probeR;
+      return `{"snap":${snapText},"probe":${probeText}}`;
+    } else if (js === buildReadyProbe()) {
       r = this.probes.shift() ?? JSON.stringify({ u: this.currentUrl(), r: 'complete', t: 'Sign up' });
     } else if (js.includes('__rhFast = window.__jevFast')) {
       r = (this.snapshots.length > 1 ? this.snapshots.shift() : this.snapshots[0])!;
@@ -202,12 +224,37 @@ describe('snapshot and actions', () => {
     ]);
   });
 
-  it('waits about two probes after a non-navigating action', async () => {
+  it('a non-navigating action costs one action evaluate + one combined snapshot evaluate, no environment read (I3)', async () => {
     await engine.snapshot();
     t.evals = [];
-    await engine.click(12);
-    const probes = t.evals.filter((e) => e.js === buildReadyProbe()).length;
-    expect(probes).toBe(2);
+    const envBefore = t.envCalls;
+    const start = clock;
+    const out = await engine.click(12);
+    expect(t.evals.map((e) => (e.js.includes('const op = ') ? 'action' : e.js === buildSnapshotWithProbe() ? 'combined' : 'other'))).toEqual([
+      'action',
+      'combined',
+    ]);
+    expect(t.envCalls).toBe(envBefore);
+    expect(clock - start).toBe(80);
+    expect(out).toContain('(same page)');
+    t.evals = [];
+    await engine.do([{ op: 'type', index: 7, text: 'a' }, { op: 'check', index: 9, checked: true }]);
+    expect(t.evals.filter((e) => !e.js.includes('const op = ')).map((e) => e.js === buildSnapshotWithProbe())).toEqual([true]);
+  });
+
+  it('a navigating action takes the slow path and renders the new page (I3)', async () => {
+    t.snapshots = [JSON.stringify(page({ page_key: [1, 'x'] }))];
+    await engine.snapshot();
+    t.evals = [];
+    const NEW = JSON.stringify(page({ url: 'https://example.com/next', title: 'Next', page_key: [2, 'x'] }));
+    const pending = JSON.stringify({ u: 'https://example.com/signup', r: 'complete', t: 'Sign up', o: 1, p: true });
+    const done = JSON.stringify({ u: 'https://example.com/next', r: 'complete', t: 'Next', o: 2, p: false });
+    t.probes = [pending, done, done];
+    t.snapshots = [() => (t.probes.length > 0 ? JSON.stringify(page({ page_key: [1, 'x'] })) : NEW)];
+    const out = await engine.click(12);
+    const kinds = t.evals.map((e) => (e.js.includes('const op = ') ? 'action' : e.js === buildSnapshotWithProbe() ? 'combined' : e.js === buildReadyProbe() ? 'probe' : 'snapshot'));
+    expect(kinds).toEqual(['action', 'combined', 'probe', 'probe', 'snapshot']);
+    expect(out).toContain('page: Next — https://example.com/next');
   });
 
   it('notes a page that is still loading after 3 s', async () => {
@@ -257,12 +304,12 @@ describe('snapshot and actions', () => {
     expect(await engine.type(3, 'x')).toBe('legacy:type');
   });
 
-  it('refuses to act when the browser has quit since the snapshot', async () => {
+  it('maps not_running from the action to "<Name> is not running" and forgets the page (I3)', async () => {
     await engine.snapshot();
-    t.env = { frontmost: null, running: [] };
-    clock += 2000;
-    await expect(engine.click(12)).rejects.toThrow('Google Chrome is no longer running. Call browser_snapshot.');
-    expect(t.actionEvals()).toHaveLength(0);
+    t.fail = new BrowserAutomationError('not_running', 'Google Chrome', 'Google Chrome is not running.');
+    await expect(engine.click(12)).rejects.toThrow('Google Chrome is not running. Call browser_snapshot.');
+    t.fail = null;
+    await expect(engine.click(12)).rejects.toThrow('Index 12 is not on the page I last showed');
   });
 });
 
@@ -671,7 +718,8 @@ describe('slow navigation (fix round 1)', () => {
     expect(t.probes).toHaveLength(0);
     expect(out).toContain('page: Welcome — https://example.com/welcome');
     expect(out).not.toContain('(same page)');
-    expect(t.snapshotEvals()).toBe(2);
+    // initial snapshot + the rejected combined read + the snapshot after the slow wait
+    expect(t.snapshotEvals()).toBe(3);
   });
 
   it('notes a navigation that is still pending at the cap', async () => {

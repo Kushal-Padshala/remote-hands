@@ -6,6 +6,7 @@ import {
   buildExtractScript,
   buildNavigateScript,
   buildReadyProbe,
+  buildSnapshotWithProbe,
   buildSnapshotCall,
   type PageOp,
   type PageOpResult,
@@ -625,6 +626,25 @@ describe('review fixes', () => {
     const page = makePage(FORM);
     page.doc.querySelectorAll = () => { throw new Error('boom'); };
     expect(page.evalJson(buildSnapshotCall())).toEqual({ error: 'snapshot failed: boom' });
+  });
+});
+
+describe('buildSnapshotWithProbe (fix pass 4)', () => {
+  it('returns the snapshot and the probe from one evaluation', () => {
+    const page = makePage(FORM);
+    const res = page.evalJson(buildSnapshotWithProbe());
+    expect(Object.keys(res).sort()).toEqual(['probe', 'snap']);
+    expect(res.snap.title).toBe('Test Page');
+    expect(Array.isArray(res.snap.actions)).toBe(true);
+    expect(res.probe).toEqual(page.evalJson(buildReadyProbe()));
+  });
+
+  it('reports a null snapshot (and still a probe) for a page without a body', () => {
+    const page = makePage('');
+    page.doc.body.remove();
+    const res = page.evalJson(buildSnapshotWithProbe());
+    expect(res.snap).toBeNull();
+    expect(res.probe.u).toBe('https://example.com/form');
   });
 });
 

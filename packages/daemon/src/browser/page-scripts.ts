@@ -358,7 +358,29 @@ export function buildSnapshotCall(): string {
  * navigation pending (`p`: the unload flag was set less than NAV_PENDING_MS ago).
  */
 export function buildReadyProbe(): string {
-  return `JSON.stringify({ u: location.href, r: document.readyState, t: document.title, o: typeof performance !== 'undefined' ? performance.timeOrigin : null, p: typeof window.__rhNavPending === 'number' && window.__rhNavPending > 0 && Date.now() - window.__rhNavPending < ${NAV_PENDING_MS} })`;
+  return `JSON.stringify(${probeObject()})`;
+}
+
+function probeObject(): string {
+  return `{ u: location.href, r: document.readyState, t: document.title, o: typeof performance !== 'undefined' ? performance.timeOrigin : null, p: typeof window.__rhNavPending === 'number' && window.__rhNavPending > 0 && Date.now() - window.__rhNavPending < ${NAV_PENDING_MS} }`;
+}
+
+/**
+ * Snapshot and readiness probe in ONE evaluation: `{"snap": <snapshot | null | {error}>,
+ * "probe": {u,r,t,o,p}}`. The probe is read after the snapshot so it describes the same
+ * document the snapshot came from (a navigation starting in between shows as `p`/`o`).
+ */
+export function buildSnapshotWithProbe(): string {
+  return `(() => {
+  let snap;
+  try {
+    const r = ${DOM_SNAPSHOT_SCRIPT};
+    snap = r === undefined ? null : r;
+  } catch (e) {
+    snap = { error: 'snapshot failed: ' + String((e && e.message) || e).slice(0, 300) };
+  }
+  return JSON.stringify({ snap: snap, probe: ${probeObject()} });
+})()`;
 }
 
 /**

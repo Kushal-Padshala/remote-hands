@@ -7,6 +7,7 @@ import {
   buildNavigateScript,
   buildReadyProbe,
   buildSnapshotCall,
+  buildSnapshotWithProbe,
   type PageOp,
   type PageOpResult,
 } from './page-scripts.js';
@@ -88,6 +89,25 @@ function navigatedAway(p: Probe, startUrl: string | null, origin: number | strin
   if (p.p) return true;
   if (origin !== null && p.o !== null && String(p.o) !== String(origin)) return true;
   return startUrl !== null && p.u !== '' && withoutHash(p.u) !== withoutHash(startUrl);
+}
+
+/** A snapshot result as page state plus its document origin; `{error}` throws. */
+function snapshotOf(raw: unknown): { state: PageState; origin: number | string | null } {
+  if (raw && typeof raw === 'object' && 'error' in raw) {
+    const msg = (raw as { error: unknown }).error;
+    throw new Error(typeof msg === 'string' ? msg : 'snapshot failed');
+  }
+  const key = raw && typeof raw === 'object' ? (raw as { page_key?: unknown }).page_key : undefined;
+  const first = Array.isArray(key) ? key[0] : undefined;
+  const origin = typeof first === 'number' || typeof first === 'string' ? first : null;
+  return { state: normalizeSnapshot(raw), origin };
+}
+
+function parseProbe(v: unknown): Probe | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const origin = typeof o.o === 'number' || typeof o.o === 'string' ? o.o : null;
+  return { u: String(o.u ?? ''), r: String(o.r ?? ''), t: String(o.t ?? ''), o: origin, p: o.p === true };
 }
 
 /** Parses a page-script result (always a JSON string); anything else is a clear error. */
@@ -314,6 +334,7 @@ export class FastBrowserEngine implements BrowserPort {
     } else if (err.code === 'not_running' || err.code === 'no_window') {
       this.shown = null;
       this.envCache = null;
+      if (err.code === 'not_running') this.pin = null;
     }
   }
 
@@ -325,15 +346,34 @@ export class FastBrowserEngine implements BrowserPort {
   // ---- page primitives ---------------------------------------------------------------
 
   private async readState(ctx: Ctx): Promise<{ state: PageState; origin: number | string | null }> {
-    const raw = parsePage(await this.t.evaluate(ctx.browser, ctx.target, buildSnapshotCall()));
-    if (raw && typeof raw === 'object' && 'error' in raw) {
-      const msg = (raw as { error: unknown }).error;
-      throw new Error(typeof msg === 'string' ? msg : 'snapshot failed');
+    return snapshotOf(parsePage(await this.t.evaluate(ctx.browser, ctx.target, buildSnapshotCall())));
+  }
+
+  /**
+   * One evaluate returning the snapshot and a readiness probe of the same document. Null
+   * when the page did not answer (mid-navigation timeout/script error): use the slow path.
+   */
+  private async readCombined(
+    ctx: Ctx,
+  ): Promise<{ state: PageState; origin: number | string | null; url: string | null; title: string | null; probe: Probe | null } | null> {
+    let v: unknown;
+    try {
+      v = parsePage(await this.t.evaluate(ctx.browser, ctx.target, buildSnapshotWithProbe()));
+    } catch (err) {
+      if (err instanceof BrowserAutomationError && (err.code === 'timeout' || err.code === 'script_error')) return null;
+      throw err;
     }
-    const key = raw && typeof raw === 'object' ? (raw as { page_key?: unknown }).page_key : undefined;
-    const first = Array.isArray(key) ? key[0] : undefined;
-    const origin = typeof first === 'number' || typeof first === 'string' ? first : null;
-    return { state: normalizeSnapshot(raw), origin };
+    if (!v || typeof v !== 'object') return null;
+    const o = v as { snap?: unknown; probe?: unknown };
+    const snap = o.snap as Record<string, unknown> | null | undefined;
+    const { state, origin } = snapshotOf(snap ?? null);
+    return {
+      state,
+      origin,
+      url: typeof snap?.url === 'string' ? snap.url : null,
+      title: typeof snap?.title === 'string' ? snap.title : null,
+      probe: parseProbe(o.probe),
+    };
   }
 
   /** Snapshot that becomes the page the model sees (actions resolve ids against it). */
@@ -369,11 +409,7 @@ export class FastBrowserEngine implements BrowserPort {
 
   private async probe(ctx: Ctx): Promise<Probe | null> {
     try {
-      const v = parsePage(await this.t.evaluate(ctx.browser, ctx.target, buildReadyProbe(), PROBE_TIMEOUT_MS));
-      if (!v || typeof v !== 'object') return null;
-      const o = v as Record<string, unknown>;
-      const origin = typeof o.o === 'number' || typeof o.o === 'string' ? o.o : null;
-      return { u: String(o.u ?? ''), r: String(o.r ?? ''), t: String(o.t ?? ''), o: origin, p: o.p === true };
+      return parseProbe(parsePage(await this.t.evaluate(ctx.browser, ctx.target, buildReadyProbe(), PROBE_TIMEOUT_MS)));
     } catch (err) {
       // A page mid-navigation may not answer; keep polling. Configuration errors propagate.
       if (err instanceof BrowserAutomationError && err.code !== 'timeout' && err.code !== 'script_error') throw err;
@@ -411,13 +447,12 @@ export class FastBrowserEngine implements BrowserPort {
     }
     return pending ? STILL_NAVIGATING : STILL_LOADING;
   }
-  /** Ensures the shown browser still runs (never launch it) and returns its context. */
+  /**
+   * Keeps the pin alive for an action on the shown tab. No environment read: every
+   * AppleScript call is guarded and raises `not_running` itself (never launching the app),
+   * which `act` maps to "<Name> is not running".
+   */
   private async ensureRunning(ctx: Ctx): Promise<void> {
-    const env = await this.environment();
-    if (!env || !env.running.includes(ctx.browser.name)) {
-      this.shown = null;
-      throw new Error(`${ctx.browser.name} is no longer running. Call browser_snapshot.`);
-    }
     if (this.pin && ctx.target && this.pin.target.windowId === ctx.target.windowId && this.pin.target.tabKey === ctx.target.tabKey) {
       this.pin.at = this.now();
     }
@@ -433,6 +468,9 @@ export class FastBrowserEngine implements BrowserPort {
         this.transportFailed(ctx, err);
         if (err.code === 'js_disabled' || err.code === 'automation_denied') {
           throw new Error(`${err.message} Call browser_snapshot to continue on the slower fallback.`);
+        }
+        if (err.code === 'not_running') {
+          throw new Error(`${ctx.browser.name} is not running. Call browser_snapshot.`);
         }
       }
       throw err;
@@ -466,11 +504,30 @@ export class FastBrowserEngine implements BrowserPort {
     unverified: boolean,
     origin: number | string | null = null,
   ): Promise<string> {
-    let loading: string | null;
+    let loading: string | null = null;
     let next: PageState;
     try {
-      loading = await this.waitStable(ctx, { origin });
-      next = await this.show(ctx);
+      // Fast path: one combined snapshot+probe evaluate. Accept it when the page is
+      // complete, no navigation is pending, and the probe describes the snapshot's page
+      // (same document, or a new document that already finished loading).
+      await this.sleep(NAV_PROBE_DELAY_MS);
+      const c = await this.readCombined(ctx);
+      const p = c?.probe ?? null;
+      const settled =
+        c !== null &&
+        p !== null &&
+        p.r === 'complete' &&
+        !p.p &&
+        (origin === null || p.o === null || String(p.o) === String(origin) || String(p.o) === String(c.origin)) &&
+        (c.url === null || c.url === p.u) &&
+        (c.title === null || c.title === p.t);
+      if (c && settled) {
+        this.shown = { mode: 'fast', browser: ctx.browser, target: ctx.target, state: c.state, origin: c.origin, targetConcrete: ctx.target !== null };
+        next = c.state;
+      } else {
+        loading = await this.waitStable(ctx, { origin });
+        next = await this.show(ctx);
+      }
     } catch (err) {
       this.shown = null;
       return `(state unavailable: ${err instanceof Error ? err.message : String(err)}; call browser_snapshot)`;
