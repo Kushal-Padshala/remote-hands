@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { performAxAction, performAxActionDetailed, getAvailableAxActions, setAxElementValue } from './ax-actions.js';
 
 describe('ax-actions', () => {
@@ -142,5 +143,35 @@ describe('performAxActionDetailed strict matching', () => {
     expect(stripped).not.toContain('strictMatch');
     expect(stripped).toContain('if targetIndex > 0 && currentCounter == targetIndex {');
     expect(stripped).toContain('if !targetLabel.isEmpty && !trimmed.isEmpty {');
+  });
+});
+
+describe('performAxActionDetailed strict fallbacks', () => {
+  const okExec = () => vi.fn().mockReturnValue({ stdout: '{"success":true,"method":"ax"}', stderr: '', status: 0 });
+  const swiftOf = (exec: ReturnType<typeof okExec>) => exec.mock.calls[0]![1][1] as string;
+
+  it('gates the parent-walk and child-press fallbacks on !strictMatch', async () => {
+    const exec = okExec();
+    await performAxActionDetailed('Finder', { bounds: [1, 2, 30, 40], strict: true }, 'AXPress', exec);
+    const swift = swiftOf(exec);
+    expect(swift).toContain('if res != .success && !strictMatch && action as String == "AXPress" {\n    var cur = found');
+    expect(swift).toContain('if res != .success && !strictMatch && action as String == "AXPress" {\n    var chListVal');
+    // radio/checkbox value-set (acts on found itself) and the cgevent click at found's own center stay ungated
+    expect(swift).toContain('if res != .success && (foundRole == "AXRadioButton" || foundRole == "AXCheckBox") {');
+    expect(swift).toContain('if res != .success && action as String == "AXPress", let (x, y, w, h) = getBounds(found), w > 0, h > 0 {');
+  });
+
+  it('non-strict script equals the stored round-2 script plus only the two new gates', async () => {
+    const exec = okExec();
+    await performAxActionDetailed('Finder', { index: 3, bounds: [1, 2, 30, 40], role: 'AXButton', label: 'Go "x"' }, 'AXPress', exec);
+    const stored = readFileSync(new URL('./fixtures/ax-press-nonstrict-round2.swift.txt', import.meta.url), 'utf8');
+    const parent = 'if res != .success && action as String == "AXPress" {\n    var cur = found';
+    const child = 'if res != .success && action as String == "AXPress" {\n    var chListVal';
+    expect(stored).toContain(parent);
+    expect(stored).toContain(child);
+    const expected = stored
+      .replace(parent, parent.replace('res != .success && ', 'res != .success && !strictMatch && '))
+      .replace(child, child.replace('res != .success && ', 'res != .success && !strictMatch && '));
+    expect(swiftOf(exec)).toBe(expected);
   });
 });

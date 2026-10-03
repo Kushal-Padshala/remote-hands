@@ -253,7 +253,7 @@ guard let found = targetEl ?? fallbackEl else {
 let action = "${escapedAction}" as CFString
 var res: AXError = AXUIElementPerformAction(found, action)
 var usedPhysicalClick: Bool = false
-if res != .success && action as String == "AXPress" {
+if res != .success && !strictMatch && action as String == "AXPress" {
     var cur = found
     for _ in 0..<4 {
         var parentVal: AnyObject?
@@ -272,7 +272,7 @@ if res != .success && action as String == "AXPress" {
         }
     }
 }
-if res != .success && action as String == "AXPress" {
+if res != .success && !strictMatch && action as String == "AXPress" {
     var chListVal: AnyObject?
     if AXUIElementCopyAttributeValue(found, kAXChildrenAttribute as CFString, &chListVal) == .success, let chList = chListVal as? [AXUIElement] {
         for c in chList {
