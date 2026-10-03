@@ -333,4 +333,50 @@ describe('WarmAgySession lifecycle hardening', () => {
     procs[1]!.reply('C', 'conv-7');
     expect((await t3).summary).toBe('C');
   });
+
+  it('a served turn without a conversation_id still counts as history: reset kills and the next turn spawns fresh', async () => {
+    const { session, procs, spawnFn, killFn } = makeSession();
+    const t1 = session.runTurn('a', config);
+    await Promise.resolve();
+    procs[0]!.stdout.write(JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: 'A' } }) + '\n');
+    expect((await t1).conversationId).toBeNull();
+    expect(session.hasHistory()).toBe(true);
+    session.reset();
+    expect(killFn).toHaveBeenCalledWith(procs[0], 'SIGTERM');
+    expect(session.hasHistory()).toBe(false);
+    const t2 = session.runTurn('b', config);
+    await Promise.resolve();
+    expect(spawnFn).toHaveBeenCalledTimes(2);
+    expect(spawnFn.mock.calls[1]![1]).not.toContain('--conversation');
+    procs[1]!.reply('B', 'conv-2');
+    expect((await t2).summary).toBe('B');
+  });
+
+  it('a fatal error event during prewarm kills the process and the next turn respawns', async () => {
+    const { session, procs, spawnFn, killFn } = makeSession();
+    session.prewarm(config);
+    procs[0]!.stdout.write('{"event":"fatal","message":"auth expired"}\n');
+    await new Promise((r) => setImmediate(r));
+    expect(killFn).toHaveBeenCalledWith(procs[0], 'SIGTERM');
+    const t = session.runTurn('a', config);
+    await Promise.resolve();
+    expect(spawnFn).toHaveBeenCalledTimes(2);
+    expect(procs[1]!.written.join('')).toContain('"content":"a"');
+    procs[1]!.reply('A');
+    expect((await t).summary).toBe('A');
+  });
+
+  it('reset kills a process that was respawned with --conversation even before it serves a turn', async () => {
+    const { session, procs, spawnFn } = makeSession();
+    const t1 = session.runTurn('a', config);
+    await Promise.resolve();
+    procs[0]!.reply('A', 'conv-3');
+    await t1;
+    procs[0]!.emit('close', 1);
+    session.prewarm(config);
+    expect(spawnFn.mock.calls[1]![1]).toEqual(expect.arrayContaining(['--conversation', 'conv-3']));
+    session.reset();
+    expect(procs[1]!.killed).toBe(true);
+    expect(session.hasHistory()).toBe(false);
+  });
 });

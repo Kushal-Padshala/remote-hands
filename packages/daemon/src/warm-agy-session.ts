@@ -64,11 +64,13 @@ export class WarmAgySession {
   private turn: ActiveTurn | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private lastConversationId: string | null = null;
+  /** The live process has received a turn, so it holds context even if no conversation_id came back. */
+  private processServedTurn = false;
 
   constructor(private readonly opts: WarmAgySessionOptions) {}
 
   hasHistory(): boolean {
-    return this.lastConversationId !== null;
+    return this.lastConversationId !== null || (this.proc !== null && this.processServedTurn);
   }
 
   prewarm(config: WarmSessionConfig): void {
@@ -83,8 +85,9 @@ export class WarmAgySession {
   }
 
   reset(): void {
-    // Idle and nothing to forget: keep the (possibly prewarmed) process.
-    if (!this.turn && this.lastConversationId === null) return;
+    // Idle and nothing to forget (never served a turn, not resumed from a conversation):
+    // keep the (possibly prewarmed) process.
+    if (!this.turn && !this.processServedTurn && this.lastConversationId === null) return;
     this.kill();
     this.turn?.finish({ summary: 'agy session reset', failed: true });
     this.lastConversationId = null;
@@ -163,6 +166,7 @@ export class WarmAgySession {
         }
 
         try {
+          this.processServedTurn = true;
           stdin.write(JSON.stringify({ event: 'user', message: { content: prompt } }) + '\n');
         } catch {
           this.kill();
@@ -198,6 +202,7 @@ export class WarmAgySession {
     this.proc = proc;
     this.procKey = key;
     this.buffer = '';
+    this.processServedTurn = false;
 
     proc.stdin?.on('error', () => {});
     proc.stdout?.on('data', (chunk: Buffer) => this.onData(proc, chunk.toString()));
@@ -220,6 +225,12 @@ export class WarmAgySession {
         event = null;
       }
       const turn = this.turn;
+      if (event && !turn && event.kind === 'error' && (event.payload as any)?.fatal === true) {
+        // A broken idle (e.g. prewarmed) process: forget it so the next turn respawns
+        // instead of writing into a dead session with no turn timeout.
+        this.kill();
+        return;
+      }
       if (!event || !turn) continue;
       turn.events.push(event);
       const conversationId = (event.payload as any)?.conversation_id;
@@ -253,6 +264,7 @@ export class WarmAgySession {
     if (proc !== this.proc) return;
     this.proc = null;
     this.procKey = '';
+    this.processServedTurn = false;
     this.turn?.finish({
       summary: errorMessage ? `agy failed: ${errorMessage}` : 'agy process exited unexpectedly',
       failed: true,
@@ -263,6 +275,7 @@ export class WarmAgySession {
     const proc = this.proc;
     this.proc = null;
     this.procKey = '';
+    this.processServedTurn = false;
     if (!proc) return;
     try {
       (this.opts.killFn ?? defaultKill)(proc, 'SIGTERM');
