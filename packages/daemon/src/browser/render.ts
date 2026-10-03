@@ -88,7 +88,7 @@ export function normalizeSnapshot(raw: unknown): PageState {
 }
 
 /** Single line: control characters and newlines become spaces, whitespace collapses. */
-function clean(s: string, max = MAX_LABEL): string {
+export function clean(s: string, max = MAX_LABEL): string {
   // eslint-disable-next-line no-control-regex
   const one = s.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim();
   return one.length > max ? `${one.slice(0, max)}…` : one;
