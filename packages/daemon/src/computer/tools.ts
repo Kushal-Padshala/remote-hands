@@ -127,7 +127,7 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
     {
       name: 'browser_snapshot',
       description:
-        'Re-read the active tab as "[id] role \\"label\\"" lines. Ids in brackets are stable numbers that stay valid while the element stays on the page. Every browser action result already includes the updated state, so only call this to start from an unknown page or to recover from an error. Pseudo lines [scroll_down], [scroll_up] and [wait] are not ids: use browser_do steps {op:"scroll",delta:560|-560} (down|up) and {op:"wait",ms:...} instead.',
+        'Re-read the active tab as "[id] role \\"label\\"" lines. Ids in brackets are stable numbers that stay valid while the element stays on the page. Every browser action result already includes the updated state, so only call this to start from an unknown page or to recover from an error. Pseudo lines [scroll_down], [scroll_up] and [wait] are not ids: use browser_do steps {op:"scroll",delta:560|-560} (down|up) and {op:"wait",ms:...} instead. Selects and checkboxes are set with browser_do ops "select" and "check" (browser_click/browser_type cannot).',
       inputSchema: {},
       handler: () => session.browserSnapshot(),
     },
@@ -162,7 +162,8 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
     {
       name: 'browser_do',
       description:
-        'Run up to 15 browser steps in ONE call, stopping at the first failure. Prefer this for forms and multi-step sequences, using stable ids from the last state you saw. Required fields per op: click/type/select/check need index; type needs text (optional submit); select needs value; check needs checked; press needs key; scroll needs delta; wait needs ms (0-5000). Example: [{"op":"type","index":3,"text":"me@x.com"},{"op":"click","index":7}]. A click, Enter or submit that navigates ends the batch (remaining steps not run) and the new page state is returned; otherwise the final page state is returned, so do not call browser_snapshot again. Pseudo lines [scroll_down], [scroll_up] and [wait] map to {op:"scroll",delta:560|-560} (down|up) and {op:"wait",ms:...}. On the slower fallback path only click, type and wait are supported.',      inputSchema: { steps: doStepsSchema },
+        'Run up to 15 browser steps in ONE call, stopping at the first failure. Prefer this for forms and multi-step sequences, using stable ids from the last state you saw. Required fields per op: click/type/select/check need index; type needs text (optional submit); select needs value; check needs checked; press needs key; scroll needs delta; wait needs ms (0-5000). Example: [{"op":"type","index":3,"text":"me@x.com"},{"op":"click","index":7}]. A click, Enter or submit that navigates ends the batch (remaining steps not run) and the new page state is returned; otherwise the final page state is returned, so do not call browser_snapshot again. Pseudo lines [scroll_down], [scroll_up] and [wait] map to {op:"scroll",delta:560|-560} (down|up) and {op:"wait",ms:...}. press dispatches synthetic key events only: Enter submits forms, but Tab and typed keys do not move focus or type (use type for text). On the slower fallback path only click, type and wait are supported.',
+      inputSchema: { steps: doStepsSchema },
       handler: (a) => session.browserDo(a.steps),
     },
     {

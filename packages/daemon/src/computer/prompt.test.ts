@@ -9,6 +9,13 @@ describe('SLIM_COMPUTER_PROMPT', () => {
     expect([...mentioned].sort()).toEqual([...actual].sort());
   });
 
+  it('names every supported browser instead of "signed-in Chrome" and says selects/checkboxes need browser_do (fix pass 4)', () => {
+    expect(SLIM_COMPUTER_PROMPT).not.toContain('signed-in Chrome');
+    expect(SLIM_COMPUTER_PROMPT).toContain('signed-in browser (Chrome, Brave, Arc, Edge or Safari)');
+    const rule = SLIM_COMPUTER_PROMPT.split('\n').find((l) => l.startsWith('5. Browser')) ?? '';
+    expect(rule).toMatch(/selects and checkboxes .*browser_do.*select.*check/i);
+  });
+
   it('tells the model to keep the desktop_click app consistent and re-snapshot on stale errors', () => {
     expect(SLIM_COMPUTER_PROMPT).toMatch(/same `app` as the latest `desktop_snapshot`/);
     expect(SLIM_COMPUTER_PROMPT).toMatch(/omit `app` on both/);
