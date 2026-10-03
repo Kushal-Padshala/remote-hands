@@ -52,6 +52,19 @@ describe('hoistSwiftParams', () => {
     expect(template).toBe('let query = "A"\nlet query = "B"\n');
   });
 
+  it('refuses a partial hoist when a string parameter line is rejected (newline in the literal)', () => {
+    const script = 'let targetIndex = 3\nlet label = "line1\nline2"\nprint(label)\n';
+    const { hoisted, template, env } = hoistSwiftParams(script);
+    expect(hoisted).toBe(false);
+    expect(env).toEqual({});
+    expect(template).toBe(script);
+  });
+
+  it('refuses a partial hoist when another param line has an unsupported escape', () => {
+    const script = 'let targetIndex = 3\nlet label = "a\\nb"\n';
+    expect(hoistSwiftParams(script).hoisted).toBe(false);
+  });
+
   it('leaves string literals with unsupported escapes untouched', () => {
     const { template, env } = hoistSwiftParams('let query = "a\\nb"\n');
     expect(env).toEqual({});
@@ -163,6 +176,33 @@ describe('createFastExec', () => {
     const exec = createFastExec({ cacheDir: fs.mkdtempSync(path.join(os.tmpdir(), 'fx-')), spawn });
     exec('swift', ['-e', 'let query = "A"\n', 'extra']);
     expect(seen[1]).toEqual({ command: 'swift', args: ['-e', 'let query = "A"\n', 'extra'] });
+  });
+
+  it('never compiles or caches a script whose label contains a newline', () => {
+    const { spawn, calls } = makeSpawn();
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fx-'));
+    const exec = createFastExec({ cacheDir, spawn });
+    const script = 'let targetIndex = 3\nlet label = "line1\nline2"\nprint(label)\n';
+    exec('swift', ['-e', script]);
+    expect(calls.map((c) => c.command)).toEqual(['swift']);
+    expect(calls[0]!.args).toEqual(['-e', script]);
+    expect(fs.readdirSync(cacheDir)).toEqual([]);
+  });
+
+  it('writes a failure marker that holds no script or compiler text', () => {
+    const spawn: SpawnFn = (command) => {
+      if (command === 'swiftc') return { stdout: '', stderr: 'main.swift:2: error: let query = rhStr("RH_P_query") SECRET', status: 1 };
+      return { stdout: '', stderr: '', status: 0 };
+    };
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fx-'));
+    const exec = createFastExec({ cacheDir, spawn, now: () => 1234 });
+    exec('swift', ['-e', 'let query = "TYPEDSECRET"\nprint(query)\n']);
+    const [entry] = fs.readdirSync(cacheDir);
+    const marker = fs.readFileSync(path.join(cacheDir, entry!, 'failed'), 'utf-8');
+    expect(JSON.parse(marker)).toEqual({ at: 1234, status: 1 });
+    expect(marker).not.toContain('TYPEDSECRET');
+    expect(marker).not.toContain('rhStr');
+    expect(marker).not.toContain('SECRET');
   });
 
   it('does not retry a compilation that already failed for the same template', () => {

@@ -36,6 +36,9 @@ const SWIFT_PRELUDE = [
 const PARAM_LINE =
   /^(let|var) ([A-Za-z_]\w*) = ("(?:[^"\\\n]|\\["\\])*"|-?\d+(?:\.\d+)?|true|false)(?=[ \t]*$|[ \t]+as[ \t]+\w+[ \t]*$|\.lowercased\(\)[ \t]*$)/gm;
 
+// Hoisted lines become `= rhStr(...)`, so any line still matching this after the replace was rejected.
+const STRING_PARAM_START = /^(let|var) [A-Za-z_]\w* = "/m;
+
 export function hoistSwiftParams(script: string): {
   template: string;
   env: Record<string, string>;
@@ -60,7 +63,13 @@ export function hoistSwiftParams(script: string): {
     if (literal.includes('.')) return `${keyword} ${name} = rhDouble("${key}")`;
     return `${keyword} ${name} = rhInt("${key}")`;
   });
-  if (duplicate || Object.keys(env).length === 0) return { template: script, env: {}, hoisted: false };
+  // A top-level string parameter line that PARAM_LINE rejected (a raw newline, an unsupported
+  // escape, ...) would stay inline while the rest is hoisted: the template would not compile and
+  // per-call text would key a new cache entry. Run such a script unmodified via `swift -e`.
+  const unhoistedStringParam = STRING_PARAM_START.test(body);
+  if (duplicate || unhoistedStringParam || Object.keys(env).length === 0) {
+    return { template: script, env: {}, hoisted: false };
+  }
   return { template: SWIFT_PRELUDE + body, env, hoisted: true };
 }
 
@@ -128,7 +137,8 @@ export function createFastExec(options: FastExecOptions = {}): ExecFunction {
           // Only a real compiler diagnostic is remembered (and only for a while). A
           // null status means swiftc could not run or was killed: retry next call.
           if (typeof compiled.status === 'number' && compiled.status !== 0) {
-            fs.writeFileSync(failedMarker, JSON.stringify({ at: now(), stderr: compiled.stderr }));
+            // swiftc diagnostics quote source lines, so only the status and time are kept.
+            fs.writeFileSync(failedMarker, JSON.stringify({ at: now(), status: compiled.status }));
           }
           return run(command, args);
         }

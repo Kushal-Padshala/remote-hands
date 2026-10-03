@@ -99,7 +99,8 @@ export class ComputerSession {
     const described = `[${element.index}] ${element.role.replace(/^AX/, '')} "${element.label}"`;
     const result = await this.deps.axAction(
       targetApp,
-      { bounds: element.bounds, role: element.role, label: element.label, strict: true },
+      // Strict matching ignores the label, so none is sent (keeps it out of the Swift script/cache key).
+      { bounds: element.bounds, role: element.role, label: '', strict: true },
       'AXPress',
     );
     if (!result.success) {
