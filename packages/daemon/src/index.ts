@@ -21,6 +21,9 @@ export * from './screen-capture.js';
 export * from './task-store.js';
 export * from './desktop/macos-driver.js';
 export * from './desktop/fast-exec.js';
+export * from './browser/browsers.js';
+export * from './browser/applescript.js';
+export * from './browser/transport.js';
 export {
   AxWalker,
   type RawAxNode,
