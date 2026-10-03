@@ -1,6 +1,6 @@
 import type { IndexedElement } from '../desktop/ax-walker.js';
 import { AxWalker } from '../desktop/ax-walker.js';
-import { performAxAction } from '../desktop/ax-actions.js';
+import { performAxActionDetailed } from '../desktop/ax-actions.js';
 import { searchAndTriggerMenu } from '../desktop/menu-crawler.js';
 import { MacOsDriver } from '../desktop/macos-driver.js';
 import { BrowserDriver } from '../browser-driver.js';
@@ -9,10 +9,10 @@ import { capLines, compactDesktopElements } from './compact.js';
 export interface ComputerSessionDeps {
   desktop: Pick<
     MacOsDriver,
-    'openApp' | 'focusWindow' | 'clickAt' | 'typeText' | 'sendKeyCombo' | 'listWindows'
+    'openApp' | 'focusWindow' | 'typeText' | 'sendKeyCombo' | 'listWindows' | 'getActiveWindowContext'
   >;
   walker: Pick<AxWalker, 'walkActiveApp'>;
-  axAction: typeof performAxAction;
+  axAction: typeof performAxActionDetailed;
   menuSearch: typeof searchAndTriggerMenu;
   browser: Pick<BrowserDriver, 'listTabs' | 'focusTab' | 'openUrl' | 'snapshot' | 'clickIndex' | 'typeIndex'>;
   settleMs?: number;
@@ -42,48 +42,84 @@ export class ComputerSession {
     if (ms > 0) await (this.deps.sleep ?? ((n) => new Promise((r) => setTimeout(r, n))))(ms);
   }
 
-  private async walk(app?: string): Promise<IndexedElement[]> {
-    const elements = await this.deps.walker.walkActiveApp(app, { allowOcr: false });
-    this.cache = { app: app ?? '', elements };
+  private async resolveApp(app?: string): Promise<string> {
+    if (app) return app;
+    try {
+      const ctx = await this.deps.desktop.getActiveWindowContext();
+      return ctx.app || '';
+    } catch {
+      return '';
+    }
+  }
+
+  private async walk(app: string): Promise<IndexedElement[]> {
+    const elements = await this.deps.walker.walkActiveApp(app || undefined, { allowOcr: false });
+    this.cache = { app, elements };
     return elements;
   }
 
   private async state(app?: string): Promise<string> {
     await this.settle();
-    return compactDesktopElements(await this.walk(app));
+    return compactDesktopElements(await this.walk(await this.resolveApp(app)));
+  }
+
+  private async safeState(app?: string): Promise<string> {
+    try {
+      return await this.state(app);
+    } catch (err) {
+      return `(state unavailable: ${err instanceof Error ? err.message : String(err)}; call desktop_snapshot)`;
+    }
+  }
+
+  private async safeBrowserState(): Promise<string> {
+    try {
+      return await this.browserSnapshot();
+    } catch (err) {
+      return `(state unavailable: ${err instanceof Error ? err.message : String(err)}; call browser_snapshot)`;
+    }
   }
 
   async desktopSnapshot(app?: string, filter?: string): Promise<string> {
-    const elements = await this.walk(app);
-    const header = `app: ${app ?? '(frontmost)'}`;
+    const resolved = await this.resolveApp(app);
+    const elements = await this.walk(resolved);
+    const header = `app: ${resolved || '(frontmost)'}`;
     return `${header}\n${compactDesktopElements(elements, filter ? { filter } : {})}`;
   }
 
   async desktopClick(index: number, app?: string): Promise<string> {
     if (!this.cache) throw new Error('No snapshot cached. Call desktop_snapshot first.');
+    const cachedApp = this.cache.app;
+    if (!cachedApp && !app) throw new Error('Snapshot app is unknown. Call desktop_snapshot with an explicit app.');
+    if (app && cachedApp && app.toLowerCase() !== cachedApp.toLowerCase()) {
+      throw new Error(`Last snapshot was of ${cachedApp}, not ${app}. Call desktop_snapshot for ${app} first.`);
+    }
     const element = this.cache.elements.find((e) => e.index === index);
     if (!element) throw new Error(`Index ${index} not in last snapshot. Call desktop_snapshot again.`);
-    const targetApp = app ?? this.cache.app;
+    const targetApp = cachedApp || app || '';
     const described = `[${element.index}] ${element.role.replace(/^AX/, '')} "${element.label}"`;
-    const pressed = await this.deps.axAction(
+    const result = await this.deps.axAction(
       targetApp,
-      { index: element.index, bounds: element.bounds, role: element.role, label: element.label },
+      { bounds: element.bounds, role: element.role, label: element.label },
       'AXPress',
     );
-    let note = '';
-    if (!pressed) {
-      const [x, y, w, h] = element.bounds;
-      const cx = Math.round(x + w / 2);
-      const cy = Math.round(y + h / 2);
-      await this.deps.desktop.clickAt(cx, cy);
-      note = `\nnote: AX press failed; used physical click at ${cx},${cy}`;
+    if (!result.success) {
+      if (/not found/i.test(result.error ?? '')) {
+        throw new Error(`Element [${element.index}] no longer present. Call desktop_snapshot again.`);
+      }
+      throw new Error(
+        `AX press failed for [${element.index}] (${result.error ?? 'unknown error'}). Call desktop_snapshot and retry.`,
+      );
     }
-    return `clicked ${described}${note}\n${await this.state(targetApp || undefined)}`;
+    const note =
+      result.method === 'cgevent'
+        ? '\nnote: AX press unsupported on this element; used a physical click at its center'
+        : '';
+    return `clicked ${described}${note}\n${await this.safeState(targetApp)}`;
   }
 
   async desktopType(text: string, app?: string): Promise<string> {
     await this.deps.desktop.typeText(text);
-    return `typed ${text.length} characters\n${await this.state(app ?? (this.cache?.app || undefined))}`;
+    return `typed ${text.length} characters\n${await this.safeState(app ?? (this.cache?.app || undefined))}`;
   }
 
   async desktopKey(combo: string, app?: string): Promise<string> {
@@ -100,19 +136,19 @@ export class ComputerSession {
       return mapped;
     });
     await this.deps.desktop.sendKeyCombo([key], modifiers);
-    return `pressed ${combo}\n${await this.state(app ?? (this.cache?.app || undefined))}`;
+    return `pressed ${combo}\n${await this.safeState(app ?? (this.cache?.app || undefined))}`;
   }
 
   async desktopOpen(app: string): Promise<string> {
     await this.deps.desktop.openApp(app);
     await this.deps.desktop.focusWindow(app).catch(() => {});
-    return `opened ${app}\n${await this.state(app)}`;
+    return `opened ${app}\n${await this.safeState(app)}`;
   }
 
   async desktopMenu(app: string, query: string): Promise<string> {
     const res = await this.deps.menuSearch(app, query);
     if (!res.success) throw new Error(res.error ?? `No menu item matching "${query}" in ${app}`);
-    return `menu ${(res.triggeredPath ?? []).join(' > ')}\n${await this.state(app)}`;
+    return `menu ${(res.triggeredPath ?? []).join(' > ')}\n${await this.safeState(app)}`;
   }
 
   async desktopWindows(): Promise<string> {
@@ -145,13 +181,13 @@ export class ComputerSession {
   async browserClick(index: number): Promise<string> {
     const res = await this.deps.browser.clickIndex(index);
     await this.settle();
-    return `clicked [${index}] ${res.label}\n${await this.browserSnapshot()}`;
+    return `clicked [${index}] ${res.label}\n${await this.safeBrowserState()}`;
   }
 
   async browserType(index: number, text: string): Promise<string> {
     const res = await this.deps.browser.typeIndex(index, text);
     await this.settle();
-    return `typed into [${index}] ${res.label}\n${await this.browserSnapshot()}`;
+    return `typed into [${index}] ${res.label}\n${await this.safeBrowserState()}`;
   }
 }
 
@@ -160,7 +196,7 @@ export function createDefaultComputerSession(): ComputerSession {
   return new ComputerSession({
     desktop,
     walker: new AxWalker({ driver: desktop }),
-    axAction: performAxAction,
+    axAction: performAxActionDetailed,
     menuSearch: searchAndTriggerMenu,
     browser: new BrowserDriver({ cdpUrl: process.env.BU_CDP_URL || 'http://127.0.0.1:9222' }),
   });
