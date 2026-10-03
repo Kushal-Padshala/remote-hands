@@ -461,8 +461,8 @@ describe('ProcessAgentRunner with a warm session', () => {
     const events: string[] = [];
     const r1 = await runner.run(baseTask, (e) => { events.push(e.kind); });
     const r2 = await runner.run({ ...baseTask, prompt: 'then open Mail', conversation_id: 'c1' });
-    expect(prompts[0]).toBe('SYSTEM\n\nopen Slack');
-    expect(prompts[1]).toBe('then open Mail');
+    expect(prompts[0]).toBe('SYSTEM\n\nTask id: t1 (pass it to approvals as --task=t1)\nopen Slack');
+    expect(prompts[1]).toBe('Task id: t1 (pass it to approvals as --task=t1)\nthen open Mail');
     expect(r1).toMatchObject({ summary: 'done', conversationId: 'c1', status: 'done' });
     expect(r2.status).toBe('done');
     expect(events).toEqual(['agent_text']);

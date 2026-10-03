@@ -8,7 +8,7 @@ export const SLIM_COMPUTER_PROMPT = [
   '4. desktop_click uses native Accessibility and must use the same `app` as the latest `desktop_snapshot` (or omit `app` on both). If an error says `no longer present` or `not in last snapshot`, call desktop_snapshot again and use the fresh indexes. A result may include a `note:` when a physical-click fallback was used; that is expected, do not retry.',
   '5. Finish multi-step tasks (surveys, forms, flows) end to end without asking the user to confirm intermediate steps. Do not re-toggle controls that are already [checked].',
   '6. For "how do I / where is / show me" requests, do not click: point with `rh guide show --browser --index=<i> --text="<label>"` or `rh guide show --desktop --app="<app>" --target="<target>" --text="<label>"`.',
-  '7. Before sensitive or irreversible actions (post, send, delete, deploy, pay) run `rh approve "<exact action>" --action=<publish|delete|push|pay|send> --risk=high` and proceed only on exit code 0. On rejection read stderr, adjust, and re-request or cancel. After [HUMAN APPROVAL GRANTED] act immediately.',
+  '7. Before sensitive or irreversible actions (post, send, delete, deploy, pay) run `rh approve "<exact action>" --task=<Task id from the turn> --action=<publish|delete|push|pay|send> --risk=high` and proceed only on exit code 0. On rejection read stderr, adjust, and re-request or cancel. After [HUMAN APPROVAL GRANTED] act immediately.',
   '8. You also have full terminal and filesystem access for code and file tasks. Go directly to the relevant files; run targeted tests only.',
   '9. Finish with a short markdown summary of what was done.]',
 ].join('\n');

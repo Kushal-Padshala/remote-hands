@@ -527,7 +527,11 @@ export class ProcessAgentRunner implements AgentRunner {
     const session = this.warmSession!;
     if (!task.conversation_id && session.hasHistory()) session.reset();
     const isFirst = !session.hasHistory();
-    const prompt = isFirst ? `${this.systemPrompt}\n\n${effectiveTask.prompt}` : effectiveTask.prompt;
+    // The warm agy process is spawned once, so REMOTE_HANDS_TASK_ID cannot reach `rh approve`
+    // through the environment; every turn names its task id so the model can pass --task=.
+    const taskLine = `Task id: ${task.id} (pass it to approvals as --task=${task.id})`;
+    const turnPrompt = `${taskLine}\n${effectiveTask.prompt}`;
+    const prompt = isFirst ? `${this.systemPrompt}\n\n${turnPrompt}` : turnPrompt;
     const config = warmConfigFor({
       model: effectiveTask.model,
       effort: effectiveTask.effort,
