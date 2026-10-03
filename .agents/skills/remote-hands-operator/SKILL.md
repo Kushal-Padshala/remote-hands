@@ -46,19 +46,25 @@ When the `rh-computer` MCP server is registered with your agent (`rh mcp install
 | `desktop_open` | Launch or activate an app and return its UI state. |
 | `desktop_menu` | Fuzzy-search an app menu bar and trigger the best match. |
 | `desktop_windows` | List open windows as `App - Title`. |
-| `browser_tabs` | List Chrome tabs. |
-| `browser_focus` | Switch to an existing tab by index, URL substring or title. |
+| `browser_tabs` | List browser tabs. |
+| `browser_focus` | Switch to an existing tab by index, URL substring or title; returns the page state. |
 | `browser_open` | Open a URL (reuses a matching tab) and return the page state. |
-| `browser_snapshot` | List interactive page elements of the active tab. |
-| `browser_click` | Click a page element by index; returns the new page state. |
-| `browser_type` | Type into a page element by index; returns the new page state. |
+| `browser_snapshot` | Re-read the interactive elements of the active tab as `[id] role "label"`. |
+| `browser_click` | Click a page element by its stable id; returns the new page state. |
+| `browser_type` | Type into a page element by its stable id (optional `submit` presses Enter); returns the new page state. |
+| `browser_find` | Search a large page for elements matching a query (optional `limit` 1-20) and return only the best matches. |
+| `browser_do` | Run 1-15 browser steps (`click`, `type`, `select`, `check`, `press`, `scroll`, `wait`) in one call and return the final page state. |
+| `browser_extract` | Read the visible page text (optional `max_chars` 200-20000) when you need to read content, not find controls. |
 | `computer_batch` | Run up to 12 tool calls in one round trip. |
 
 Rules:
 - Same-app rule: `desktop_click` must target the same app as the latest `desktop_snapshot`. Omit `app` on both calls or pass the same app to both, otherwise the call fails.
-- Indexes are only valid until the next snapshot or action. If an error says `no longer present` or `not in last snapshot`, call `desktop_snapshot` again and use the fresh indexes.
+- Browser ids (the numbers in brackets) are stable: they stay valid while the element stays on the page. Every browser action result already contains the updated state, so never call `browser_snapshot` again after an action.
+- Use `browser_do` to fill and submit a whole form or run any multi-step browser sequence in one call, with ids from the last state you saw. Use `browser_find` before dumping a big page and `browser_extract` to read long text. `browser_focus` and `browser_open` reuse existing tabs.
+- If a browser result begins with `note: fast browser path unavailable`, tell the user once to run `rh browser doctor` and continue with the fallback.
+- Desktop indexes are only valid until the next snapshot or action. If an error says `no longer present` or `not in last snapshot`, call `desktop_snapshot` again and use the fresh indexes.
 - `desktop_click` presses by Accessibility with no mouse movement. If the element does not support `AXPress`, it may fall back to a physical click at the element center. The result then includes a `note:` line saying so. This is expected; do not retry.
-- `computer_batch` validates every step first and stops at the first failure. Index-based steps (`desktop_click`, `browser_click`, `browser_type`) refer to the UI state after the previous step, which you have not seen, so batch only steps that need no index, with at most one index-based step first or last.
+- `computer_batch` validates every step first and stops at the first failure. Index-based steps (`desktop_click`, `browser_click`, `browser_type`) refer to the UI state after the previous step, which you have not seen, so batch only steps that need no index, with at most one index-based step first or last. For browser sequences use `browser_do` instead.
 - The zero-discovery and zero-screenshot mandates apply unchanged to the MCP tools.
 
 The `rh browser` and `rh desktop` shell commands below remain available as a fallback when the MCP tools are not registered or a tool does not cover the action.

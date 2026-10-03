@@ -215,6 +215,7 @@ describe('HudCoordinator', () => {
     for (const tool of ['browser_snapshot', 'browser_click', 'browser_type', 'desktop_snapshot', 'desktop_click', 'computer_batch']) {
       expect(rule5).toContain(tool);
     }
+    expect(rule5).toContain('browser_do');
     expect(rule5).toMatch(/fallback/i);
     expect(rule5).toContain('`rh browser snapshot`');
     expect(rule5).toContain('`rh desktop ax-action <app> <index> [action]`');
