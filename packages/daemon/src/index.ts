@@ -47,3 +47,5 @@ export * from './desktop/menu-crawler.js';
 export * from './desktop/slicer-adapter.js';
 export * from './computer/compact.js';
 export * from './computer/session.js';
+export * from './computer/tools.js';
+export * from './computer/mcp-server.js';

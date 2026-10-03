@@ -14,6 +14,7 @@ import { guideCommand, executeGuideCommand } from './commands/guide.js';
 
 import { permissionsCommand } from './commands/permissions.js';
 import { contextCommand } from './commands/context.js';
+import { mcpCommand } from './commands/mcp.js';
 
 export {
   setupCommand,
@@ -31,6 +32,7 @@ export {
   guideCommand,
   executeGuideCommand,
   contextCommand,
+  mcpCommand,
   type CommandContext,
 };
 
@@ -55,6 +57,7 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
     stdout('  approve     Request human-in-the-loop approval on the mobile app');
     stdout('  profiles    List detected Chrome browser profiles and launch commands');
     stdout('  context     List running apps, browser tabs, profiles, and local files');
+    stdout('  mcp         Run or register the warm computer-use MCP server for agy');
     stdout('  setup       Set up Cloudflare resources and pair this computer');
     stdout('  deploy      Deploy backend Worker and phone PWA to Cloudflare');
     stdout('  doctor      Check system prerequisites and connectivity');
@@ -84,6 +87,10 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
 
   if (command === 'context') {
     return await contextCommand(args, context);
+  }
+
+  if (command === 'mcp') {
+    return await mcpCommand(args, context);
   }
 
   if (command === 'browser') {
