@@ -237,6 +237,10 @@ describe('snapshot and actions', () => {
     t.evals = [];
     const envBefore = t.envCalls;
     const start = clock;
+    // The click changes the page (checkbox now checked), so no confirmation read is needed.
+    const changed = page();
+    (changed.actions as Array<Record<string, unknown>>)[3] = { node: 9, role: 'checkbox', label: 'I agree', kind: 'click', value: 'on', checked: 'true' };
+    t.snapshots = [JSON.stringify(changed)];
     const out = await engine.click(12);
     expect(t.evals.map((e) => (e.js.includes('const op = ') ? 'action' : e.js === buildSnapshotWithProbe() ? 'combined' : 'other'))).toEqual([
       'action',
@@ -248,6 +252,80 @@ describe('snapshot and actions', () => {
     t.evals = [];
     await engine.do([{ op: 'type', index: 7, text: 'a' }, { op: 'check', index: 9, checked: true }]);
     expect(t.evals.filter((e) => !e.js.includes('const op = ')).map((e) => e.js === buildSnapshotWithProbe())).toEqual([true]);
+  });
+
+  describe('late-starting navigation confirmation (fix pass 5 A)', () => {
+    const OLD = JSON.stringify(page({ page_key: [1, 'x'] }));
+    const NEW = JSON.stringify(page({ url: 'https://example.com/welcome', title: 'Welcome', page_key: [2, 'x'] }));
+    const pr = (u: string, t2: string, o: number, p: boolean, r = 'complete'): string => JSON.stringify({ u, r, t: t2, o, p });
+    const kinds = (): string[] =>
+      t.evals.map((e) =>
+        e.js.includes('const op = ') ? 'action' : e.js === buildSnapshotWithProbe() ? 'combined' : e.js === buildReadyProbe() ? 'probe' : 'snapshot',
+      );
+
+    it('a button click whose navigation starts late renders the NEW page', async () => {
+      t.snapshots = [OLD];
+      await engine.snapshot();
+      t.evals = [];
+      t.probes = [
+        pr('https://example.com/signup', 'Sign up', 1, false),
+        pr('https://example.com/signup', 'Sign up', 1, true),
+        pr('https://example.com/welcome', 'Welcome', 2, false),
+        pr('https://example.com/welcome', 'Welcome', 2, false),
+      ];
+      t.snapshots = [() => (t.probes.length >= 2 ? OLD : NEW)];
+      const out = await engine.click(12);
+      expect(kinds()).toEqual(['action', 'combined', 'combined', 'probe', 'probe', 'snapshot']);
+      expect(out).toContain('page: Welcome — https://example.com/welcome');
+      expect(out).not.toContain('no change detected');
+    });
+
+    it('a genuinely no-op button click takes exactly one confirmation read and notes it', async () => {
+      await engine.snapshot();
+      t.evals = [];
+      const out = await engine.click(12);
+      expect(kinds()).toEqual(['action', 'combined', 'combined']);
+      expect(out.split('\n').slice(-2)).toEqual(['no visible change', 'note: no change detected']);
+    });
+
+    it('a type with submit confirms but does not add the note; a link click with a real change does not confirm', async () => {
+      await engine.snapshot();
+      t.evals = [];
+      const out = await engine.type(7, 'q', { submit: true });
+      expect(kinds()).toEqual(['action', 'combined', 'combined']);
+      expect(out).not.toContain('no change detected');
+      const linkPage = page({ actions: [{ node: 4, role: 'link', label: 'Pricing', kind: 'click', value: '' }] });
+      t.snapshots = [JSON.stringify(linkPage)];
+      await engine.snapshot();
+      t.snapshots = [JSON.stringify(page({ actions: [{ node: 4, role: 'link', label: 'Pricing', kind: 'click', value: '' }, { node: 5, role: 'button', label: 'Close', kind: 'click', value: '' }] }))];
+      t.evals = [];
+      const out2 = await engine.click(4);
+      expect(kinds()).toEqual(['action', 'combined']);
+      expect(out2).toContain('+ [5] button "Close"');
+    });
+
+    it('select, check, scroll and wait never confirm, even with no visible change', async () => {
+      await engine.snapshot();
+      for (const steps of [
+        [{ op: 'select' as const, index: 3, value: 'Canada' }],
+        [{ op: 'check' as const, index: 9, checked: true }],
+        [{ op: 'scroll' as const, delta: 10 }],
+        [{ op: 'wait' as const, ms: 10 }],
+      ]) {
+        t.evals = [];
+        const out = await engine.do(steps);
+        expect(kinds().filter((k) => k !== 'action')).toEqual(['combined']);
+        expect(out).not.toContain('no change detected');
+      }
+    });
+
+    it('a do batch ending in a no-op button click confirms once and notes it', async () => {
+      await engine.snapshot();
+      t.evals = [];
+      const out = await engine.do([{ op: 'scroll', delta: 5 }, { op: 'click', index: 12 }]);
+      expect(kinds().filter((k) => k !== 'action')).toEqual(['combined', 'combined']);
+      expect(out.split('\n').at(-1)).toBe('note: no change detected');
+    });
   });
 
   it('a combined read whose snapshot errored falls back to the slow path (fix pass 5 B)', async () => {

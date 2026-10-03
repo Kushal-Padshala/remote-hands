@@ -65,6 +65,18 @@ interface Probe {
 /** The value the snapshot shows for password fields. */
 const PASSWORD_MASK = '•'.repeat(8);
 const UNCONFIRMED = 'note: could not confirm the state change';
+const NO_CHANGE_NOTE = 'note: no change detected';
+const CONFIRM_DELAY_MS = 150;
+/**
+ * Whether an action may start a navigation late and needs one confirmation read when it
+ * shows no change: 'note' (link/button click: say when nothing happened), 'quiet' (submit
+ * or Enter), null (never).
+ */
+type Confirm = 'note' | 'quiet' | null;
+
+function clickConfirm(el: PageElement): Confirm {
+  return el.role === 'link' || el.role === 'button' ? 'note' : null;
+}
 
 /** Url without its hash (hash-only changes are in-page navigation). */
 function withoutHash(url: string): string {
@@ -561,9 +573,11 @@ export class FastBrowserEngine implements BrowserPort {
     unverified: boolean,
     origin: number | string | null = null,
     passwordTyped = false,
+    confirm: Confirm = null,
   ): Promise<string> {
     let loading: string | null = null;
     let next: PageState;
+    let noChangeNote = false;
     try {
       // Fast path: one combined snapshot+probe evaluate. Accept it when the page is
       // complete, no navigation is pending, and the probe describes the snapshot's page
@@ -582,6 +596,30 @@ export class FastBrowserEngine implements BrowserPort {
       if (c && settled) {
         this.shown = { mode: 'fast', browser: ctx.browser, target: ctx.target, state: c.state, origin: c.origin, targetConcrete: ctx.target !== null };
         next = c.state;
+        // A click/submit whose handler fetches first and navigates later can look like a
+        // no-op at the first read: confirm once before reporting "no visible change".
+        if (confirm && renderDelta(prev, next).endsWith('no visible change')) {
+          await this.sleep(CONFIRM_DELAY_MS);
+          const c2 = await this.readCombined(ctx);
+          const p2 = c2?.probe ?? null;
+          const firstUrl = withoutHash(c.url ?? p!.u);
+          const moved =
+            c2 === null ||
+            p2 === null ||
+            p2.p ||
+            p2.r !== 'complete' ||
+            (p2.o !== null && c.origin !== null && String(p2.o) !== String(c.origin)) ||
+            withoutHash(p2.u) !== firstUrl ||
+            (c2.url !== null && withoutHash(c2.url) !== firstUrl);
+          if (moved) {
+            loading = await this.waitStable(ctx, { origin });
+            next = await this.show(ctx);
+          } else {
+            this.shown = { mode: 'fast', browser: ctx.browser, target: ctx.target, state: c2.state, origin: c2.origin, targetConcrete: ctx.target !== null };
+            next = c2.state;
+            noChangeNote = confirm === 'note';
+          }
+        }
       } else {
         loading = await this.waitStable(ctx, { origin });
         next = await this.show(ctx);
@@ -593,6 +631,7 @@ export class FastBrowserEngine implements BrowserPort {
     const lines = [renderDelta(prev, next)];
     if (passwordTyped && lines[0]!.endsWith('no visible change')) lines[0] = `${lines[0]} (password field: value hidden)`;
     else if (unverified && lines[0]!.endsWith('no visible change')) lines.push(UNCONFIRMED);
+    if (noChangeNote && lines[0]!.endsWith('no visible change')) lines.push(NO_CHANGE_NOTE);
     if (loading) lines.push(loading);
     return lines.join('\n');
   }
@@ -627,7 +666,7 @@ export class FastBrowserEngine implements BrowserPort {
     const ctx: Ctx = { browser: shown.browser, target: shown.target };
     await this.ensureRunning(ctx);
     await this.act(ctx, this.guarded({ op: 'click', node: el.node, label: el.label }, shown.origin), index);
-    return `clicked [${index}] ${clean(el.label)}\n${await this.after(ctx, shown.state, false, shown.origin)}`;
+    return `clicked [${index}] ${clean(el.label)}\n${await this.after(ctx, shown.state, false, shown.origin, false, clickConfirm(el))}`;
   }
 
   async type(index: number, text: string, opts: { submit?: boolean } = {}): Promise<string> {
@@ -639,7 +678,7 @@ export class FastBrowserEngine implements BrowserPort {
       ? { op: 'type', node: el.node, label: el.label, text, submit: true }
       : { op: 'type', node: el.node, label: el.label, text };
     await this.act(ctx, this.guarded(op, shown.origin), index);
-    return `typed into [${index}] ${clean(el.label)}\n${await this.after(ctx, shown.state, false, shown.origin, el.value === PASSWORD_MASK)}`;
+    return `typed into [${index}] ${clean(el.label)}\n${await this.after(ctx, shown.state, false, shown.origin, el.value === PASSWORD_MASK, opts.submit ? 'quiet' : null)}`;
   }
 
   async find(query: string, limit = 8): Promise<string> {
@@ -799,6 +838,7 @@ export class FastBrowserEngine implements BrowserPort {
       if (ran) throw new Error(`step ${n} ${name} ran, but checking the page afterwards failed: ${msg} (${okSoFar(n + 1)})${state}`);
       throw new Error(`step ${n} ${name} failed: ${msg} (${okSoFar(n)})${state}`);
     };
+    let confirm: Confirm = null;
     for (let i = 0; i < plan.length; i += 1) {
       const p = plan[i]!;
       const n = i + 1;
@@ -815,6 +855,7 @@ export class FastBrowserEngine implements BrowserPort {
       }
       if (res.verified === false) unverified = true;
       done.push(p.name);
+      if (p.confirm === 'note' || (p.confirm === 'quiet' && confirm === null)) confirm = p.confirm;
       const op = p.op;
       const mayNavigate =
         op.op === 'click' || (op.op === 'type' && op.submit === true) || (op.op === 'press' && op.key === 'Enter');
@@ -833,7 +874,7 @@ export class FastBrowserEngine implements BrowserPort {
       }
     }
     const passwordTyped = plan.some((p) => p.masked);
-    const body = await this.after(ctx, shown?.state ?? null, unverified, origin, passwordTyped);
+    const body = await this.after(ctx, shown?.state ?? null, unverified, origin, passwordTyped, confirm);
     return [`did: ${done.join(', ')}`, ...(navigated ? [navigated] : []), body].join('\n');
   }
 }
@@ -842,6 +883,8 @@ interface PlannedStep {
   name: string;
   /** A type step into a field the snapshot shows masked (password). */
   masked?: boolean;
+  /** Late-navigation confirmation kind for this step (see Confirm). */
+  confirm?: Confirm;
   op: PageOp | null;
   index: number | null;
   ms: number;
@@ -861,7 +904,13 @@ function planStep(step: DoStep, n: number, state: PageState | null): PlannedStep
     }
     el = found as PageElement & { node: number };
   }
-  const base = { name, index: el ? (step.index as number) : null, ms: 0, masked: step.op === 'type' && el?.value === PASSWORD_MASK };
+  const confirm: Confirm =
+    step.op === 'click' && el
+      ? clickConfirm(el)
+      : (step.op === 'type' && step.submit === true) || (step.op === 'press' && typeof step.key === 'string' && step.key.toLowerCase() === 'enter')
+        ? 'quiet'
+        : null;
+  const base = { name, index: el ? (step.index as number) : null, ms: 0, masked: step.op === 'type' && el?.value === PASSWORD_MASK, confirm };
   switch (step.op) {
     case 'click':
       return { ...base, op: { op: 'click', node: el!.node, label: el!.label } };
