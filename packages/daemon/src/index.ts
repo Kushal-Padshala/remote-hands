@@ -59,3 +59,4 @@ export * from './computer/compact.js';
 export * from './computer/session.js';
 export * from './computer/tools.js';
 export * from './computer/mcp-server.js';
+export * from './browser/setup.js';
