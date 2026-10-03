@@ -415,12 +415,16 @@ export class FastBrowserEngine implements BrowserPort {
       throw new Error(`unexpected page result: ${text.slice(0, 80)}`);
     }
     if (res.ok) return res;
-    const n = index ?? '?';
+    const subject = index !== null ? `Element [${index}]` : `The ${op.op} target`;
+    const why = res.message ? clean(res.message, 300) : null;
     switch (res.error) {
       case 'stale':
-        throw new Error(`Element [${n}] no longer on the page. Call browser_snapshot.`);
+        // The page guard says why (e.g. 'page changed since the snapshot'); keep its words.
+        if (why) throw new Error(`${subject}: ${why}. Call browser_snapshot.`);
+        throw new Error(`${subject} no longer on the page. Call browser_snapshot.`);
       case 'changed':
-        throw new Error(`Element [${n}] changed (now "${clean(res.current ?? '')}"). Call browser_snapshot.`);
+        if (why) throw new Error(`${subject}: ${why}. Call browser_snapshot.`);
+        throw new Error(`${subject} changed (now "${clean(res.current ?? '')}"). Call browser_snapshot.`);
       case 'no_snapshot':
         throw new Error('The page was reloaded since the last snapshot. Call browser_snapshot.');
       default:

@@ -735,6 +735,24 @@ describe('do failure context (fix round 1)', () => {
     );
   });
 
+  it('passes the page guard message through and never prints [?]', async () => {
+    await engine.snapshot();
+    const guard = JSON.stringify({ ok: false, error: 'stale', message: 'page changed since the snapshot' });
+    t.actions = [guard];
+    await expect(engine.click(12)).rejects.toThrow(/^Element \[12\]: page changed since the snapshot\. Call browser_snapshot\.$/);
+    t.actions = [guard];
+    const err = await engine.do([{ op: 'press', key: 'Tab' }]).catch((e: Error) => e);
+    expect((err as Error).message).toBe(
+      'step 1 press failed: The press target: page changed since the snapshot. Call browser_snapshot. (no steps ok)',
+    );
+    t.actions = [JSON.stringify({ ok: false, error: 'stale' })];
+    const err2 = await engine.do([{ op: 'scroll', delta: 5 }]).catch((e: Error) => e);
+    expect((err2 as Error).message).not.toContain('[?]');
+    expect((err2 as Error).message).toContain('The scroll target no longer on the page');
+    t.actions = [JSON.stringify({ ok: false, error: 'changed', current: 'Back', message: 'label differs' })];
+    await expect(engine.click(12)).rejects.toThrow('Element [12]: label differs. Call browser_snapshot.');
+  });
+
   it('does not append state when the first step fails', async () => {
     await engine.snapshot();
     t.actions = [JSON.stringify({ ok: false, error: 'stale' })];
