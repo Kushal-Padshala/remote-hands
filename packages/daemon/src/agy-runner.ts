@@ -7,6 +7,7 @@ import { z } from 'zod';
 import type { DaemonConfig } from './config.js';
 import type { EventInput } from './task-store.js';
 import { HermesBrain } from './hermes-brain.js';
+import type { WarmAgySession, WarmSessionConfig } from './warm-agy-session.js';
 
 export interface AgentRunResult {
   events: readonly EventInput[];
@@ -471,11 +472,61 @@ export class ProcessAgentRunner implements AgentRunner {
   private agyCommand: string;
   private systemPrompt?: string;
   private hermesBrain: HermesBrain;
+  private warmSession: WarmAgySession | undefined;
 
-  constructor(agyCommand: string = 'agy', systemPrompt?: string, hermesBrain?: HermesBrain) {
+  constructor(agyCommand: string = 'agy', systemPrompt?: string, hermesBrain?: HermesBrain, warmSession?: WarmAgySession) {
     this.agyCommand = agyCommand;
     this.systemPrompt = systemPrompt ?? getDefaultRemoteHandsSystemPrompt();
     this.hermesBrain = hermesBrain ?? new HermesBrain();
+    this.warmSession = warmSession;
+  }
+
+  prewarm(): void {
+    this.warmSession?.prewarm({ model: 'gemini-3.8-flash', effort: 'low' });
+  }
+
+  newConversation(): void {
+    this.warmSession?.reset();
+    this.prewarm();
+  }
+
+  stop(): void {
+    this.warmSession?.stop();
+  }
+
+  private async runWarm(
+    task: Task,
+    effectiveTask: Task,
+    onEvent?: (event: EventInput) => Promise<void> | void,
+    signal?: AbortSignal,
+  ): Promise<AgentRunResult> {
+    const session = this.warmSession!;
+    if (!task.conversation_id && session.hasHistory()) session.reset();
+    const isFirst = !session.hasHistory();
+    const prompt = isFirst ? `${this.systemPrompt}\n\n${effectiveTask.prompt}` : effectiveTask.prompt;
+    const config: WarmSessionConfig = {
+      model: effectiveTask.model || 'gemini-3.8-flash',
+      effort: effectiveTask.effort || 'low',
+      workspace: task.workspace_path || undefined,
+      mode: task.mode && task.mode !== 'default' ? task.mode : undefined,
+    };
+    const turn = await session.runTurn(prompt, config, onEvent, signal);
+    if (!turn.failed && !turn.aborted) {
+      try {
+        await this.hermesBrain.recordTaskCompletion({
+          prompt: task.prompt,
+          summary: turn.summary,
+          workspacePath: task.workspace_path || undefined,
+          conversationId: turn.conversationId,
+        });
+      } catch {}
+    }
+    return {
+      events: turn.events,
+      summary: turn.summary || (turn.failed ? 'Task failed' : 'Task completed'),
+      conversationId: turn.conversationId,
+      status: turn.failed ? 'failed' : 'done',
+    };
   }
 
   async run(
@@ -518,6 +569,10 @@ export class ProcessAgentRunner implements AgentRunner {
 
     if (effectiveTask.model === 'gemini-3.8-flash-high' && effectiveTask.effort === 'low') {
       effectiveTask.model = 'gemini-3.8-flash';
+    }
+
+    if (this.warmSession) {
+      return this.runWarm(task, effectiveTask, onEvent, signal);
     }
 
     const args = buildAgyArgs(effectiveTask, {

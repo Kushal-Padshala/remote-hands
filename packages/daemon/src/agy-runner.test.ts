@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -16,6 +16,7 @@ import {
   getDefaultRemoteHandsReminder,
 } from './agy-runner.js';
 import { HermesBrain } from './hermes-brain.js';
+import type { WarmAgySession } from './warm-agy-session.js';
 
 function task(overrides: Partial<Task> = {}): Task {
   return {
@@ -408,3 +409,102 @@ describe('remote hands system prompt and reminder', () => {
   });
 });
 
+describe('ProcessAgentRunner with a warm session', () => {
+  const baseTask = {
+    id: 't1',
+    prompt: 'open Slack',
+    workspace_path: null,
+    conversation_id: null,
+    model: null,
+    effort: null,
+    mode: null,
+  } as any;
+
+  it('uses the warm session instead of spawning, sending the system prompt only on the first turn', async () => {
+    const prompts: string[] = [];
+    let history = false;
+    const session = {
+      hasHistory: vi.fn(() => history),
+      reset: vi.fn(() => {
+        history = false;
+      }),
+      runTurn: vi.fn(async (prompt: string, _cfg: any, onEvent?: any) => {
+        prompts.push(prompt);
+        history = true;
+        await onEvent?.({ kind: 'agent_text', payload: { text: 'hi' } });
+        return { events: [{ kind: 'agent_text', payload: { text: 'hi' } }], summary: 'done', conversationId: 'c1', failed: false, aborted: false };
+      }),
+      prewarm: vi.fn(),
+    } as unknown as WarmAgySession;
+    const brain = {
+      prepareTaskContext: vi.fn(async (t: any) => ({ augmentedPrompt: t.prompt, resolvedWorkspacePath: null, recommendedEffort: 'low' })),
+      recordTaskCompletion: vi.fn(),
+    } as any;
+    const runner = new ProcessAgentRunner('agy', 'SYSTEM', brain, session);
+    const events: string[] = [];
+    const r1 = await runner.run(baseTask, (e) => { events.push(e.kind); });
+    const r2 = await runner.run({ ...baseTask, prompt: 'then open Mail', conversation_id: 'c1' });
+    expect(prompts[0]).toBe('SYSTEM\n\nopen Slack');
+    expect(prompts[1]).toBe('then open Mail');
+    expect(r1).toMatchObject({ summary: 'done', conversationId: 'c1', status: 'done' });
+    expect(r2.status).toBe('done');
+    expect(events).toEqual(['agent_text']);
+  });
+
+  it('maps failed and aborted turns to the runner result', async () => {
+    const make = (turn: any) =>
+      new ProcessAgentRunner('agy', 'S', { prepareTaskContext: async (t: any) => ({ augmentedPrompt: t.prompt }), recordTaskCompletion: vi.fn() } as any, {
+        hasHistory: () => true,
+        reset: vi.fn(),
+        runTurn: async () => turn,
+        prewarm: vi.fn(),
+      } as any);
+    const failed = await make({ events: [], summary: 'agy process exited unexpectedly', conversationId: null, failed: true, aborted: false }).run(baseTask);
+    expect(failed).toMatchObject({ status: 'failed', summary: 'agy process exited unexpectedly' });
+    const aborted = await make({ events: [], summary: 'Task cancelled by user', conversationId: null, failed: false, aborted: true }).run(baseTask);
+    expect(aborted).toMatchObject({ status: 'done', summary: 'Task cancelled by user' });
+  });
+
+  it('starts a fresh conversation when a new task carries no conversation_id but the session has history', async () => {
+    const reset = vi.fn();
+    const runner = new ProcessAgentRunner('agy', 'SYSTEM', { prepareTaskContext: async (t: any) => ({ augmentedPrompt: t.prompt }), recordTaskCompletion: vi.fn() } as any, {
+      hasHistory: () => true,
+      reset,
+      runTurn: async () => ({ events: [], summary: 'ok', conversationId: 'c2', failed: false, aborted: false }),
+      prewarm: vi.fn(),
+    } as any);
+    await runner.run({ ...baseTask, conversation_id: null });
+    expect(reset).toHaveBeenCalledTimes(1);
+    reset.mockClear();
+    await runner.run({ ...baseTask, conversation_id: 'c2' });
+    expect(reset).not.toHaveBeenCalled();
+  });
+
+  it('newConversation resets then prewarms', () => {
+    const calls: string[] = [];
+    const runner = new ProcessAgentRunner('agy', 'S', undefined, { reset: () => calls.push('reset'), prewarm: () => calls.push('prewarm') } as any);
+    runner.newConversation();
+    expect(calls).toEqual(['reset', 'prewarm']);
+  });
+
+  it('prewarm starts the session with the default model and effort', () => {
+    const prewarm = vi.fn();
+    new ProcessAgentRunner('agy', 'S', undefined, { prewarm } as any).prewarm();
+    expect(prewarm).toHaveBeenCalledWith({ model: 'gemini-3.8-flash', effort: 'low' });
+  });
+
+  it('stop stops the warm session', () => {
+    const stop = vi.fn();
+    new ProcessAgentRunner('agy', 'S', undefined, { stop } as any).stop();
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('prewarm, newConversation and stop are no-ops without a warm session', () => {
+    const runner = new ProcessAgentRunner('agy', 'S');
+    expect(() => {
+      runner.prewarm();
+      runner.newConversation();
+      runner.stop();
+    }).not.toThrow();
+  });
+});
