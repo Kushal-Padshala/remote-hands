@@ -83,6 +83,8 @@ export class WarmAgySession {
   }
 
   reset(): void {
+    // Idle and nothing to forget: keep the (possibly prewarmed) process.
+    if (!this.turn && this.lastConversationId === null) return;
     this.kill();
     this.turn?.finish({ summary: 'agy session reset', failed: true });
     this.lastConversationId = null;

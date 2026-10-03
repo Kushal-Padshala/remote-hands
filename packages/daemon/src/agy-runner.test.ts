@@ -14,9 +14,12 @@ import {
   getDetectedChromeProfiles,
   getDefaultRemoteHandsSystemPrompt,
   getDefaultRemoteHandsReminder,
+  HUD_TASK_MODE,
 } from './agy-runner.js';
 import { HermesBrain } from './hermes-brain.js';
-import type { WarmAgySession } from './warm-agy-session.js';
+import { WarmAgySession } from './warm-agy-session.js';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 
 function task(overrides: Partial<Task> = {}): Task {
   return {
@@ -506,5 +509,60 @@ describe('ProcessAgentRunner with a warm session', () => {
       runner.newConversation();
       runner.stop();
     }).not.toThrow();
+  });
+});
+
+describe('warm prewarm and first HUD task share one process', () => {
+  class FakeProc extends EventEmitter {
+    stdin = new PassThrough();
+    stdout = new PassThrough();
+    stderr = new PassThrough();
+    pid = 321;
+    written: string[] = [];
+    constructor() {
+      super();
+      this.stdin.on('data', (c) => this.written.push(String(c)));
+    }
+    kill() {
+      this.emit('close', null);
+      return true;
+    }
+  }
+
+  it('spawns exactly once when prewarm(HUD hint) precedes a HUD-shaped task', async () => {
+    const procs: FakeProc[] = [];
+    const spawnFn = vi.fn((_c: string, _a: string[]) => {
+      const p = new FakeProc();
+      procs.push(p);
+      return p as any;
+    });
+    const session = new WarmAgySession({
+      command: 'agy',
+      parseLine: (line) => {
+        const rec = JSON.parse(line);
+        return { kind: 'result', payload: { summary: rec.result.response, conversation_id: rec.result.conversation_id } };
+      },
+      spawnFn: spawnFn as any,
+      killFn: ((p: any) => p.kill()) as any,
+    });
+    const brain = {
+      prepareTaskContext: async (t: any) => ({ augmentedPrompt: t.prompt }),
+      recordTaskCompletion: vi.fn(),
+    } as any;
+    const runner = new ProcessAgentRunner('agy', 'S', brain, session);
+    runner.prewarm({ mode: HUD_TASK_MODE });
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+    const hudTask = { id: 't', prompt: 'open Slack', workspace_path: null, conversation_id: null, model: null, effort: null, mode: HUD_TASK_MODE } as any;
+    const run = runner.run(hudTask);
+    await vi.waitFor(() => expect(procs[0]!.written.length).toBe(1));
+    procs[0]!.stdout.write(JSON.stringify({ event: 'result', result: { conversation_id: 'c', status: 'SUCCESS', response: 'ok' } }) + '\n');
+    expect(await run).toMatchObject({ status: 'done', summary: 'ok' });
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('newConversation forwards the hint to prewarm', () => {
+    const prewarm = vi.fn();
+    new ProcessAgentRunner('agy', 'S', undefined, { reset: vi.fn(), prewarm } as any).newConversation({ mode: HUD_TASK_MODE });
+    expect(prewarm).toHaveBeenCalledWith({ model: 'gemini-3.8-flash', effort: 'low', mode: HUD_TASK_MODE });
   });
 });

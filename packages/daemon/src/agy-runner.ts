@@ -27,6 +27,31 @@ export interface AgentRunner {
 
 export type AgentStreamRecord = EventInput;
 
+/** Task mode used by every HUD-created task; the warm prewarm must use the same value. */
+export const HUD_TASK_MODE = 'autonomous';
+
+export interface WarmHint {
+  model?: string | undefined;
+  effort?: string | undefined;
+  mode?: string | undefined;
+}
+
+/** Single source of the warm-session config, shared by prewarm and runWarm so they cannot drift. */
+export function warmConfigFor(input: {
+  model?: string | null | undefined;
+  effort?: string | null | undefined;
+  workspace?: string | null | undefined;
+  mode?: string | null | undefined;
+}): WarmSessionConfig {
+  const config: WarmSessionConfig = {
+    model: input.model || 'gemini-3.8-flash',
+    effort: input.effort || 'low',
+  };
+  if (input.workspace) config.workspace = input.workspace;
+  if (input.mode && input.mode !== 'default') config.mode = input.mode;
+  return config;
+}
+
 export const DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT =
   '[Context: Remote Hands autonomous control plane. You MUST follow the `remote-hands-operator` skill at all times. You are a supercharged, high-speed autonomous AI engineer operating the user\'s computer and browser directly from their mobile phone or desktop overlay.\n' +
   '1. CRITICAL SPEED MANDATE - ZERO DISCOVERY: Start working immediately on the user\'s primary task from your first tool call. Read the `remote-hands-operator` skill for all commands. NEVER run exploratory commands such as `which rh`, `rh --help`, `rh browser --help`, `rh desktop --help`, `rh profiles`, `find`, `mdfind`, or test commands. The commands `rh browser open`, `rh browser snapshot`, `rh browser click`, `rh browser type`, `rh browser tabs`, `rh desktop`, `rh guide`, and `rh approve` are pre-installed in PATH and work immediately. Do not stall or check the environment. When a task requires research or strategy (e.g. setting up campaigns, rental property marketing, platform rules, client redirect workflows), perform targeted web research immediately and jump straight into working at full speed.\n' +
@@ -481,13 +506,13 @@ export class ProcessAgentRunner implements AgentRunner {
     this.warmSession = warmSession;
   }
 
-  prewarm(): void {
-    this.warmSession?.prewarm({ model: 'gemini-3.8-flash', effort: 'low' });
+  prewarm(hint?: WarmHint): void {
+    this.warmSession?.prewarm(warmConfigFor(hint ?? {}));
   }
 
-  newConversation(): void {
+  newConversation(hint?: WarmHint): void {
     this.warmSession?.reset();
-    this.prewarm();
+    this.prewarm(hint);
   }
 
   stop(): void {
@@ -504,12 +529,12 @@ export class ProcessAgentRunner implements AgentRunner {
     if (!task.conversation_id && session.hasHistory()) session.reset();
     const isFirst = !session.hasHistory();
     const prompt = isFirst ? `${this.systemPrompt}\n\n${effectiveTask.prompt}` : effectiveTask.prompt;
-    const config: WarmSessionConfig = {
-      model: effectiveTask.model || 'gemini-3.8-flash',
-      effort: effectiveTask.effort || 'low',
-      workspace: task.workspace_path || undefined,
-      mode: task.mode && task.mode !== 'default' ? task.mode : undefined,
-    };
+    const config = warmConfigFor({
+      model: effectiveTask.model,
+      effort: effectiveTask.effort,
+      workspace: task.workspace_path,
+      mode: task.mode,
+    });
     const turn = await session.runTurn(prompt, config, onEvent, signal);
     if (!turn.failed && !turn.aborted) {
       try {

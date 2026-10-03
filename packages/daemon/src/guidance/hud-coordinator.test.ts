@@ -733,6 +733,7 @@ describe('HudCoordinator default warm runner lifecycle', () => {
     const listener = new HudCoordinator(deps).startListening();
     expect(defaultRunnerFactory).toHaveBeenCalledTimes(1);
     expect(fakeRunner.prewarm).toHaveBeenCalledTimes(1);
+    expect(fakeRunner.prewarm).toHaveBeenCalledWith({ mode: 'autonomous' });
     expect(fakeRunner.stop).not.toHaveBeenCalled();
     listener.stop();
     expect(fakeRunner.stop).toHaveBeenCalledTimes(1);
@@ -745,6 +746,7 @@ describe('HudCoordinator default warm runner lifecycle', () => {
     const cb = hudRunner.startListener.mock.calls[0]![0];
     await cb({ event: 'hotkey', app: 'Google Chrome' });
     expect(fakeRunner.newConversation).toHaveBeenCalledTimes(1);
+    expect(fakeRunner.newConversation).toHaveBeenCalledWith({ mode: 'autonomous' });
     await coordinator.cancelActiveTask();
     expect(fakeRunner.newConversation).toHaveBeenCalledTimes(2);
   });

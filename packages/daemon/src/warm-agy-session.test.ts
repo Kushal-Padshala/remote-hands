@@ -276,4 +276,28 @@ describe('WarmAgySession lifecycle hardening', () => {
       expect(await t).toMatchObject({ failed: true, aborted: false });
     }
   });
+
+  it('reset keeps an idle prewarmed process that has no history', async () => {
+    const { session, procs, spawnFn, killFn } = makeSession();
+    session.prewarm(config);
+    session.reset();
+    expect(killFn).not.toHaveBeenCalled();
+    expect(procs[0]!.killed).toBe(false);
+    const t = session.runTurn('a', config);
+    await Promise.resolve();
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+    procs[0]!.reply('A');
+    await t;
+  });
+
+  it('reset after a completed turn kills the process and forgets history', async () => {
+    const { session, procs, killFn } = makeSession();
+    const t = session.runTurn('a', config);
+    await Promise.resolve();
+    procs[0]!.reply('A');
+    await t;
+    session.reset();
+    expect(killFn).toHaveBeenCalledTimes(1);
+    expect(session.hasHistory()).toBe(false);
+  });
 });

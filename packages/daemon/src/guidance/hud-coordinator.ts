@@ -8,7 +8,7 @@ import { GuidanceManager } from './guidance-manager.js';
 import { MacOsDriver, type ActiveWindowContext } from '../desktop/macos-driver.js';
 import { LocalTaskStore } from '../local-task-store.js';
 import type { TaskStore } from '../task-store.js';
-import { ProcessAgentRunner, parseAgyStreamLine, type AgentRunner } from '../agy-runner.js';
+import { ProcessAgentRunner, parseAgyStreamLine, HUD_TASK_MODE, type AgentRunner } from '../agy-runner.js';
 import { WarmAgySession } from '../warm-agy-session.js';
 import { SLIM_COMPUTER_PROMPT } from '../computer/prompt.js';
 import { DynamicPowerManager } from '../system/power-manager.js';
@@ -353,7 +353,7 @@ export class HudCoordinator {
 
   async cancelActiveTask(reason = 'Task cancelled by user from HUD'): Promise<void> {
     this.currentConversationId = undefined;
-    this.defaultRunner?.newConversation();
+    this.defaultRunner?.newConversation({ mode: HUD_TASK_MODE });
     await this.stopActiveTask(reason);
   }
 
@@ -520,7 +520,7 @@ export class HudCoordinator {
         prompt,
         goal: result.query,
         kind: windowContext.isBrowser ? 'browser' : 'mixed',
-        mode: 'autonomous',
+        mode: HUD_TASK_MODE,
         status: 'queued',
         model: 'gemini-3.8-flash',
         effort: 'low',
@@ -560,7 +560,7 @@ export class HudCoordinator {
           prompt,
           goal: result.query,
           kind: windowContext.isBrowser ? 'browser' : 'mixed',
-          mode: 'autonomous',
+          mode: HUD_TASK_MODE,
           status: 'queued',
           model: 'gemini-3.8-flash',
           effort: 'low',
@@ -629,7 +629,7 @@ export class HudCoordinator {
   startListening(): { stop: () => void } {
     if (!this.runner) {
       this.getRunner();
-      this.defaultRunner?.prewarm();
+      this.defaultRunner?.prewarm({ mode: HUD_TASK_MODE });
     }
     let activePrompt: { close: () => void } | null = null;
     const runnerListener = this.hudRunner.startListener(async (event: any) => {
@@ -643,7 +643,7 @@ export class HudCoordinator {
             activePrompt = null;
           }
           this.currentConversationId = undefined;
-          this.defaultRunner?.newConversation();
+          this.defaultRunner?.newConversation({ mode: HUD_TASK_MODE });
           const promptArgs: any[] = [
             event.app,
             async (result: any, sendUpdate: any) => {
