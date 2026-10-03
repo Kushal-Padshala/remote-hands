@@ -93,11 +93,26 @@ describe('fix round 1', () => {
     );
   });
 
-  it('maps an uninstalled browser to not_running with an install hint', () => {
+  it('maps a compile (syntax) error to script_error with the condensed detail, not not_running', () => {
     for (const stderr of [
       '318:321: syntax error: Expected end of line but found property. (-2741)\n',
       '12:30: syntax error: Expected class name but found identifier. (-2740)',
+    ]) {
+      const err = classifyOsascriptError(edge, stderr, 1);
+      expect(err.code).toBe('script_error');
+      expect(err.message).toBe(`AppleScript could not compile for Microsoft Edge: ${stderr.trim()}`);
+    }
+    const long = `1:2: syntax error: ${'x'.repeat(400)} (-2741)`;
+    const msg = classifyOsascriptError(edge, long, 1).message;
+    expect(msg.startsWith(`AppleScript could not compile for Microsoft Edge: ${long.slice(0, 200)}`)).toBe(true);
+    expect(msg.length).toBeLessThan(270);
+  });
+
+  it('maps an uninstalled browser to not_running with an install hint', () => {
+    for (const stderr of [
       'execution error: Can’t get application "Microsoft Edge". (-1728)',
+      '0:42: syntax error: Can’t get application "Microsoft Edge". (-1728)',
+      "execution error: Can't get application \"Microsoft Edge\". (-1728)",
     ]) {
       const err = classifyOsascriptError(edge, stderr, 1);
       expect(err.code).toBe('not_running');

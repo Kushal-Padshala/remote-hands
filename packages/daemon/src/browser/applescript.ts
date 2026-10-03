@@ -91,13 +91,16 @@ export function classifyOsascriptError(
   ) {
     return make('js_disabled');
   }
-  // The script names the app with literal terminology; when the app is not installed
-  // osascript cannot load its dictionary and the script fails to compile.
-  if (
-    new RegExp(`${prefix}syntax error: [^\\n]*\\((?:-2741|-2740)\\)$`).test(text) ||
-    new RegExp(`${prefix}(?:execution error: )?Can[’']t get application "${name}"\\. \\(-1728\\)$`).test(text)
-  ) {
+  // osascript cannot find the app (not installed): it names the application itself.
+  if (new RegExp(`${prefix}(?:execution error: |syntax error: )?Can[’']t get application "${name}"\\. \\(-1728\\)$`).test(text)) {
     return new BrowserAutomationError('not_running', browser.name, `${browser.name} is not installed or not running.`);
+  }
+  // Any other compile error is a bug in our script for this browser's dictionary: say so
+  // instead of hiding it behind "not installed".
+  if (new RegExp(`${prefix}syntax error: [^\\n]*\\((?:-2741|-2740)\\)$`).test(text)) {
+    const oneLine = text.replace(/\s+/g, ' ');
+    const detail = oneLine.length > 200 ? `${oneLine.slice(0, 200)}...` : oneLine;
+    return new BrowserAutomationError('script_error', browser.name, `AppleScript could not compile for ${browser.name}: ${detail}`);
   }
   return make('script_error', text === '' ? `osascript exited with status ${status}` : condense(text));
 }
