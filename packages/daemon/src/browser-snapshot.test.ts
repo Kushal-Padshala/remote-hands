@@ -13,6 +13,10 @@ describe('DOM Snapshot Engine', () => {
     expect(DOM_SNAPSHOT_SCRIPT).toContain('checkVisibility');
   });
 
+  it('exposes the name, role and visible helpers on the page cache', () => {
+    expect(DOM_SNAPSHOT_SCRIPT).toContain('cache.name = name; cache.role = role; cache.visible = visible;');
+  });
+
   it('formats indexed elements into a compact terminal table', () => {
     const elements: IndexedElement[] = [
       { index: 1, id: 101, role: 'button', label: 'Deploy Preview', tag: 'BUTTON' },
