@@ -20,6 +20,8 @@ export interface PageState {
   title: string;
   text: string;
   elements: PageElement[];
+  /** Actions the snapshot dropped beyond its 250-action cap. */
+  omitted?: number;
 }
 
 export interface RenderOpts {
@@ -30,19 +32,19 @@ export interface RenderOpts {
 
 const ARROW = ' → ';
 const MAX_LABEL = 80;
-const MAX_OPTIONS = 5;
+const MAX_OPTIONS = 8;
 const DEFAULT_MAX_LINES = 120;
 const DEFAULT_TEXT_CHARS = 1200;
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
 function baseLabel(label: string): string {
-  const i = label.indexOf(ARROW);
+  const i = label.lastIndexOf(ARROW);
   return i >= 0 ? label.slice(0, i) : label;
 }
 
 function optionLabel(label: string): string {
-  const i = label.indexOf(ARROW);
+  const i = label.lastIndexOf(ARROW);
   return i >= 0 ? label.slice(i + ARROW.length) : label;
 }
 
@@ -84,18 +86,24 @@ export function normalizeSnapshot(raw: unknown): PageState {
     byNode.set(node, el);
     elements.push(el);
   }
-  return { url: str(obj.url), title: str(obj.title), text: str(obj.text), elements };
+  const state: PageState = { url: str(obj.url), title: str(obj.title), text: str(obj.text), elements };
+  if (typeof obj.omitted_actions === 'number' && obj.omitted_actions > 0) state.omitted = obj.omitted_actions;
+  return state;
 }
 
 /** Single line: control characters and newlines become spaces, whitespace collapses. */
 export function clean(s: string, max = MAX_LABEL): string {
   // eslint-disable-next-line no-control-regex
   const one = s.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim();
-  return one.length > max ? `${one.slice(0, max)}…` : one;
+  if (one.length <= max) return one;
+  let end = max;
+  const last = one.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return `${one.slice(0, end)}…`;
 }
 
 function quote(s: string): string {
-  return `"${clean(s).replace(/"/g, '\\"')}"`;
+  return `"${clean(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 function showsValue(el: PageElement): boolean {
@@ -104,12 +112,12 @@ function showsValue(el: PageElement): boolean {
   return el.value !== '' && (el.kind === 'fill' || el.role === 'combobox');
 }
 
-export function renderElement(el: PageElement): string {
+export function renderElement(el: PageElement, maxOptions = MAX_OPTIONS): string {
   let line = `[${el.id}] ${el.role} ${quote(el.label)}`;
   if (showsValue(el)) line += ` = ${quote(el.value ?? '')}`;
   if (el.checked === true) line += ' [checked]';
   if (el.options && el.options.length > 0) {
-    const shown = el.options.slice(0, MAX_OPTIONS).map((o) => clean(o));
+    const shown = el.options.slice(0, maxOptions).map((o) => clean(o));
     const more = el.options.length - shown.length;
     line += ` options: ${shown.join(' | ')}${more > 0 ? ` | …(+${more})` : ''}`;
   }
@@ -138,6 +146,9 @@ export function renderFull(state: PageState, opts: RenderOpts): string {
   for (const el of state.elements.slice(0, max)) lines.push(renderElement(el));
   if (state.elements.length > max) {
     lines.push(`… ${state.elements.length - max} more elements hidden; use browser_find`);
+  }
+  if (state.omitted) {
+    lines.push(`(${state.omitted} more elements not listed: only the first 250 are captured; use browser_find or scroll)`);
   }
   return lines.join('\n');
 }
@@ -192,7 +203,7 @@ export function findElements(state: PageState, query: string, limit: number): Pa
   const exact = query.trim().toLowerCase();
   const scored: Array<{ el: PageElement; score: number; i: number }> = [];
   state.elements.forEach((el, i) => {
-    const hay = words(`${el.label} ${el.value ?? ''} ${el.role}`);
+    const hay = words(`${el.label} ${el.value ?? ''} ${el.role} ${(el.options ?? []).join(' ')}`);
     const hits = tokens.filter((t) => hay.some((w) => w.startsWith(t))).length;
     if (hits === 0) return;
     let score = hits;

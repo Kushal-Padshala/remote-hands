@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findElements, normalizeSnapshot, renderDelta, renderFull, type PageState } from './render.js';
+import { clean, findElements, normalizeSnapshot, renderDelta, renderElement, renderFull, type PageState } from './render.js';
 
 // Shaped like DOM_SNAPSHOT_SCRIPT output (snapshot `id`s e1.. are positional and ignored).
 function rawPage(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -65,13 +65,13 @@ describe('renderFull', () => {
   });
 
   it('caps option lists and sanitizes labels', () => {
-    const actions = ['B', 'C', 'D', 'E', 'F', 'G'].map((o, i) => ({
+    const actions = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].map((o, i) => ({
       node: 4, role: 'combobox', kind: 'select', label: `Size → ${o}`, value: String(i), current_value: 'A',
     }));
     actions.push({ node: 5, role: 'link', kind: 'click', label: `Say "hi"\nnow\u0007${'y'.repeat(100)}`, value: '', current_value: '' });
     actions.push({ node: 6, role: 'button', kind: 'click', label: '', value: '', current_value: '' });
     const out = renderFull(normalizeSnapshot({ url: 'u', title: 't', text: '', actions }), { text: false }).split('\n');
-    expect(out[1]).toBe('[4] select "Size" = "A" options: A | B | C | D | E | …(+2)');
+    expect(out[1]).toBe('[4] select "Size" = "A" options: A | B | C | D | E | F | G | H | …(+2)');
     expect(out[2]).toBe(`[5] link "Say \\"hi\\" now ${'y'.repeat(67)}…"`);
     expect(out[3]).toBe('[6] button ""');
   });
@@ -146,5 +146,47 @@ describe('findElements', () => {
     expect(findElements(s, 'SIGN IN', 1).map((e) => e.id)).toEqual([2]);
     expect(findElements(s, 'textbox', 8).map((e) => e.id)).toEqual([5]);
     expect(findElements(s, 'zzz', 8)).toEqual([]);
+  });
+});
+
+describe('fix round 1 minors', () => {
+  it('splits a select label at the last arrow', () => {
+    const s = normalizeSnapshot({ url: 'u', title: 't', text: '', actions: [
+      { node: 4, role: 'combobox', kind: 'select', label: 'From → To → Canada', value: 'ca', current_value: 'US' },
+    ] });
+    expect(s.elements[0]).toMatchObject({ label: 'From → To', options: ['US', 'Canada'] });
+  });
+
+  it('find matches option labels and renders the whole option list up to 40', () => {
+    const opts = Array.from({ length: 45 }, (_, i) => `Opt${i}`);
+    opts[30] = 'Zanzibar';
+    const actions = opts.map((o) => ({ node: 4, role: 'combobox', kind: 'select', label: `Place → ${o}`, value: o, current_value: 'Home' }));
+    const s = normalizeSnapshot({ url: 'u', title: 't', text: '', actions });
+    const hits = findElements(s, 'zanzibar', 8);
+    expect(hits.map((e) => e.id)).toEqual([4]);
+    const line = renderElement(hits[0]!, 40);
+    expect(line).toContain('Zanzibar');
+    expect(line.endsWith('| …(+6)')).toBe(true);
+  });
+
+  it('shows a hint when the snapshot omitted actions', () => {
+    const s = normalizeSnapshot({ url: 'u', title: 't', text: '', omitted_actions: 12, actions: [
+      { node: 1, role: 'link', kind: 'click', label: 'A', value: '' },
+    ] });
+    expect(s.omitted).toBe(12);
+    expect(renderFull(s, { text: false }).split('\n').at(-1)).toBe(
+      '(12 more elements not listed: only the first 250 are captured; use browser_find or scroll)',
+    );
+  });
+
+  it('escapes backslashes before quotes and never splits a surrogate pair', () => {
+    const s = normalizeSnapshot({ url: 'u', title: 't', text: '', actions: [
+      { node: 1, role: 'link', kind: 'click', label: 'a\\"b', value: '' },
+      { node: 2, role: 'link', kind: 'click', label: `${'x'.repeat(79)}😀tail`, value: '' },
+    ] });
+    const lines = renderFull(s, { text: false }).split('\n');
+    expect(lines[1]).toBe('[1] link "a\\\\\\"b"');
+    expect(lines[2]).toBe(`[2] link "${'x'.repeat(79)}…"`);
+    expect(clean(`${'x'.repeat(79)}😀tail`)).toBe(`${'x'.repeat(79)}…`);
   });
 });
