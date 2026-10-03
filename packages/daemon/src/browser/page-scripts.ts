@@ -89,24 +89,30 @@ const PRELUDE = String.raw`
 `;
 
 // Identity guard: the document must be the one that was snapshotted (when the caller says which).
+// Every op first clears a leftover navigation flag (downloads, mailto: links, 204 responses and
+// cancelled navigations fire beforeunload without leaving the page).
 const GUARD = String.raw`
+  window.__rhNavPending = 0;
   if (op.origin !== undefined && op.origin !== null && typeof performance !== 'undefined' &&
       String(performance.timeOrigin) !== String(op.origin)) {
     return fail('stale', { message: 'page changed since the snapshot' });
   }
 `;
 
-// Marks a pending navigation (beforeunload/pagehide) so the engine does not mistake the old
-// document for the result. Installed once per document; the flag is cleared before each action.
+// Marks a pending navigation (beforeunload/pagehide) with a timestamp so the engine does not
+// mistake the old document for the result. Installed once per document; GUARD clears the flag
+// before each action and the ready probe ignores a flag older than NAV_PENDING_MS.
 const NAV_HOOK = String.raw`
   if (!window.__rhNavHooked && typeof window.addEventListener === 'function') {
-    const markNav = () => { window.__rhNavPending = true; };
+    const markNav = () => { window.__rhNavPending = Date.now(); };
     window.addEventListener('beforeunload', markNav);
     window.addEventListener('pagehide', markNav);
     window.__rhNavHooked = true;
   }
-  window.__rhNavPending = false;
 `;
+
+/** A navigation flag older than this is treated as stale (the navigation never happened). */
+export const NAV_PENDING_MS = 3000;
 
 // Resolves `el` and verifies the label; runs for every op that targets a node.
 const RESOLVE = String.raw`
@@ -347,9 +353,12 @@ export function buildSnapshotCall(): string {
 })()`;
 }
 
-/** Cheap probe as a JSON string: url, readyState, title, document origin (timeOrigin), navigation pending. */
+/**
+ * Cheap probe as a JSON string: url, readyState, title, document origin (timeOrigin), and
+ * navigation pending (`p`: the unload flag was set less than NAV_PENDING_MS ago).
+ */
 export function buildReadyProbe(): string {
-  return `JSON.stringify({ u: location.href, r: document.readyState, t: document.title, o: typeof performance !== 'undefined' ? performance.timeOrigin : null, p: !!window.__rhNavPending })`;
+  return `JSON.stringify({ u: location.href, r: document.readyState, t: document.title, o: typeof performance !== 'undefined' ? performance.timeOrigin : null, p: typeof window.__rhNavPending === 'number' && window.__rhNavPending > 0 && Date.now() - window.__rhNavPending < ${NAV_PENDING_MS} })`;
 }
 
 /**

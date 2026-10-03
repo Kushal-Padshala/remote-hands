@@ -659,6 +659,40 @@ describe('slow navigation (fix round 1)', () => {
     expect(out).toContain('step 1 press ok but the page navigated');
   });
 
+  /** Evaluates the real probe source against a page whose unload flag was set `ageMs` ago. */
+  function probeWithFlag(ageMs: number): (js: string) => string {
+    return (js) => {
+      const win = { __rhNavPending: Date.now() - ageMs };
+      const loc = { href: 'https://example.com/signup' };
+      const doc = { readyState: 'complete', title: 'Sign up' };
+      const perf = { timeOrigin: 1 };
+      return new Function('window', 'location', 'document', 'performance', `return ${js};`)(win, loc, doc, perf) as string;
+    };
+  }
+
+  it('a stale navigation flag (set seconds earlier) causes no 3 s wait and no navigating note', async () => {
+    t.snapshots = [OLD];
+    await engine.snapshot();
+    t.probes = Array.from({ length: 100 }, () => probeWithFlag(5000));
+    const start = clock;
+    const out = await engine.click(12);
+    expect(clock - start).toBeLessThan(1000);
+    expect(out).not.toContain('still navigating');
+    expect(out).not.toContain('still loading');
+  });
+
+  it('do does not abort on a navigation flag set seconds earlier; a fresh flag still stops it', async () => {
+    t.snapshots = [OLD];
+    await engine.snapshot();
+    t.probes = Array.from({ length: 100 }, () => probeWithFlag(5000));
+    const out = await engine.do([{ op: 'click', index: 12 }, { op: 'type', index: 7, text: 'x' }]);
+    expect(t.actionEvals()).toHaveLength(2);
+    expect(out).not.toContain('navigated');
+    t.probes = [probeWithFlag(100), ...Array.from({ length: 100 }, () => probeWithFlag(5000))];
+    const out2 = await engine.do([{ op: 'click', index: 12 }, { op: 'type', index: 7, text: 'x' }]);
+    expect(out2).toContain('step 1 click ok but the page navigated');
+  });
+
   it('open keeps waiting while the new tab is about:blank', async () => {
     t.tabList = [];
     t.tabListAfterOpen = [{ windowId: '11', windowIndex: 1, tabKey: '103', tabIndex: 1, title: 'Welcome', url: 'about:blank', active: true }];

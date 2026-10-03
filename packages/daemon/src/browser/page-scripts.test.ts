@@ -660,10 +660,10 @@ describe('fix round 1: identity guard, navigation flag, navigate script', () => 
             ? page.run({ op, node: page.node('#name'), label: 'Full name', text: 'x' })
             : page.run({ op, key: 'Tab' });
       expect(res.ok).toBe(true);
-      expect(page.win.__rhNavPending).toBe(false);
+      expect(page.win.__rhNavPending).toBe(0);
       expect(page.evalJson(buildReadyProbe()).p).toBe(false);
       page.win.dispatchEvent(new page.win.Event('beforeunload'));
-      expect(page.win.__rhNavPending).toBe(true);
+      expect(page.win.__rhNavPending).toBeGreaterThan(0);
       expect(page.evalJson(buildReadyProbe()).p).toBe(true);
     }
   });
@@ -674,8 +674,38 @@ describe('fix round 1: identity guard, navigation flag, navigate script', () => 
     page.run({ op: 'click', node: page.node('#go'), label: 'Go now' });
     page.run({ op: 'click', node: page.node('#go'), label: 'Go now' });
     page.win.dispatchEvent(new page.win.Event('pagehide'));
-    expect(page.win.__rhNavPending).toBe(true);
+    expect(page.win.__rhNavPending).toBeGreaterThan(0);
     expect(page.win.__rhNavHooked).toBe(true);
+  });
+
+  it('the navigation flag is a timestamp: a flag older than ~3 s is reported false, a fresh one true', () => {
+    const page = makePage(FORM);
+    page.snapshot();
+    page.run({ op: 'click', node: page.node('#go'), label: 'Go now' });
+    page.win.dispatchEvent(new page.win.Event('beforeunload'));
+    expect(typeof page.win.__rhNavPending).toBe('number');
+    expect(page.evalJson(buildReadyProbe()).p).toBe(true);
+    page.win.__rhNavPending = Date.now() - 5000;
+    const probe = page.evalJson(buildReadyProbe());
+    expect(probe.p).toBe(false);
+    expect(Object.keys(probe).sort()).toEqual(['o', 'p', 'r', 't', 'u']);
+    page.win.__rhNavPending = Date.now() - 500;
+    expect(page.evalJson(buildReadyProbe()).p).toBe(true);
+  });
+
+  it('every op clears a leftover navigation flag (select, check, scroll included)', () => {
+    const ops = [
+      (p: Page) => p.run({ op: 'select', node: p.node('#color'), label: 'Color', value: 'Green' }),
+      (p: Page) => p.run({ op: 'check', node: p.node('#agree'), label: 'Agree to terms', checked: true }),
+      (p: Page) => p.run({ op: 'scroll', delta: 100 }),
+    ];
+    for (const run of ops) {
+      const page = makePage(FORM);
+      page.snapshot();
+      page.win.__rhNavPending = Date.now();
+      expect(run(page).ok).toBe(true);
+      expect(page.evalJson(buildReadyProbe()).p).toBe(false);
+    }
   });
 
   it('buildNavigateScript sets location.href and returns JSON', () => {
