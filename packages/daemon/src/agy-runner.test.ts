@@ -497,6 +497,24 @@ describe('ProcessAgentRunner with a warm session', () => {
     expect(reset).not.toHaveBeenCalled();
   });
 
+  it('resumes an explicit conversation on a fresh session without the system prompt, passing conversationId and workspace', async () => {
+    const runTurn = vi.fn(async (_prompt: string, _cfg: any) => ({ events: [], summary: 'ok', conversationId: 'conv-x', failed: false, aborted: false }));
+    const reset = vi.fn();
+    const runner = new ProcessAgentRunner('agy', 'SYSTEM', { prepareTaskContext: async (t: any) => ({ augmentedPrompt: t.prompt }), recordTaskCompletion: vi.fn() } as any, {
+      hasHistory: () => false,
+      reset,
+      runTurn,
+      prewarm: vi.fn(),
+    } as any);
+    // A path isSafeWorkspacePath rejects, so run() skips the ~/.gemini trusted-workspace write.
+    const ws = '/usr/rh-warm-ws-test';
+    await runner.run({ ...baseTask, conversation_id: 'conv-x', workspace_path: ws });
+    expect(reset).not.toHaveBeenCalled();
+    const [prompt, cfg] = runTurn.mock.calls[0]!;
+    expect(prompt).not.toContain('SYSTEM');
+    expect(cfg).toMatchObject({ conversationId: 'conv-x', workspace: ws });
+  });
+
   it('newConversation resets then prewarms', () => {
     const calls: string[] = [];
     const runner = new ProcessAgentRunner('agy', 'S', undefined, { reset: () => calls.push('reset'), prewarm: () => calls.push('prewarm') } as any);

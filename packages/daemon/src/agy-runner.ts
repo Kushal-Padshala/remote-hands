@@ -42,6 +42,7 @@ export function warmConfigFor(input: {
   effort?: string | null | undefined;
   workspace?: string | null | undefined;
   mode?: string | null | undefined;
+  conversationId?: string | null | undefined;
 }): WarmSessionConfig {
   const config: WarmSessionConfig = {
     model: input.model || 'gemini-3.8-flash',
@@ -49,6 +50,7 @@ export function warmConfigFor(input: {
   };
   if (input.workspace) config.workspace = input.workspace;
   if (input.mode && input.mode !== 'default') config.mode = input.mode;
+  if (input.conversationId) config.conversationId = input.conversationId;
   return config;
 }
 
@@ -526,7 +528,9 @@ export class ProcessAgentRunner implements AgentRunner {
   ): Promise<AgentRunResult> {
     const session = this.warmSession!;
     if (!task.conversation_id && session.hasHistory()) session.reset();
-    const isFirst = !session.hasHistory();
+    // Resuming an explicit conversation (the session respawns with --conversation) never
+    // re-sends the system prompt, even on a fresh process.
+    const isFirst = !task.conversation_id && !session.hasHistory();
     // The warm agy process is spawned once, so REMOTE_HANDS_TASK_ID cannot reach `rh approve`
     // through the environment; every turn names its task id so the model can pass --task=.
     const taskLine = `Task id: ${task.id} (pass it to approvals as --task=${task.id})`;
@@ -537,6 +541,7 @@ export class ProcessAgentRunner implements AgentRunner {
       effort: effectiveTask.effort,
       workspace: task.workspace_path,
       mode: task.mode,
+      conversationId: task.conversation_id || undefined,
     });
     const turn = await session.runTurn(prompt, config, onEvent, signal);
     if (!turn.failed && !turn.aborted) {

@@ -6,6 +6,8 @@ export interface WarmSessionConfig {
   effort?: string | undefined;
   workspace?: string | undefined;
   mode?: string | undefined;
+  /** The conversation the task continues; a different one replaces the live process. */
+  conversationId?: string | undefined;
 }
 
 export interface TurnResult {
@@ -25,7 +27,9 @@ export interface WarmAgySessionOptions {
   killFn?: (proc: ChildProcess, signal?: NodeJS.Signals) => void;
 }
 
-export function buildWarmAgyArgs(c: WarmSessionConfig & { conversationId?: string | null }): string[] {
+export function buildWarmAgyArgs(
+  c: Omit<WarmSessionConfig, 'conversationId'> & { conversationId?: string | null | undefined },
+): string[] {
   const args = ['--input-format', 'stream-json', '--output-format', 'stream-json', '--print-timeout', '0'];
   if (c.workspace) args.push('--add-dir', c.workspace);
   if (c.conversationId) args.push('--conversation', c.conversationId);
@@ -182,6 +186,12 @@ export class WarmAgySession {
   }
 
   private ensure(config: WarmSessionConfig): ChildProcess {
+    // A task that names a conversation other than the active one (or a fresh process with
+    // no history) gets a process started with --conversation <that id>.
+    if (config.conversationId && config.conversationId !== this.lastConversationId) {
+      if (this.proc) this.kill();
+      this.lastConversationId = config.conversationId;
+    }
     const key = JSON.stringify([config.model, config.effort ?? '', config.mode ?? '']);
     // cwd and --add-dir are fixed at spawn. A request without a workspace reuses any live
     // process; one with a workspace needs a process spawned there. A respawn keeps

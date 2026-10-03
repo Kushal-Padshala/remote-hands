@@ -434,3 +434,49 @@ describe('WarmAgySession workspace', () => {
     await t2;
   });
 });
+
+describe('WarmAgySession requested conversation', () => {
+  it('respawns with --conversation when the requested id differs from the active one, and reuses it when equal', async () => {
+    const { session, procs, spawnFn } = makeSession();
+    const t1 = session.runTurn('a', config);
+    await Promise.resolve();
+    procs[0]!.reply('A', 'conv-c');
+    await t1;
+    const t2 = session.runTurn('b', { ...config, conversationId: 'conv-x' });
+    await Promise.resolve();
+    expect(spawnFn).toHaveBeenCalledTimes(2);
+    expect(procs[0]!.killed).toBe(true);
+    expect(spawnFn.mock.calls[1]![1]).toEqual(expect.arrayContaining(['--conversation', 'conv-x']));
+    expect(procs[1]!.written.join('')).toContain('"content":"b"');
+    procs[1]!.reply('B', 'conv-x');
+    await t2;
+    const t3 = session.runTurn('c', { ...config, conversationId: 'conv-x' });
+    await Promise.resolve();
+    expect(spawnFn).toHaveBeenCalledTimes(2);
+    procs[1]!.reply('C', 'conv-x');
+    await t3;
+  });
+
+  it('replaces a fresh prewarmed process when a conversation id is requested', async () => {
+    const { session, procs, spawnFn } = makeSession();
+    session.prewarm(config);
+    expect(session.hasHistory()).toBe(false);
+    const t = session.runTurn('a', { ...config, conversationId: 'conv-x' });
+    await Promise.resolve();
+    expect(spawnFn).toHaveBeenCalledTimes(2);
+    expect(procs[0]!.killed).toBe(true);
+    expect(spawnFn.mock.calls[1]![1]).toEqual(expect.arrayContaining(['--conversation', 'conv-x']));
+    procs[1]!.reply('A', 'conv-x');
+    expect((await t).summary).toBe('A');
+  });
+
+  it('spawns with the requested id when no process is live', async () => {
+    const { session, procs, spawnFn } = makeSession();
+    const t = session.runTurn('a', { ...config, conversationId: 'conv-x' });
+    await Promise.resolve();
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+    expect(spawnFn.mock.calls[0]![1]).toEqual(expect.arrayContaining(['--conversation', 'conv-x']));
+    procs[0]!.reply('A', 'conv-x');
+    await t;
+  });
+});
