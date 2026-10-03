@@ -31,6 +31,12 @@ vi.mock('@remote-hands/daemon', async () => ({
   MacOsDriver: class {
     focusWindow = vi.fn().mockResolvedValue(undefined);
   },
+  // Harmless stand-in: every doctor test injects its own transport, so the real one (which
+  // runs osascript against the user's browsers) must never be constructed here.
+  AppleScriptTransport: class {
+    environment = vi.fn().mockResolvedValue({ frontmost: null, running: [] });
+    evaluate = vi.fn().mockRejectedValue(new Error('stub AppleScriptTransport: inject a transport in tests'));
+  },
 }));
 
 const mockSpawn = vi.fn();
@@ -142,6 +148,30 @@ describe('browserCommand', () => {
       expect(code).toBe(0);
       expect(out).toContain('Privacy & Security > Automation');
       expect(out).toContain('did not answer in time');
+      expect(out).toContain(
+        'Microsoft Edge did not answer in time. (a macOS Automation permission prompt may be waiting for a click)',
+      );
+    });
+
+    it('says the ready check ran on the front tab', async () => {
+      const transport = fakeTransport({ frontmost: 'Google Chrome', running: ['Google Chrome'] });
+      await browserCommand(['doctor'], { ...getCtx(), browserTransport: transport });
+      expect(stdoutMessages.join('\n')).toMatch(/✔ Google Chrome\s+fast path ready \(checked on the front tab\)/);
+    });
+
+    it('script_error hints at a restricted front tab and does not call the setting broken', async () => {
+      const transport = fakeTransport({
+        frontmost: 'Google Chrome',
+        running: ['Google Chrome'],
+        probe: { 'Google Chrome': new BrowserAutomationError('script_error', 'Google Chrome', 'The script failed.') },
+      });
+      await browserCommand(['doctor'], { ...getCtx(), browserTransport: transport });
+      const out = stdoutMessages.join('\n');
+      expect(out).toContain(
+        '✖ Google Chrome  The script failed. (the front tab may be a restricted page such as chrome:// — try a normal web page)',
+      );
+      expect(out).not.toContain('until it is fixed');
+      expect(out).toContain('not necessarily the setting');
     });
 
     it('prints the target browser and a security note', async () => {
@@ -191,6 +221,7 @@ describe('browserCommand', () => {
       expect(chrome.code).toBeUndefined();
       const safari = parsed.browsers.find((b: any) => b.name === 'Safari');
       expect(safari).toMatchObject({ running: false, ready: false });
+      expect(stderrMessages).toEqual([]);
     });
 
     it('--json reports a null target when nothing runs', async () => {

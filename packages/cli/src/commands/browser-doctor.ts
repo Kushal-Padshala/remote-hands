@@ -45,10 +45,15 @@ async function probe(transport: BrowserDoctorTransport, browser: BrowserApp): Pr
   }
 }
 
+const SCRIPT_ERROR_HINT = ' (the front tab may be a restricted page such as chrome:// — try a normal web page)';
+const TIMEOUT_HINT = ' (a macOS Automation permission prompt may be waiting for a click)';
+
 function line(r: BrowserReport): string {
   if (!r.running) return `– ${r.name}  not running`;
-  if (r.ready) return `✔ ${r.name}  fast path ready`;
+  if (r.ready) return `✔ ${r.name}  fast path ready (checked on the front tab)`;
   if (r.code === 'no_window') return `✖ ${r.name}  ${r.message} Open a window to test it (setting unknown).`;
+  if (r.code === 'script_error') return `✖ ${r.name}  ${r.message}${SCRIPT_ERROR_HINT}`;
+  if (r.code === 'timeout') return `✖ ${r.name}  ${r.message}${TIMEOUT_HINT}`;
   return `✖ ${r.name}  ${r.message}`;
 }
 
@@ -102,6 +107,10 @@ export async function browserDoctor(args: string[], opts: BrowserDoctorOptions):
     lines.push('Fast path not available: no supported browser is running. The CDP/accessibility fallback (Chrome only) applies.');
   } else if (targetReport?.ready) {
     lines.push(`Fast path ready for ${target.name}.`);
+  } else if (targetReport?.code === 'script_error') {
+    lines.push(
+      `Fast path not confirmed for ${target.name}: the check failed on the front tab, not necessarily the setting. Open a normal web page and run rh browser doctor again.`,
+    );
   } else {
     lines.push(`Fast path not available for ${target.name}; the slower CDP/accessibility fallback (Chrome only) applies until it is fixed.`);
   }

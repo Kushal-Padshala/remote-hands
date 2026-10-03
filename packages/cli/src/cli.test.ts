@@ -69,6 +69,12 @@ describe('CLI command dispatcher', () => {
     expect(logs.some((l) => l.includes('browser'))).toBe(true);
   });
 
+  it('lists browser doctor in help output', async () => {
+    const logs: string[] = [];
+    await main(['--help'], { stdout: (msg) => logs.push(msg) });
+    expect(logs.some((l) => l.includes('browser doctor'))).toBe(true);
+  });
+
   it('returns error code 1 on unknown command', async () => {
     const errors: string[] = [];
     const code = await main(['foobar'], { stderr: (msg) => errors.push(msg) });
