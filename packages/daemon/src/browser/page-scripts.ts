@@ -18,7 +18,11 @@ export type PageOp =
 export type PageOpError = 'no_snapshot' | 'stale' | 'changed' | 'unsupported' | 'no_option' | 'failed';
 
 export type PageOpResult =
-  | { ok: true; label?: string; navigated?: boolean; value?: string }
+  /**
+   * `verified: false` means the action ran but its effect could not be confirmed in-page
+   * (async-rendering widgets); the engine confirms by re-snapshotting.
+   */
+  | { ok: true; label?: string; navigated?: boolean; value?: string; verified?: boolean }
   | { ok: false; error: PageOpError; current?: string; message?: string };
 
 /**
@@ -88,7 +92,17 @@ const RESOLVE = String.raw`
   if (!el || !el.isConnected) return fail('stale');
   const labelOf = () => String((cache.name ? cache.name(el) : '') || (cache.role ? cache.role(el) : '') || '').trim();
   const current = labelOf();
-  if (op.label && String(op.label).trim() !== current) return fail('changed', { current: current });
+  if (op.label) {
+    // Accept the labels the snapshot emits for this node: the plain label, the extra
+    // 'Open <label>' click action of editable fields, and '<label> → <option>' for selects.
+    const want = String(op.label).trim();
+    const sameNode = want === current || want === 'Open ' + current || want.startsWith(current + ' → ');
+    if (!sameNode) return fail('changed', { current: current });
+  }
+  if (cache.visible && !cache.visible(el)) return fail('stale');
+  const disabled = (typeof el.matches === 'function' && el.matches(':disabled')) ||
+    !!(el.closest && el.closest('[aria-disabled="true"]'));
+  if (disabled) return fail('unsupported', { message: 'element is disabled' });
 `;
 
 const CLICK = String.raw`
@@ -106,7 +120,7 @@ const TYPE = String.raw`
   const inputType = tag === 'INPUT' ? String(el.type || 'text').toLowerCase() : '';
   const isField = tag === 'TEXTAREA' || (tag === 'INPUT' && !NON_TYPABLE.includes(inputType));
   if (!isField && !isEditableHost(el)) return fail('unsupported', { message: 'element is not editable' });
-  if (isField && (el.disabled || el.readOnly)) return fail('unsupported', { message: 'element is disabled or read-only' });
+  if (isField && el.readOnly) return fail('unsupported', { message: 'element is read-only' });
   const text = String(op.text);
   reveal(el);
   if (isField) {
@@ -125,9 +139,18 @@ const TYPE = String.raw`
       let expected = text;
       if (tag === 'INPUT') expected = expected.replace(/[\r\n]/g, '');
       if (inputType === 'email' || inputType === 'url') expected = expected.trim();
-      if (el.value !== expected) return fail('failed', { message: 'value did not stick' });
+      if (el.value !== expected) {
+        // Report what the page kept (masking handlers etc.), but never a password value.
+        const extra = { message: 'value did not stick' };
+        if (inputType !== 'password') extra.current = String(el.value).slice(0, 200);
+        return fail('failed', extra);
+      }
+    } else if (tag === 'INPUT' && text !== '' && String(el.value) === '') {
+      return fail('failed', { message: 'value rejected by the ' + inputType + ' input' });
     }
   } else {
+    // contenteditable: prefer execCommand (keeps the editor's undo stack and fires a real
+    // input event); fall back to textContent only when it is missing, throws or returns false.
     let inserted = false;
     if (typeof document.execCommand === 'function') {
       try {
@@ -141,7 +164,7 @@ const TYPE = String.raw`
         inserted = document.execCommand('insertText', false, text) === true;
       } catch (e) { inserted = false; }
     }
-    if (!inserted || el.textContent !== text) {
+    if (!inserted) {
       el.textContent = text;
       fire(el, 'input');
     }
@@ -167,7 +190,10 @@ const SELECT = String.raw`
     return fail('no_option', { message: 'no option matching "' + String(op.value) + '"; available: ' + names.join(', ') });
   }
   reveal(el);
-  el.selectedIndex = match.index;
+  // A multiple select adds the matching option and leaves the existing selection alone
+  // (one op selects one option); a single select replaces the selection.
+  if (el.multiple) match.selected = true;
+  else el.selectedIndex = match.index;
   fire(el, 'input');
   fire(el, 'change');
   return out({ ok: true, label: current });
@@ -182,7 +208,12 @@ const CHECK = String.raw`
   if (state() !== want) {
     reveal(el);
     el.click();
-    if (state() !== want) return fail('failed', { message: 'checked state did not change' });
+    if (state() !== want) {
+      // Native inputs update synchronously, so an unchanged state is a real failure. ARIA
+      // widgets may re-render asynchronously: report unverified and let the engine re-snapshot.
+      if (native) return fail('failed', { message: 'checked state did not change' });
+      return out({ ok: true, label: current, verified: false });
+    }
   }
   return out({ ok: true, label: current });
 `;
@@ -231,7 +262,7 @@ export function buildExtractScript(maxChars: number): string {
   const limit = Number.isFinite(maxChars) && maxChars > 0 ? Math.floor(maxChars) : 20000;
   return `(() => {
   const max = ${embed(limit)};
-  const SKIP = ['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE'];
+  const SKIP = ['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SELECT', 'OPTION', 'OPTGROUP', 'DATALIST'];
   const VALUE_TYPES = ['text', 'search', 'email', 'url', 'tel', 'number'];
   const hidden = (e) => e.hasAttribute('hidden') || e.getAttribute('aria-hidden') === 'true' || e.hasAttribute('inert') ||
     (typeof e.checkVisibility === 'function' && !e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
@@ -240,39 +271,55 @@ export function buildExtractScript(maxChars: number): string {
   let root = null;
   for (const c of candidates) if (!root || textLen(c) > textLen(root)) root = c;
   root = root || document.body || document.documentElement;
-  const parts = [];
-  let size = 0;
+  // Count the COLLAPSED length while walking so whitespace-heavy markup cannot make the walk
+  // stop early with a short, unmarked result.
+  let text = '';
+  let full = false;
+  let truncated = false;
+  const add = (raw) => {
+    if (full) { truncated = true; return; }
+    const t = String(raw).replace(/\\s+/g, ' ').trim();
+    if (!t) return;
+    text = text ? text + ' ' + t : t;
+    if (text.length >= max) full = true;
+  };
   const walk = (n) => {
-    if (size > max + 200) return;
-    if (n.nodeType === 3) {
-      const t = n.textContent || '';
-      if (t.trim()) { parts.push(t); size += t.length; }
-      return;
-    }
+    if (truncated) return;
+    if (n.nodeType === 3) { add(n.textContent || ''); return; }
     if (n.nodeType !== 1 || SKIP.includes(n.tagName) || hidden(n)) return;
     if (n.tagName === 'INPUT') {
       const type = String(n.type || 'text').toLowerCase();
-      if (VALUE_TYPES.includes(type) && n.value) { parts.push(String(n.value)); size += String(n.value).length; }
+      if (VALUE_TYPES.includes(type) && n.value) add(n.value);
       return;
     }
-    if (n.tagName === 'TEXTAREA') {
-      if (n.value) { parts.push(String(n.value)); size += String(n.value).length; }
-      return;
-    }
+    if (n.tagName === 'TEXTAREA') { if (n.value) add(n.value); return; }
     for (const c of n.childNodes) walk(c);
   };
   if (root) walk(root);
-  let text = parts.join(' ').replace(/\\s+/g, ' ').trim();
-  if (text.length > max) text = text.slice(0, max) + '\\u2026';
+  if (truncated || text.length > max) {
+    // Cut at max without splitting a surrogate pair.
+    let end = Math.min(max, text.length);
+    const last = text.charCodeAt(end - 1);
+    if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+    text = text.slice(0, end).trimEnd() + '\\u2026';
+  }
   return JSON.stringify({ title: document.title, url: location.href, text: text });
 })()`;
 }
 
-/** Wraps DOM_SNAPSHOT_SCRIPT so it evaluates to a JSON string (`null` when there is no body). */
+/**
+ * Wraps DOM_SNAPSHOT_SCRIPT so it evaluates to a JSON string: the snapshot, `null` when the
+ * page has no body, or `{"error":"snapshot failed: <message>"}` when it throws. Callers must
+ * treat a result with an `error` key as a failed snapshot.
+ */
 export function buildSnapshotCall(): string {
   return `(() => {
-  const r = ${DOM_SNAPSHOT_SCRIPT};
-  return JSON.stringify(r === undefined ? null : r);
+  try {
+    const r = ${DOM_SNAPSHOT_SCRIPT};
+    return JSON.stringify(r === undefined ? null : r);
+  } catch (e) {
+    return JSON.stringify({ error: 'snapshot failed: ' + String((e && e.message) || e).slice(0, 300) });
+  }
 })()`;
 }
 

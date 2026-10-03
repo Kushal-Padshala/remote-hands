@@ -267,14 +267,49 @@ describe('buildActionScript: type', () => {
     const el = page.doc.getElementById('name');
     el.addEventListener('input', () => { el.value = 'reverted'; });
     expect(page.run({ op: 'type', node: page.node('#name'), label: 'Full name', text: 'Alice' }))
-      .toEqual({ ok: false, error: 'failed', message: 'value did not stick' });
+      .toEqual({ ok: false, error: 'failed', message: 'value did not stick', current: 'reverted' });
+  });
+
+  it('returns failed with the read-back value when a masking handler changes it', () => {
+    const page = makePage(FORM);
+    page.snapshot();
+    const el = page.doc.getElementById('name');
+    el.addEventListener('input', () => { el.value = el.value.toUpperCase(); });
+    expect(page.run({ op: 'type', node: page.node('#name'), label: 'Full name', text: 'alice' }))
+      .toEqual({ ok: false, error: 'failed', message: 'value did not stick', current: 'ALICE' });
+  });
+
+  it('caps the read-back value at 200 chars', () => {
+    const page = makePage(FORM);
+    page.snapshot();
+    const el = page.doc.getElementById('name');
+    el.addEventListener('input', () => { el.value = 'z'.repeat(500); });
+    const res = page.run({ op: 'type', node: page.node('#name'), label: 'Full name', text: 'a' }) as { current?: string };
+    expect(res.current).toBe('z'.repeat(200));
+  });
+
+  it('never returns the read-back value of a password field that did not stick', () => {
+    const page = makePage(FORM);
+    page.snapshot();
+    const el = page.doc.getElementById('pw');
+    el.addEventListener('input', () => { el.value = el.value.toUpperCase(); });
+    const res = page.run({ op: 'type', node: page.node('#pw'), label: 'Password', text: 'secret' });
+    expect(res).toEqual({ ok: false, error: 'failed', message: 'value did not stick' });
+    expect(JSON.stringify(res).toLowerCase()).not.toContain('secret');
   });
 
   it('returns ok with the value read back for a number input the browser normalises', () => {
     const page = makePage(FORM);
     page.snapshot();
+    const res = page.run({ op: 'type', node: page.node('#age'), label: 'Age', text: '0042' });
+    expect(res).toEqual({ ok: true, label: 'Age', value: '0042' });
+  });
+
+  it('returns failed when non-empty text is rejected by a number input (read-back empty)', () => {
+    const page = makePage(FORM);
+    page.snapshot();
     const res = page.run({ op: 'type', node: page.node('#age'), label: 'Age', text: 'abc' });
-    expect(res).toEqual({ ok: true, label: 'Age', value: '' });
+    expect(res).toMatchObject({ ok: false, error: 'failed' });
   });
 
   it('types into a contenteditable element (textContent fallback) and fires input', () => {
@@ -423,5 +458,169 @@ describe('buildExtractScript', () => {
   it('truncates at maxChars with a trailing ellipsis', () => {
     const page = makePage('<main>abcdefghijklmnopqrstuvwxyz</main>');
     expect(page.evalJson(buildExtractScript(10)).text).toBe('abcdefghij…');
+  });
+});
+
+describe('review fixes', () => {
+  it('extract counts collapsed length so indented pages fill maxChars and end with an ellipsis', () => {
+    const pad = ' '.repeat(200);
+    const paras = Array.from({ length: 100 }, (_, i) => `<p>${pad}paragraph number ${i} has some words${pad}</p>`).join('\n');
+    const page = makePage(`<main>${paras}</main>`);
+    const text: string = page.evalJson(buildExtractScript(1000)).text;
+    expect(text.endsWith('…')).toBe(true);
+    expect(text.length).toBeGreaterThanOrEqual(990);
+    expect(text.length).toBeLessThanOrEqual(1001);
+  });
+
+  it('extract does not descend into select/option', () => {
+    const page = makePage('<main>Pick <select><option>Alpha</option><option>Beta</option></select> done</main>');
+    expect(page.evalJson(buildExtractScript(1000)).text).toBe('Pick done');
+  });
+
+  it('extract truncation does not split a surrogate pair', () => {
+    const page = makePage('<main>abcdefghi\u{1F600}xyz</main>');
+    expect(page.evalJson(buildExtractScript(10)).text).toBe('abcdefghi…');
+  });
+
+  it('extract skips password input values even when set in markup', () => {
+    const page = makePage('<main>Login <input type="password" value="pw-in-markup"> <input type="text" value="visible-user"></main>');
+    const text: string = page.evalJson(buildExtractScript(1000)).text;
+    expect(text).not.toContain('pw-in-markup');
+    expect(text).toContain('visible-user');
+  });
+
+  it('contenteditable: a successful execCommand is not overwritten and input fires once', () => {
+    const page = makePage('<div id="ed" contenteditable="true" aria-label="Editor">old</div>', { contentEditable: true });
+    page.snapshot();
+    const ed = page.doc.getElementById('ed');
+    let inputs = 0;
+    ed.addEventListener('input', () => inputs++);
+    let execCalls = 0;
+    page.doc.execCommand = (cmd: string, _ui: boolean, value: string) => {
+      execCalls++;
+      expect(cmd).toBe('insertText');
+      ed.textContent = value.replace(' ', ' ');
+      ed.dispatchEvent(new page.win.Event('input', { bubbles: true }));
+      return true;
+    };
+    const res = page.run({ op: 'type', node: page.node('#ed'), label: 'Editor', text: 'new text' });
+    expect(res).toMatchObject({ ok: true, label: 'Editor' });
+    expect(execCalls).toBe(1);
+    expect(ed.textContent).toBe('new text');
+    expect(inputs).toBe(1);
+  });
+
+  it('contenteditable: execCommand returning false uses the textContent fallback', () => {
+    const page = makePage('<div id="ed" contenteditable="true" aria-label="Editor">old</div>', { contentEditable: true });
+    page.snapshot();
+    const ed = page.doc.getElementById('ed');
+    let inputs = 0;
+    ed.addEventListener('input', () => inputs++);
+    page.doc.execCommand = () => false;
+    const res = page.run({ op: 'type', node: page.node('#ed'), label: 'Editor', text: 'fallback text' });
+    expect(res).toEqual({ ok: true, label: 'Editor' });
+    expect(ed.textContent).toBe('fallback text');
+    expect(inputs).toBe(1);
+  });
+
+  it('check on an aria-checked widget that renders asynchronously returns ok with verified:false', () => {
+    const page = makePage('<div id="sw" role="switch" aria-checked="false" aria-label="Wifi" tabindex="0"></div>');
+    page.snapshot();
+    expect(page.run({ op: 'check', node: page.node('#sw'), label: 'Wifi', checked: true }))
+      .toEqual({ ok: true, label: 'Wifi', verified: false });
+  });
+
+  it('check on a native checkbox whose click is prevented still hard-fails', () => {
+    const page = makePage(FORM);
+    page.snapshot();
+    page.doc.getElementById('agree').addEventListener('click', (e: any) => e.preventDefault());
+    expect(page.run({ op: 'check', node: page.node('#agree'), label: 'Agree to terms', checked: true }))
+      .toMatchObject({ ok: false, error: 'failed' });
+  });
+
+  it('end-to-end: real snapshot actions (Open …, fill, select option) drive ops successfully', () => {
+    const page = makePage(FORM);
+    const actions = page.snapshot().actions as Array<any>;
+    const open = actions.find((a) => a.kind === 'click' && a.label === 'Open Full name');
+    const fill = actions.find((a) => a.kind === 'fill' && a.label === 'Full name');
+    const option = actions.find((a) => a.kind === 'select' && a.value === 'b');
+    const button = actions.find((a) => a.role === 'button');
+    expect(open && fill && option && button).toBeTruthy();
+    expect(option.label).toBe('Color → Blue');
+    expect(page.run({ op: 'click', node: open.node, label: open.label })).toMatchObject({ ok: true });
+    expect(page.run({ op: 'type', node: fill.node, label: fill.label, text: 'Zed' })).toMatchObject({ ok: true });
+    expect(page.run({ op: 'select', node: option.node, label: option.label, value: option.value })).toMatchObject({ ok: true });
+    expect(page.run({ op: 'click', node: button.node, label: button.label })).toMatchObject({ ok: true });
+    expect(page.doc.getElementById('name').value).toBe('Zed');
+    expect(page.doc.getElementById('color').value).toBe('b');
+  });
+
+  it('label tolerance does not accept an unrelated prefix', () => {
+    const page = makePage(FORM);
+    page.snapshot();
+    expect(page.run({ op: 'click', node: page.node('#go'), label: 'Go' })).toMatchObject({ ok: false, error: 'changed' });
+    expect(page.run({ op: 'click', node: page.node('#go'), label: 'Open Go' })).toMatchObject({ ok: false, error: 'changed' });
+  });
+
+  it('disabled, aria-disabled and disabled-fieldset elements return unsupported', () => {
+    const page = makePage(`${FORM}<fieldset id="fs"><button id="inner">Inner</button></fieldset><button id="ad">Aria</button>`);
+    page.snapshot();
+    const go = page.node('#go');
+    const inner = page.node('#inner');
+    const ad = page.node('#ad');
+    page.doc.getElementById('go').disabled = true;
+    page.doc.getElementById('fs').disabled = true;
+    page.doc.getElementById('ad').setAttribute('aria-disabled', 'true');
+    const expected = { ok: false, error: 'unsupported', message: 'element is disabled' };
+    expect(page.run({ op: 'click', node: go, label: 'Go now' })).toEqual(expected);
+    expect(page.run({ op: 'click', node: inner, label: 'Inner' })).toEqual(expected);
+    expect(page.run({ op: 'click', node: ad, label: 'Aria' })).toEqual(expected);
+    const name = page.node('#name');
+    page.doc.getElementById('name').disabled = true;
+    expect(page.run({ op: 'type', node: name, label: 'Full name', text: 'x' })).toEqual(expected);
+  });
+
+  it('an element that became invisible returns stale', () => {
+    const page = makePage(FORM);
+    page.snapshot();
+    const go = page.node('#go');
+    page.doc.getElementById('go').setAttribute('aria-hidden', 'true');
+    expect(page.run({ op: 'click', node: go, label: 'Go now' })).toEqual({ ok: false, error: 'stale' });
+  });
+
+  it('select multiple adds the matching option and keeps the others selected', () => {
+    const page = makePage('<label for="m">Tags</label><select id="m" multiple><option value="a">A</option><option value="b">B</option><option value="c">C</option></select>');
+    page.snapshot();
+    const node = page.node('#m');
+    expect(page.run({ op: 'select', node, label: 'Tags', value: 'a' }).ok).toBe(true);
+    expect(page.run({ op: 'select', node, label: 'Tags', value: 'c' }).ok).toBe(true);
+    const selected = Array.from(page.doc.getElementById('m').selectedOptions).map((o: any) => o.value);
+    expect(selected).toEqual(['a', 'c']);
+  });
+
+  it('clicking a checkbox through op:click toggles it exactly once', () => {
+    const page = makePage(FORM);
+    page.snapshot();
+    const el = page.doc.getElementById('agree');
+    let changes = 0;
+    el.addEventListener('change', () => changes++);
+    expect(page.run({ op: 'click', node: page.node('#agree'), label: 'Agree to terms' }).ok).toBe(true);
+    expect(el.checked).toBe(true);
+    expect(changes).toBe(1);
+  });
+
+  it('an exception inside the script still evaluates to a JSON failure string', () => {
+    const page = makePage(FORM);
+    page.snapshot();
+    page.win.__rhFast.name = () => { throw new Error('kaboom'); };
+    const raw = page.win.eval(buildActionScript({ op: 'click', node: page.node('#go'), label: 'Go now' }));
+    expect(typeof raw).toBe('string');
+    expect(JSON.parse(raw)).toEqual({ ok: false, error: 'failed', message: 'kaboom' });
+  });
+
+  it('buildSnapshotCall returns a JSON error object when the snapshot throws', () => {
+    const page = makePage(FORM);
+    page.doc.querySelectorAll = () => { throw new Error('boom'); };
+    expect(page.evalJson(buildSnapshotCall())).toEqual({ error: 'snapshot failed: boom' });
   });
 });

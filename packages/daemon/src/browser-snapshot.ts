@@ -71,7 +71,7 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
     return null;
   };
   cache.name = name; cache.role = role; cache.visible = visible;
-  cache.pageKey =() => [performance.timeOrigin, location.href, scrollX, scrollY, innerWidth, innerHeight,
+  cache.pageKey = () => [performance.timeOrigin, location.href, scrollX, scrollY, innerWidth, innerHeight,
     [...document.querySelectorAll('input,textarea,select')].filter(safe)
       .map((e) => [identity(e), e.value, e.checked, e.selectedIndex, e.disabled, e.readOnly])];
   cache.guard = (e) => {
