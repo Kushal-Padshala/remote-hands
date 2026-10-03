@@ -24,6 +24,11 @@ export * from './desktop/fast-exec.js';
 export * from './browser/browsers.js';
 export * from './browser/applescript.js';
 export * from './browser/transport.js';
+export * from './browser/page-scripts.js';
+export * from './browser/port.js';
+export * from './browser/render.js';
+export * from './browser/engine.js';
+export * from './browser/legacy-port.js';
 export {
   AxWalker,
   type RawAxNode,
