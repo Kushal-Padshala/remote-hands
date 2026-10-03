@@ -5,7 +5,7 @@ import type { CommandContext } from './setup.js';
 
 export const AGY_MCP_NAME = 'rh-computer';
 
-type ExecResult = { status: number | null; stdout: string; stderr: string };
+type ExecResult = { status: number | null; stdout: string; stderr: string; error?: Error | undefined };
 
 export interface McpCommandContext extends CommandContext {
   exec?: (command: string, args: string[]) => ExecResult;
@@ -16,8 +16,16 @@ export interface McpCommandContext extends CommandContext {
 
 const realExec = (command: string, args: string[]): ExecResult => {
   const res = spawnSync(command, args, { encoding: 'utf-8' });
-  return { status: res.status, stdout: res.stdout || '', stderr: res.stderr || '' };
+  return { status: res.status, stdout: res.stdout || '', stderr: res.stderr || '', error: res.error };
 };
+
+function failureDetail(res: ExecResult): string {
+  const text = res.stderr.trim() || res.stdout.trim();
+  if (text) return text;
+  const err = res.error as (Error & { code?: string }) | undefined;
+  if (err?.code === 'ENOENT') return `agy not found on PATH (${err.message})`;
+  return err?.message ?? `exit status ${res.status}`;
+}
 
 function currentCliPath(): string {
   const entry = process.argv[1];
@@ -45,7 +53,7 @@ export async function mcpCommand(args: string[], context: McpCommandContext = {}
       'mcp', 'serve',
     ]);
     if (res.status !== 0) {
-      stderr(`Failed to register ${AGY_MCP_NAME} with agy: ${res.stderr.trim() || res.stdout.trim()}`);
+      stderr(`Failed to register ${AGY_MCP_NAME} with agy: ${failureDetail(res)}`);
       return 1;
     }
     stdout(`Registered MCP server ${AGY_MCP_NAME} with agy.`);
@@ -55,7 +63,7 @@ export async function mcpCommand(args: string[], context: McpCommandContext = {}
   if (sub === 'remove') {
     const res = exec('agy', ['mcp', 'remove', AGY_MCP_NAME]);
     if (res.status !== 0) {
-      stderr(`Failed to remove ${AGY_MCP_NAME}: ${res.stderr.trim() || res.stdout.trim()}`);
+      stderr(`Failed to remove ${AGY_MCP_NAME}: ${failureDetail(res)}`);
       return 1;
     }
     stdout(`Removed MCP server ${AGY_MCP_NAME}.`);

@@ -43,4 +43,28 @@ describe('mcpCommand', () => {
     expect(await mcpCommand(['wat'], { stderr })).toBe(1);
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining('Usage: rh mcp'));
   });
+
+  it('install reports spawn errors when agy is missing', async () => {
+    const exec = vi.fn().mockReturnValue({
+      status: null,
+      stdout: '',
+      stderr: '',
+      error: Object.assign(new Error('spawn agy ENOENT'), { code: 'ENOENT' }),
+    });
+    const stderr = vi.fn();
+    expect(await mcpCommand(['install'], { exec, stderr, nodePath: 'n', cliPath: 'c' })).toBe(1);
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('spawn agy ENOENT'));
+  });
+
+  it('remove reports spawn errors when agy is missing', async () => {
+    const exec = vi.fn().mockReturnValue({
+      status: null,
+      stdout: '',
+      stderr: '',
+      error: Object.assign(new Error('spawn agy ENOENT'), { code: 'ENOENT' }),
+    });
+    const stderr = vi.fn();
+    expect(await mcpCommand(['remove'], { exec, stderr })).toBe(1);
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('spawn agy ENOENT'));
+  });
 });
