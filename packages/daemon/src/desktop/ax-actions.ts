@@ -7,6 +7,8 @@ export interface AxElementTarget {
   role?: string;
   label?: string;
   windowTitle?: string | undefined;
+  /** Match ONLY by bounds (+role); never by index counter or label. Requires bounds. */
+  strict?: boolean;
 }
 
 const defaultExec: ExecFunction = fastExec;
@@ -47,6 +49,8 @@ export async function performAxActionDetailed(
   const targetH = hasBounds ? normTarget.bounds![3] : 0;
   const escapedRole = (normTarget.role ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const escapedLabel = (normTarget.label ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const strict = normTarget.strict === true;
+  if (strict && !hasBounds) return { success: false, error: 'strict match requires bounds' };
   const escapedWinTitle = (normTarget.windowTitle ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
   const swiftScript = `
@@ -154,6 +158,7 @@ func getBounds(_ el: AXUIElement) -> (Int, Int, Int, Int)? {
 
 let targetIndex = ${targetIndex}
 let hasBounds = ${hasBounds}
+let strictMatch = ${strict}
 let targetX = ${targetX}
 let targetY = ${targetY}
 let targetW = ${targetW}
@@ -193,7 +198,7 @@ func checkElement(_ el: AXUIElement, depth: Int) {
             }
             if isAllowed {
                 currentCounter += 1
-                if targetIndex > 0 && currentCounter == targetIndex {
+                if !strictMatch && targetIndex > 0 && currentCounter == targetIndex {
                     targetEl = c
                     return
                 }
@@ -208,7 +213,7 @@ func checkElement(_ el: AXUIElement, depth: Int) {
                 }
             }
 
-            if !targetLabel.isEmpty && !trimmed.isEmpty {
+            if !strictMatch && !targetLabel.isEmpty && !trimmed.isEmpty {
                 let roleMatches = targetRole.isEmpty || role == targetRole || role.contains(targetRole) || targetRole.contains(role)
                 if trimmed.caseInsensitiveCompare(targetLabel) == .orderedSame {
                     if roleMatches {

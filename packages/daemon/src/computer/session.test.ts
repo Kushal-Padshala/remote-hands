@@ -55,14 +55,14 @@ describe('ComputerSession desktop', () => {
     expect(out).toContain('[2] TextField "Email"');
   });
 
-  it('click targets by bounds, role and label with NO index key', async () => {
+  it('click targets strictly by bounds, role and label with NO index key', async () => {
     const deps = makeDeps();
     const s = new ComputerSession(deps);
     await s.desktopSnapshot('Finder');
     await s.desktopClick(1, 'Finder');
     const call = vi.mocked(deps.axAction).mock.calls[0]!;
     expect(call[0]).toBe('Finder');
-    expect(call[1]).toEqual({ bounds: [10, 20, 100, 40], role: 'AXButton', label: 'Next' });
+    expect(call[1]).toEqual({ bounds: [10, 20, 100, 40], role: 'AXButton', label: 'Next', strict: true });
     expect(Object.keys(call[1] as object)).not.toContain('index');
     expect(call[2]).toBe('AXPress');
   });
