@@ -117,6 +117,41 @@ node scripts/bench-actions.mjs [runs]
 
 `runs` defaults to 5. It runs `rh desktop window list`, `rh desktop snapshot --no-ocr`, `rh browser tabs` and a cold `agy` turn (`gemini-3.8-flash`, low effort), and prints the median wall time in milliseconds for each. It uses the installed `rh` and `agy` from `PATH`. Run it once first so the swift cache is populated.
 
+### Fast browser path
+
+The `browser_*` computer tools drive the browser you already use through AppleScript: JavaScript runs in a specific tab through Apple Events, elements get stable ids, and the engine returns diffs. This avoids Chrome DevTools (which Chrome 136+ ignores for the default profile) and the slow accessibility walk.
+
+**Which browsers.** Google Chrome, Brave Browser, Arc, Microsoft Edge and Safari are in the registry (`packages/daemon/src/browser/browsers.ts`). The target is the `RH_BROWSER` override when that browser is running, else the frontmost supported browser, else the first running one in that order. The engine never launches a closed browser.
+
+**Verification status.** The AppleScript for Arc, Edge and Safari is written against their real scripting dictionaries, but only browsers verified live are claimed supported. At the time of writing, tab listing was verified live on Chrome and Brave; JavaScript execution is pending until the setting below is enabled in a browser. Arc, Edge and Safari have not been verified on a real install.
+
+**One-time setting (per browser).** JavaScript from Apple Events is off by default. Turn it on once:
+
+- Chrome, Brave, Edge and Arc: `<browser> menu bar > View > Developer > Allow JavaScript from Apple Events`.
+- Safari: `Safari > Settings > Advanced > Show features for web developers`, then `Develop > Allow JavaScript from Apple Events`.
+
+macOS also asks once to let the app that runs Remote Hands control the browser. If you declined, allow it in `System Settings > Privacy & Security > Automation`. Remote Hands never changes either setting for you.
+
+**Check it.**
+
+```
+rh browser doctor [--json]
+```
+
+For each registry browser it prints whether it is running and, for running browsers, whether Automation permission and the Apple Events JavaScript setting are in place (it evaluates the harmless JavaScript `1` on the front tab), plus the browser the HUD would target now and a summary line. A closed browser shows `not running` and is never probed or launched. A running browser with no open window shows that the setting is unknown. Failures print the exact remediation text. `--json` prints `{ target, browsers: [{ name, family, running, ready, code?, message? }] }`. The command only reads, always exits 0 (it is a diagnostic), and exits 1 only for a usage error.
+
+**Fallback and its limits.** When the fast path is unavailable (setting off, permission denied, no supported browser running) the browser tools fall back to the older CDP and accessibility path. That path is slower, works for Chrome only, and supports fewer operations (`browser_do` accepts only `click`, `type` and `wait` there, and `submit` and `browser_extract` need the legacy driver's script support). The engine retries the fast path after a short back-off (about a minute), so enabling the setting takes effect without restarting anything.
+
+**Security.** While "Allow JavaScript from Apple Events" is on, any app that has Automation permission for that browser can run JavaScript in your tabs, including logged-in sessions. Turn the setting off when you do not need it; `rh browser doctor` will then report the fast path as unavailable and the fallback applies.
+
+**Benchmark.**
+
+```
+node scripts/bench-browser.mjs [runs]
+```
+
+`runs` defaults to 5. It uses the built daemon (`npm run build` first) and times, against the target browser, `transport.evaluate(browser, null, '1')`, a full snapshot through `FastBrowserEngine`, and `engine.tabs()`, printing the median milliseconds and `ok/total` for each. If the fast path is unavailable it prints the remediation message instead and exits 0. It does not use the CDP fallback.
+
 ### Swift binary cache
 
 Desktop actions that previously ran `swift -e <script>` (a compile on every call) now compile once with `swiftc -O` and run the cached binary. Per-call values are passed through environment variables; scripts whose values cannot be hoisted that way run uncached and are never written to disk.
