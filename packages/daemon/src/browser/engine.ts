@@ -30,7 +30,9 @@ interface Ctx {
   target: TabTarget | null;
 }
 
-type Shown = ({ mode: 'fast'; state: PageState } & Ctx) | { mode: 'legacy' };
+/** `origin` is the snapshotted document's performance.timeOrigin (identity guard for actions). */
+type FastShown = { mode: 'fast'; state: PageState; origin: number | string | null; targetConcrete: boolean } & Ctx;
+type Shown = FastShown | { mode: 'legacy' };
 
 type Resolved = { kind: 'fast'; ctx: Ctx } | { kind: 'legacy'; reason: string | null };
 
@@ -242,20 +244,47 @@ export class FastBrowserEngine implements BrowserPort {
 
   // ---- page primitives ---------------------------------------------------------------
 
-  private async readState(ctx: Ctx): Promise<PageState> {
+  private async readState(ctx: Ctx): Promise<{ state: PageState; origin: number | string | null }> {
     const raw = parsePage(await this.t.evaluate(ctx.browser, ctx.target, buildSnapshotCall()));
     if (raw && typeof raw === 'object' && 'error' in raw) {
       const msg = (raw as { error: unknown }).error;
       throw new Error(typeof msg === 'string' ? msg : 'snapshot failed');
     }
-    return normalizeSnapshot(raw);
+    const key = raw && typeof raw === 'object' ? (raw as { page_key?: unknown }).page_key : undefined;
+    const first = Array.isArray(key) ? key[0] : undefined;
+    const origin = typeof first === 'number' || typeof first === 'string' ? first : null;
+    return { state: normalizeSnapshot(raw), origin };
   }
 
   /** Snapshot that becomes the page the model sees (actions resolve ids against it). */
   private async show(ctx: Ctx): Promise<PageState> {
-    const state = await this.readState(ctx);
-    this.shown = { mode: 'fast', browser: ctx.browser, target: ctx.target, state };
+    const { state, origin } = await this.readState(ctx);
+    this.shown = { mode: 'fast', browser: ctx.browser, target: ctx.target, state, origin, targetConcrete: ctx.target !== null };
     return state;
+  }
+
+  /**
+   * Pins an unpinned context to a concrete tab (the active tab of the lowest-index window)
+   * so later actions cannot land in a tab the user switched to. Falls back to the front tab
+   * (target null) when the tabs cannot be listed; actions then rely on the origin guard.
+   */
+  private async concrete(ctx: Ctx): Promise<Ctx> {
+    if (ctx.target) return ctx;
+    let tabs: TabInfo[];
+    try {
+      tabs = await this.t.listTabs(ctx.browser);
+    } catch (err) {
+      if (err instanceof BrowserAutomationError && ['automation_denied', 'not_running', 'no_window'].includes(err.code)) throw err;
+      return ctx;
+    }
+    let front: TabInfo | undefined;
+    for (const tab of tabs) if (tab.active && (!front || tab.windowIndex < front.windowIndex)) front = tab;
+    return front ? { browser: ctx.browser, target: { windowId: front.windowId, tabKey: front.tabKey } } : ctx;
+  }
+
+  /** Adds the shown document's origin to an op (identity guard). */
+  private guarded(op: PageOp, origin: number | string | null): PageOp {
+    return origin === null ? op : { ...op, origin };
   }
 
   private async probe(ctx: Ctx): Promise<{ u: string; r: string; t: string } | null> {
@@ -354,7 +383,7 @@ export class FastBrowserEngine implements BrowserPort {
   }
 
   /** The shown fast page and the element for `index`, or the model-facing error. */
-  private lookup(index: number): { shown: Extract<Shown, { mode: 'fast' }>; el: PageElement & { node: number } } {
+  private lookup(index: number): { shown: FastShown; el: PageElement & { node: number } } {
     const shown = this.shown;
     const el = shown?.mode === 'fast' ? shown.state.elements.find((e) => e.id === index) : undefined;
     if (!shown || shown.mode !== 'fast' || !el || typeof el.node !== 'number') {
@@ -367,7 +396,7 @@ export class FastBrowserEngine implements BrowserPort {
 
   async snapshot(opts: { text?: boolean } = {}): Promise<string> {
     return this.run(
-      async (ctx) => renderFull(await this.show(ctx), { text: opts.text === true }),
+      async (ctx) => renderFull(await this.show(await this.concrete(ctx)), { text: opts.text === true }),
       () => this.legacy.snapshot(opts),
       true,
     );
@@ -378,7 +407,7 @@ export class FastBrowserEngine implements BrowserPort {
     const { shown, el } = this.lookup(index);
     const ctx: Ctx = { browser: shown.browser, target: shown.target };
     await this.ensureRunning(ctx);
-    await this.act(ctx, { op: 'click', node: el.node, label: el.label }, index);
+    await this.act(ctx, this.guarded({ op: 'click', node: el.node, label: el.label }, shown.origin), index);
     return `clicked [${index}] ${clean(el.label)}\n${await this.after(ctx, shown.state, false)}`;
   }
 
@@ -390,14 +419,14 @@ export class FastBrowserEngine implements BrowserPort {
     const op: PageOp = opts.submit
       ? { op: 'type', node: el.node, label: el.label, text, submit: true }
       : { op: 'type', node: el.node, label: el.label, text };
-    await this.act(ctx, op, index);
+    await this.act(ctx, this.guarded(op, shown.origin), index);
     return `typed into [${index}] ${clean(el.label)}\n${await this.after(ctx, shown.state, false)}`;
   }
 
   async find(query: string, limit = 8): Promise<string> {
     return this.run(
       async (ctx) => {
-        const state = await this.show(ctx);
+        const state = await this.show(await this.concrete(ctx));
         const total = state.elements.length;
         const hits = findElements(state, query, limit);
         if (hits.length > 0) {
@@ -501,7 +530,7 @@ export class FastBrowserEngine implements BrowserPort {
     } else {
       const r = await this.resolve();
       if (r.kind === 'legacy') return this.useLegacy(() => this.legacy.do(steps), r.reason, true);
-      ctx = r.ctx;
+      ctx = await this.concrete(r.ctx);
     }
     const startUrl = shown?.state.url ?? null;
     const done: string[] = [];
@@ -517,7 +546,7 @@ export class FastBrowserEngine implements BrowserPort {
       }
       let res: PageOpResult & { ok: true };
       try {
-        res = await this.act(ctx, p.op, p.index);
+        res = await this.act(ctx, this.guarded(p.op, shown?.origin ?? null), p.index);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         throw new Error(`step ${n} ${p.name} failed: ${msg} (${okSoFar(n)})`);

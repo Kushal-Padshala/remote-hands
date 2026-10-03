@@ -434,7 +434,7 @@ describe('tabs, focus and open', () => {
     expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '102' });
     clock += 5 * 60_000 + 1;
     await engine.snapshot();
-    expect(t.evals.at(-1)!.target).toBeNull();
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' }); // front tab, not null
   });
 
   it('focus matches numbers, titles and urls; reset() drops the pin', async () => {
@@ -447,7 +447,7 @@ describe('tabs, focus and open', () => {
     await expect(engine.focus('nothing-like-this')).rejects.toThrow('No tab matching "nothing-like-this"');
     engine.reset();
     await engine.snapshot();
-    expect(t.evals.at(-1)!.target).toBeNull();
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' }); // front tab, not null
   });
 
   it('no_tab clears the pin and throws the actionable message', async () => {
@@ -456,7 +456,7 @@ describe('tabs, focus and open', () => {
     await expect(engine.snapshot()).rejects.toThrow('The target tab is gone.');
     t.fail = null;
     await engine.snapshot();
-    expect(t.evals.at(-1)!.target).toBeNull();
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' }); // front tab, not null
   });
 
   it('open reuses a tab with the same host and path', async () => {
@@ -520,5 +520,56 @@ describe('open url allow-list (fix round 1)', () => {
     expect(t.evals).toHaveLength(0);
     await engine.open('localhost:3000');
     expect(t.opened[0]!.url).toBe('http://localhost:3000');
+  });
+});
+
+describe('concrete tab targets (fix round 1)', () => {
+  const FRONT: TabInfo[] = [
+    { windowId: '12', windowIndex: 2, tabKey: '201', tabIndex: 1, title: 'Other', url: 'https://o.test/', active: true },
+    { windowId: '11', windowIndex: 1, tabKey: '101', tabIndex: 1, title: 'A', url: 'https://a.test/', active: false },
+    { windowId: '11', windowIndex: 1, tabKey: '102', tabIndex: 2, title: 'B', url: 'https://b.test/', active: true },
+  ];
+
+  it('resolves the front window active tab before the snapshot (environment, listTabs, evaluate)', async () => {
+    t.tabList = FRONT;
+    const order: string[] = [];
+    const env = t.environment.bind(t);
+    const list = t.listTabs.bind(t);
+    const ev = t.evaluate.bind(t);
+    t.environment = async () => { order.push('environment'); return env(); };
+    t.listTabs = async () => { order.push('listTabs'); return list(); };
+    t.evaluate = async (b, target, js) => { order.push('evaluate'); return ev(b, target, js); };
+    await engine.snapshot();
+    expect(order).toEqual(['environment', 'listTabs', 'evaluate']);
+    expect(t.evals[0]!.target).toEqual({ windowId: '11', tabKey: '102' });
+  });
+
+  it('an action targets the snapshot tab even after the user switches tabs', async () => {
+    t.tabList = FRONT;
+    await engine.snapshot();
+    t.tabList = FRONT.map((x) => ({ ...x, active: x.tabKey === '101' || x.tabKey === '201' }));
+    await engine.click(12);
+    const action = t.evals.find((e) => e.js.includes('const op = '))!;
+    expect(action.target).toEqual({ windowId: '11', tabKey: '102' });
+    for (const e of t.evals) expect(e.target).toEqual({ windowId: '11', tabKey: '102' });
+    await engine.snapshot();
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' });
+  });
+
+  it('falls back to the front tab with an origin guard when listTabs fails', async () => {
+    t.listTabs = async () => { throw new Error('boom'); };
+    t.snapshots = [JSON.stringify(page({ page_key: [1234.5, 'x'] }))];
+    await engine.snapshot();
+    expect(t.evals[0]!.target).toBeNull();
+    await engine.click(12);
+    expect(opOf(t.actionEvals()[0]!)).toEqual({ op: 'click', node: 12, label: 'Next', origin: 1234.5 });
+  });
+
+  it('every action carries the snapshot origin', async () => {
+    t.tabList = FRONT;
+    t.snapshots = [JSON.stringify(page({ page_key: [99, 'x'] }))];
+    await engine.snapshot();
+    await engine.do([{ op: 'type', index: 7, text: 'a' }, { op: 'scroll', delta: 5 }]);
+    expect(t.actionEvals().map((js) => opOf(js).origin)).toEqual([99, 99]);
   });
 });
