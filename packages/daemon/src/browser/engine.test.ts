@@ -573,3 +573,109 @@ describe('concrete tab targets (fix round 1)', () => {
     expect(t.actionEvals().map((js) => opOf(js).origin)).toEqual([99, 99]);
   });
 });
+
+describe('slow navigation (fix round 1)', () => {
+  const OLD = JSON.stringify(page({ page_key: [1, 'x'] }));
+  const NEW = JSON.stringify(page({ url: 'https://example.com/welcome', title: 'Welcome', page_key: [2, 'x'] }));
+  const probe = (u: string, r: string, t: string, o: number, p: boolean): string => JSON.stringify({ u, r, t, o, p });
+  const oldPending = probe('https://example.com/signup', 'complete', 'Sign up', 1, true);
+  const newLoading = probe('https://example.com/welcome', 'loading', 'Welcome', 2, false);
+  const newDone = probe('https://example.com/welcome', 'complete', 'Welcome', 2, false);
+
+  /** Snapshots show the old page until the scripted probes are used up. */
+  function scriptNavigation(probes: string[]): void {
+    t.probes = probes;
+    t.snapshots = [() => (t.probes.length > 0 ? OLD : NEW)];
+  }
+
+  it('waits through a pending navigation and renders the new page', async () => {
+    t.snapshots = [OLD];
+    await engine.snapshot();
+    scriptNavigation([oldPending, oldPending, newLoading, newDone, newDone]);
+    const out = await engine.click(12);
+    expect(t.probes).toHaveLength(0);
+    expect(out).toContain('page: Welcome — https://example.com/welcome');
+    expect(out).not.toContain('(same page)');
+    expect(t.snapshotEvals()).toBe(2);
+  });
+
+  it('notes a navigation that is still pending at the cap', async () => {
+    t.snapshots = [OLD];
+    await engine.snapshot();
+    t.probes = Array.from({ length: 100 }, () => oldPending);
+    const out = await engine.click(12);
+    expect(out.endsWith('note: page is still navigating')).toBe(true);
+  });
+
+  it('do stops after a click whose navigation has not committed yet', async () => {
+    t.snapshots = [OLD];
+    await engine.snapshot();
+    scriptNavigation([oldPending, newLoading, newDone, newDone]);
+    const out = await engine.do([
+      { op: 'click', index: 12 },
+      { op: 'type', index: 7, text: 'never' },
+    ]);
+    expect(t.actionEvals()).toHaveLength(1);
+    const lines = out.split('\n');
+    expect(lines[1]).toBe('step 1 click ok but the page navigated; remaining steps not run');
+    expect(out).toContain('page: Welcome — https://example.com/welcome');
+  });
+
+  it('do treats press "enter" case-insensitively and ignores hash-only changes', async () => {
+    t.snapshots = [OLD];
+    await engine.snapshot();
+    t.probes = [probe('https://example.com/signup#step2', 'complete', 'Sign up', 1, false)];
+    await engine.do([{ op: 'press', key: 'enter' }, { op: 'scroll', delta: 10 }]);
+    expect(t.actionEvals()).toHaveLength(2);
+    t.probes = [probe('https://example.com/signup?page=2', 'complete', 'Sign up', 1, false)];
+    const out = await engine.do([{ op: 'press', key: 'enter' }, { op: 'scroll', delta: 10 }]);
+    expect(out).toContain('step 1 press ok but the page navigated');
+  });
+
+  it('open keeps waiting while the new tab is about:blank', async () => {
+    t.tabList = [];
+    t.tabListAfterOpen = [{ windowId: '11', windowIndex: 1, tabKey: '103', tabIndex: 1, title: 'Welcome', url: 'about:blank', active: true }];
+    const blank = probe('about:blank', 'complete', '', 5, false);
+    scriptNavigation([blank, blank, blank, newLoading, newDone, newDone]);
+    const out = await engine.open('https://example.com/welcome');
+    expect(t.probes).toHaveLength(0);
+    expect(out).toContain('page: Welcome — https://example.com/welcome');
+  });
+});
+
+describe('do failure context (fix round 1)', () => {
+  it('appends the current state when a later step fails', async () => {
+    await engine.snapshot();
+    const after = page();
+    (after.actions as Array<Record<string, unknown>>)[0] = { node: 7, role: 'textbox', label: 'Email', kind: 'fill', value: 'a@b.c' };
+    t.snapshots = [JSON.stringify(after)];
+    t.actions = [JSON.stringify({ ok: true }), JSON.stringify({ ok: false, error: 'stale' })];
+    const err = await engine.do([{ op: 'type', index: 7, text: 'a@b.c' }, { op: 'click', index: 12 }]).catch((e: Error) => e);
+    expect((err as Error).message).toBe(
+      [
+        'step 2 click failed: Element [12] no longer on the page. Call browser_snapshot. (step 1 ok)',
+        'current state:',
+        'page: Sign up — https://example.com/signup (same page)',
+        '~ [7] textbox "Email" = "a@b.c"',
+        '(4 unchanged)',
+      ].join('\n'),
+    );
+  });
+
+  it('does not append state when the first step fails', async () => {
+    await engine.snapshot();
+    t.actions = [JSON.stringify({ ok: false, error: 'stale' })];
+    await expect(engine.do([{ op: 'click', index: 12 }])).rejects.toThrow(/^step 1 click failed: .*\(no steps ok\)$/s);
+  });
+
+  it('wraps a navigation-probe failure with the step context and drops the pin on no_tab', async () => {
+    t.tabList = TABS;
+    await engine.focus('docs');
+    t.probes = [new BrowserAutomationError('no_tab', 'Google Chrome', 'The target tab is gone.')];
+    await expect(engine.do([{ op: 'click', index: 12 }, { op: 'scroll', delta: 1 }])).rejects.toThrow(
+      'step 1 click failed: The target tab is gone. (no steps ok)',
+    );
+    await engine.snapshot();
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' });
+  });
+});

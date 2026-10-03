@@ -48,7 +48,31 @@ const MAX_STEPS = 15;
 const INDEX_OPS = new Set<DoStep['op']>(['click', 'type', 'select', 'check']);
 const ALL_OPS = new Set<string>(['click', 'type', 'select', 'check', 'press', 'scroll', 'wait']);
 const STILL_LOADING = 'note: page still loading';
+const STILL_NAVIGATING = 'note: page is still navigating';
+const NAV_PROBE_DELAY_MS = 80;
+const FAIL_SETTLE_MS = 150;
+
+interface Probe {
+  u: string;
+  r: string;
+  t: string;
+  o: number | string | null;
+  p: boolean;
+}
 const UNCONFIRMED = 'note: could not confirm the state change';
+
+/** Url without its hash (hash-only changes are in-page navigation). */
+function withoutHash(url: string): string {
+  const i = url.indexOf('#');
+  return i >= 0 ? url.slice(0, i) : url;
+}
+
+/** A probe shows a different document: pending unload, new origin, or a new path/query. */
+function navigatedAway(p: Probe, startUrl: string | null, origin: number | string | null): boolean {
+  if (p.p) return true;
+  if (origin !== null && p.o !== null && String(p.o) !== String(origin)) return true;
+  return startUrl !== null && p.u !== '' && withoutHash(p.u) !== withoutHash(startUrl);
+}
 
 /** Parses a page-script result (always a JSON string); anything else is a clear error. */
 function parsePage(text: string): unknown {
@@ -237,6 +261,19 @@ export class FastBrowserEngine implements BrowserPort {
     this.disabled.set(browser.name, { until: this.now() + DISABLE_MS, reason });
   }
 
+  /** Bookkeeping after a transport failure during an action or probe. */
+  private transportFailed(ctx: Ctx, err: BrowserAutomationError): void {
+    if (err.code === 'js_disabled' || err.code === 'automation_denied') {
+      this.disable(ctx.browser, err.message);
+      this.shown = null;
+    } else if (err.code === 'no_tab') {
+      this.dropTarget();
+    } else if (err.code === 'not_running' || err.code === 'no_window') {
+      this.shown = null;
+      this.envCache = null;
+    }
+  }
+
   private dropTarget(): void {
     this.pin = null;
     this.shown = null;
@@ -287,12 +324,13 @@ export class FastBrowserEngine implements BrowserPort {
     return origin === null ? op : { ...op, origin };
   }
 
-  private async probe(ctx: Ctx): Promise<{ u: string; r: string; t: string } | null> {
+  private async probe(ctx: Ctx): Promise<Probe | null> {
     try {
       const v = parsePage(await this.t.evaluate(ctx.browser, ctx.target, buildReadyProbe(), PROBE_TIMEOUT_MS));
       if (!v || typeof v !== 'object') return null;
       const o = v as Record<string, unknown>;
-      return { u: String(o.u ?? ''), r: String(o.r ?? ''), t: String(o.t ?? '') };
+      const origin = typeof o.o === 'number' || typeof o.o === 'string' ? o.o : null;
+      return { u: String(o.u ?? ''), r: String(o.r ?? ''), t: String(o.t ?? ''), o: origin, p: o.p === true };
     } catch (err) {
       // A page mid-navigation may not answer; keep polling. Configuration errors propagate.
       if (err instanceof BrowserAutomationError && err.code !== 'timeout' && err.code !== 'script_error') throw err;
@@ -300,21 +338,32 @@ export class FastBrowserEngine implements BrowserPort {
     }
   }
 
-  /** Polls until the page is complete and two probes agree; returns a note after the cap. */
-  private async waitStable(ctx: Ctx): Promise<string | null> {
+  /**
+   * Polls until the page is `complete` and two probes agree (url, title, document origin).
+   * Not stable while a navigation is pending on the old document (`p`), while a different
+   * document than `origin` is still loading, or (with `avoidBlank`) while the tab shows
+   * about:blank. Returns a note when the 3 s cap is hit.
+   */
+  private async waitStable(ctx: Ctx, opts: { origin?: number | string | null; avoidBlank?: boolean } = {}): Promise<string | null> {
     const start = this.now();
     await this.sleep(FIRST_PROBE_MS);
-    let prev: { u: string; r: string; t: string } | null = null;
+    let prev: Probe | null = null;
+    let pending = false;
     for (let i = 0; i < MAX_PROBES; i += 1) {
       const p = await this.probe(ctx);
-      if (p && prev && p.r === 'complete' && p.u === prev.u && p.t === prev.t) return null;
+      if (p) {
+        pending = p.p;
+        const otherDoc = opts.origin != null && p.o !== null && String(p.o) !== String(opts.origin);
+        const busy = p.p || (otherDoc && p.r !== 'complete') || (opts.avoidBlank === true && p.u === 'about:blank');
+        const agrees = prev !== null && prev.r === 'complete' && prev.u === p.u && prev.t === p.t && String(prev.o) === String(p.o);
+        if (!busy && p.r === 'complete' && agrees) return null;
+      }
       prev = p;
       if (this.now() - start >= STABLE_CAP_MS) break;
       await this.sleep(PROBE_EVERY_MS);
     }
-    return STILL_LOADING;
+    return pending ? STILL_NAVIGATING : STILL_LOADING;
   }
-
   /** Ensures the shown browser still runs (never launch it) and returns its context. */
   private async ensureRunning(ctx: Ctx): Promise<void> {
     const env = await this.environment();
@@ -334,15 +383,9 @@ export class FastBrowserEngine implements BrowserPort {
       text = await this.t.evaluate(ctx.browser, ctx.target, buildActionScript(op));
     } catch (err) {
       if (err instanceof BrowserAutomationError) {
+        this.transportFailed(ctx, err);
         if (err.code === 'js_disabled' || err.code === 'automation_denied') {
-          this.disable(ctx.browser, err.message);
-          this.shown = null;
           throw new Error(`${err.message} Call browser_snapshot to continue on the slower fallback.`);
-        }
-        if (err.code === 'no_tab') this.dropTarget();
-        if (err.code === 'not_running' || err.code === 'no_window') {
-          this.shown = null;
-          this.envCache = null;
         }
       }
       throw err;
@@ -366,11 +409,16 @@ export class FastBrowserEngine implements BrowserPort {
   }
 
   /** After an action: settle, re-snapshot, render the delta against `prev`. */
-  private async after(ctx: Ctx, prev: PageState | null, unverified: boolean): Promise<string> {
+  private async after(
+    ctx: Ctx,
+    prev: PageState | null,
+    unverified: boolean,
+    origin: number | string | null = null,
+  ): Promise<string> {
     let loading: string | null;
     let next: PageState;
     try {
-      loading = await this.waitStable(ctx);
+      loading = await this.waitStable(ctx, { origin });
       next = await this.show(ctx);
     } catch (err) {
       this.shown = null;
@@ -408,7 +456,7 @@ export class FastBrowserEngine implements BrowserPort {
     const ctx: Ctx = { browser: shown.browser, target: shown.target };
     await this.ensureRunning(ctx);
     await this.act(ctx, this.guarded({ op: 'click', node: el.node, label: el.label }, shown.origin), index);
-    return `clicked [${index}] ${clean(el.label)}\n${await this.after(ctx, shown.state, false)}`;
+    return `clicked [${index}] ${clean(el.label)}\n${await this.after(ctx, shown.state, false, shown.origin)}`;
   }
 
   async type(index: number, text: string, opts: { submit?: boolean } = {}): Promise<string> {
@@ -420,7 +468,7 @@ export class FastBrowserEngine implements BrowserPort {
       ? { op: 'type', node: el.node, label: el.label, text, submit: true }
       : { op: 'type', node: el.node, label: el.label, text };
     await this.act(ctx, this.guarded(op, shown.origin), index);
-    return `typed into [${index}] ${clean(el.label)}\n${await this.after(ctx, shown.state, false)}`;
+    return `typed into [${index}] ${clean(el.label)}\n${await this.after(ctx, shown.state, false, shown.origin)}`;
   }
 
   async find(query: string, limit = 8): Promise<string> {
@@ -496,7 +544,7 @@ export class FastBrowserEngine implements BrowserPort {
         const fresh = after.find((t) => inFront(t) && isNew(t)) ?? after.find(inFront);
         const c: Ctx = { browser: ctx.browser, target: fresh ? { windowId: fresh.windowId, tabKey: fresh.tabKey } : null };
         this.pin = c.target ? { browser: c.browser, target: c.target, at: this.now() } : null;
-        const loading = await this.waitStable(c);
+        const loading = await this.waitStable(c, { avoidBlank: url.toLowerCase() !== 'about:blank' });
         const state = await this.show(c);
         return [`opened ${url}`, renderFull(state, { text: false }), ...(loading ? [loading] : [])].join('\n');
       },
@@ -533,9 +581,26 @@ export class FastBrowserEngine implements BrowserPort {
       ctx = await this.concrete(r.ctx);
     }
     const startUrl = shown?.state.url ?? null;
+    const origin = shown?.origin ?? null;
     const done: string[] = [];
     let unverified = false;
     let navigated: string | null = null;
+    const fail = async (n: number, name: string, err: unknown): Promise<never> => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (err instanceof BrowserAutomationError) this.transportFailed(ctx, err);
+      let state = '';
+      if (done.length > 0 && this.shown?.mode === 'fast') {
+        // Earlier steps changed the page: show where the batch stopped.
+        const before = this.shown;
+        try {
+          await this.sleep(FAIL_SETTLE_MS);
+          state = `\ncurrent state:\n${renderDelta(before.state, await this.show(ctx))}`;
+        } catch {
+          state = '';
+        }
+      }
+      throw new Error(`step ${n} ${name} failed: ${msg} (${okSoFar(n)})${state}`);
+    };
     for (let i = 0; i < plan.length; i += 1) {
       const p = plan[i]!;
       const n = i + 1;
@@ -546,25 +611,30 @@ export class FastBrowserEngine implements BrowserPort {
       }
       let res: PageOpResult & { ok: true };
       try {
-        res = await this.act(ctx, this.guarded(p.op, shown?.origin ?? null), p.index);
+        res = await this.act(ctx, this.guarded(p.op, origin), p.index);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        throw new Error(`step ${n} ${p.name} failed: ${msg} (${okSoFar(n)})`);
+        return fail(n, p.name, err);
       }
       if (res.verified === false) unverified = true;
       done.push(p.name);
       const op = p.op;
       const mayNavigate =
         op.op === 'click' || (op.op === 'type' && op.submit === true) || (op.op === 'press' && op.key === 'Enter');
-      if (mayNavigate && i < plan.length - 1 && startUrl !== null) {
-        const probe = await this.probe(ctx);
-        if (probe && probe.u && probe.u !== startUrl) {
+      if (mayNavigate && i < plan.length - 1) {
+        let probe: Probe | null;
+        try {
+          await this.sleep(NAV_PROBE_DELAY_MS);
+          probe = await this.probe(ctx);
+        } catch (err) {
+          return fail(n, p.name, err);
+        }
+        if (probe && navigatedAway(probe, startUrl, origin)) {
           navigated = `step ${n} ${p.name} ok but the page navigated; remaining steps not run`;
           break;
         }
       }
     }
-    const body = await this.after(ctx, shown?.state ?? null, unverified);
+    const body = await this.after(ctx, shown?.state ?? null, unverified, origin);
     return [`did: ${done.join(', ')}`, ...(navigated ? [navigated] : []), body].join('\n');
   }
 }
@@ -609,7 +679,7 @@ function planStep(step: DoStep, n: number, state: PageState | null): PlannedStep
       return { ...base, op: { op: 'check', node: el!.node, label: el!.label, checked: step.checked } };
     case 'press':
       if (typeof step.key !== 'string' || !step.key.trim()) throw invalid('key is required');
-      return { ...base, op: { op: 'press', key: step.key } };
+      return { ...base, op: { op: 'press', key: step.key.toLowerCase() === 'enter' ? 'Enter' : step.key } };
     case 'scroll':
       if (typeof step.delta !== 'number' || !Number.isFinite(step.delta)) throw invalid('delta is required');
       return { ...base, op: { op: 'scroll', delta: step.delta } };
