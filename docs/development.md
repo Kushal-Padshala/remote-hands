@@ -123,7 +123,7 @@ The `browser_*` computer tools drive the browser you already use through AppleSc
 
 **Which browsers.** Google Chrome, Brave Browser, Arc, Microsoft Edge and Safari are in the registry (`packages/daemon/src/browser/browsers.ts`). The target is the `RH_BROWSER` override when that browser is running, else the frontmost supported browser, else the first running one in that order. The engine never launches a closed browser.
 
-**Verification status.** The AppleScript for Arc, Edge and Safari is written against their real scripting dictionaries, but only browsers verified live are claimed supported. At the time of writing, tab listing was verified live on Chrome and Brave; JavaScript execution is pending until the setting below is enabled in a browser. Arc, Edge and Safari have not been verified on a real install.
+**Verification status (update after live run).** The AppleScript for Arc, Edge and Safari is written from the browsers' documented AppleScript dictionaries; Arc, Edge and Safari have not been run on this machine. Only browsers verified live are claimed supported. At the time of writing, tab listing was verified live on Chrome and Brave; JavaScript execution through the fast path has not been verified live yet (it needs the setting below enabled in a browser).
 
 **One-time setting (per browser).** JavaScript from Apple Events is off by default. Turn it on once:
 
@@ -138,6 +138,8 @@ macOS also asks once to let the app that runs Remote Hands control the browser. 
 rh browser doctor [--json]
 ```
 
+The installed `rh` only has `browser doctor` once the new bundle is copied to `~/.remote-hands/cli/index.js` (see "Installed `rh` runs a copied bundle" above); until then run it from the repo with `node packages/cli/dist/index.js browser doctor`.
+
 For each registry browser it prints whether it is running and, for running browsers, whether Automation permission and the Apple Events JavaScript setting are in place (it evaluates the harmless JavaScript `1` on the front tab), plus the browser the HUD would target now and a summary line. A closed browser shows `not running` and is never probed or launched. A running browser with no open window shows that the setting is unknown. Failures print the exact remediation text. `--json` prints `{ target, browsers: [{ name, family, running, ready, code?, message? }] }`. The command only reads, always exits 0 (it is a diagnostic), and exits 1 only for a usage error.
 
 **Fallback and its limits.** When the fast path is unavailable (setting off, permission denied, no supported browser running) the browser tools fall back to the older CDP and accessibility path. That path is slower, works for Chrome only, and supports fewer operations (`browser_do` accepts only `click`, `type` and `wait` there, and `submit` and `browser_extract` need the legacy driver's script support). The engine retries the fast path after a short back-off (about a minute), so enabling the setting takes effect without restarting anything.
@@ -150,7 +152,7 @@ For each registry browser it prints whether it is running and, for running brows
 node scripts/bench-browser.mjs [runs]
 ```
 
-`runs` defaults to 5. It uses the built daemon (`npm run build` first) and times, against the target browser, `transport.evaluate(browser, null, '1')`, a full snapshot through `FastBrowserEngine`, and `engine.tabs()`, printing the median milliseconds and `ok/total` for each. If the fast path is unavailable it prints the remediation message instead and exits 0. It does not use the CDP fallback.
+`runs` defaults to 5 (anything but a positive integer is a usage error). It uses the built daemon (`npm run build` first) and times, against the target browser, `transport.evaluate(browser, null, '1')`, a full snapshot through `FastBrowserEngine`, and `engine.tabs()` (the engine is reset before every timed call, so nothing is cached), printing the median milliseconds and `ok/total` for each, and the first error for a row where every run failed. A snapshot installs small page globals (`__rhFast`, `__rhNavHooked`) in the active tab. If the fast path is unavailable it prints the remediation message instead and exits 0. It does not use the CDP fallback.
 
 ### Swift binary cache
 
