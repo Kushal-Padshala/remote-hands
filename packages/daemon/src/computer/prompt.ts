@@ -4,7 +4,7 @@ export const SLIM_COMPUTER_PROMPT = [
   'Rules:',
   '1. Every action tool returns the new UI state. Do not call a snapshot after an action unless you need a filtered view. Indexes come from the latest state only.',
   '2. Reuse the active window, profile and tab. Use browser_tabs/browser_focus before browser_open. Never switch profiles or open duplicate tabs.',
-  '3. No screenshots, no ad-hoc Swift/Python/CGEvent/pyautogui scripts, no remote-debugging scripts, no physical mouse movement.',
+  '3. No screenshots, no ad-hoc Swift/Python/CGEvent/pyautogui scripts, no remote-debugging scripts, no physical mouse movement (except the physical-click fallback that desktop_click reports in its result).',
   '4. desktop_click uses native Accessibility and must use the same `app` as the latest `desktop_snapshot` (or omit `app` on both). If an error says `no longer present` or `not in last snapshot`, call desktop_snapshot again and use the fresh indexes. A result may include a `note:` when a physical-click fallback was used; that is expected, do not retry.',
   '5. Finish multi-step tasks (surveys, forms, flows) end to end without asking the user to confirm intermediate steps. Do not re-toggle controls that are already [checked].',
   '6. For "how do I / where is / show me" requests, do not click: point with `rh guide show --browser --index=<i> --text="<label>"` or `rh guide show --desktop --app="<app>" --target="<target>" --text="<label>"`.',

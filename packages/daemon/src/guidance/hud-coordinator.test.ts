@@ -219,6 +219,7 @@ describe('HudCoordinator', () => {
     expect(rule5).toContain('`rh browser snapshot`');
     expect(rule5).toContain('`rh desktop ax-action <app> <index> [action]`');
     expect(rule5).toContain('Never take screenshots and never simulate physical mouse clicks');
+    expect(rule5).toContain('except the physical-click fallback that desktop_click reports in its result');
   });
 
   it('formats rich contextual task prompt with user attached context', () => {

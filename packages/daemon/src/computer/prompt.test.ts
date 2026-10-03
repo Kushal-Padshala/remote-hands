@@ -32,5 +32,7 @@ describe('SLIM_COMPUTER_PROMPT', () => {
   it('keeps zero-screenshot and zero-mouse rules', () => {
     expect(SLIM_COMPUTER_PROMPT).toMatch(/No screenshots/);
     expect(SLIM_COMPUTER_PROMPT).toMatch(/no physical mouse movement/);
+    const rule3 = SLIM_COMPUTER_PROMPT.split('\n').find((l) => l.startsWith('3.')) ?? '';
+    expect(rule3).toContain('except the physical-click fallback that desktop_click reports in its result');
   });
 });
