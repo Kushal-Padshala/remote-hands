@@ -1,7 +1,7 @@
 import type { BrowserDriver } from '../browser-driver.js';
 import { capLines } from '../computer/compact.js';
 import { buildActionScript, buildExtractScript } from './page-scripts.js';
-import { checkOpenUrl } from './engine.js';
+import { normalizeOpenUrl } from './engine.js';
 import { okSoFar, type BrowserPort, type DoStep } from './port.js';
 
 export type LegacyBrowserDriver = Pick<
@@ -72,8 +72,8 @@ export class LegacyBrowserPort implements BrowserPort {
     return `focused ${res.tab.title} - ${res.tab.url}\n${await this.snapshot()}`;
   }
 
-  async open(url: string): Promise<string> {
-    checkOpenUrl(url);
+  async open(rawUrl: string): Promise<string> {
+    const url = normalizeOpenUrl(rawUrl);
     const res = await this.driver.openUrl(url);
     return `opened ${res.url}\n${await this.snapshot()}`;
   }

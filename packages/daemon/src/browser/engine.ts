@@ -67,15 +67,38 @@ function hostPath(url: string): string | null {
   }
 }
 
-/** Only http(s), file, about:blank and data: URLs may be opened. */
-export function checkOpenUrl(url: string): void {
+const HOST_PORT = /^(?:[a-z0-9-]+(?:\.[a-z0-9-]+)*|\[[0-9a-f:.]+\]):\d+(?:[/?#]|$)/i;
+const BARE_HOST = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[/?#]|$)/i;
+const LOCAL_HOST = /^(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-f:.]+\])(?:[:/?#]|$)/i;
+const ALLOWED_PROTOCOLS = new Set(['http:', 'https:', 'file:', 'data:']);
+
+/**
+ * Normalises a URL for `open` and enforces the allow-list: http(s), file, data and exactly
+ * `about:blank`. Whitespace or control characters anywhere are refused (they let
+ * `java\tscript:` slip past naive scheme checks). `host:port` and bare hosts get `https://`
+ * (`http://` for localhost and IP literals).
+ */
+export function normalizeOpenUrl(url: string): string {
   const trimmed = url.trim();
-  const m = /^([a-z][a-z0-9+.-]*):/i.exec(trimmed);
-  if (!m) return;
-  const scheme = m[1]!.toLowerCase();
-  if (['http', 'https', 'file', 'data'].includes(scheme)) return;
-  if (scheme === 'about' && trimmed.toLowerCase() === 'about:blank') return;
-  throw new Error(`Refusing to open ${scheme}: URLs`);
+  if (!trimmed) throw new Error('Refusing to open an empty URL');
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000- \u007f]/.test(trimmed)) {
+    throw new Error('Refusing to open a URL containing whitespace or control characters');
+  }
+  let candidate = trimmed;
+  if (HOST_PORT.test(trimmed) || (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed) && BARE_HOST.test(trimmed))) {
+    candidate = `${LOCAL_HOST.test(trimmed) ? 'http' : 'https'}://${trimmed}`;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error(`Invalid URL: ${clean(trimmed, 200)}`);
+  }
+  const protocol = parsed.protocol.toLowerCase();
+  if (ALLOWED_PROTOCOLS.has(protocol)) return candidate;
+  if (protocol === 'about:' && candidate.toLowerCase() === 'about:blank') return candidate;
+  throw new Error(`Refusing to open ${protocol} URLs`);
 }
 
 function tabLine(t: TabInfo): string {
@@ -428,8 +451,8 @@ export class FastBrowserEngine implements BrowserPort {
     );
   }
 
-  async open(url: string): Promise<string> {
-    checkOpenUrl(url);
+  async open(rawUrl: string): Promise<string> {
+    const url = normalizeOpenUrl(rawUrl);
     return this.run(
       async (ctx) => {
         const tabs = await this.t.listTabs(ctx.browser);

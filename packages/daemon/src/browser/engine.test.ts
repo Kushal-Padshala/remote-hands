@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { FastBrowserEngine } from './engine.js';
+import { FastBrowserEngine, normalizeOpenUrl } from './engine.js';
 import { BrowserAutomationError, type TabTarget } from './applescript.js';
 import type { TabInfo } from './transport.js';
 import type { BrowserApp } from './browsers.js';
@@ -486,5 +486,39 @@ describe('tabs, focus and open', () => {
     expect(t.envCalls).toBe(0);
     expect(t.evals).toHaveLength(0);
     expect(t.opened).toHaveLength(0);
+  });
+});
+
+describe('open url allow-list (fix round 1)', () => {
+  it('rejects control characters, whitespace and disallowed schemes', () => {
+    for (const url of ['java\tscript:alert(1)', 'java\nscript:alert(1)', '\u0001javascript:alert(1)', 'a b.com']) {
+      expect(() => normalizeOpenUrl(url)).toThrow('Refusing to open a URL containing whitespace or control characters');
+    }
+    expect(() => normalizeOpenUrl('JaVaScRiPt:alert(1)')).toThrow('Refusing to open javascript: URLs');
+    expect(() => normalizeOpenUrl('vbscript:x')).toThrow('Refusing to open vbscript: URLs');
+    expect(() => normalizeOpenUrl('about:config')).toThrow('Refusing to open about: URLs');
+  });
+
+  it('normalises missing schemes and keeps allowed URLs', () => {
+    expect(normalizeOpenUrl('localhost:3000')).toBe('http://localhost:3000');
+    expect(normalizeOpenUrl('127.0.0.1:8080/x')).toBe('http://127.0.0.1:8080/x');
+    expect(normalizeOpenUrl('example.com:8080/x')).toBe('https://example.com:8080/x');
+    expect(normalizeOpenUrl('example.com')).toBe('https://example.com');
+    expect(normalizeOpenUrl('  www.x.org/path ')).toBe('https://www.x.org/path');
+    expect(normalizeOpenUrl('data:text/html,<p>x</p>')).toBe('data:text/html,<p>x</p>');
+    expect(normalizeOpenUrl('about:blank')).toBe('about:blank');
+    expect(normalizeOpenUrl('file:///tmp/a.html')).toBe('file:///tmp/a.html');
+    expect(normalizeOpenUrl('HTTPS://Example.com/A')).toBe('HTTPS://Example.com/A');
+  });
+
+  it('the engine transports nothing for a rejected URL and opens the normalised one', async () => {
+    t.tabList = [];
+    for (const url of ['java\tscript:alert(1)', 'java\nscript:alert(1)', '\u0001javascript:alert(1)', 'JaVaScRiPt:alert(1)']) {
+      await expect(engine.open(url)).rejects.toThrow(/^Refusing to open/);
+    }
+    expect(t.envCalls).toBe(0);
+    expect(t.evals).toHaveLength(0);
+    await engine.open('localhost:3000');
+    expect(t.opened[0]!.url).toBe('http://localhost:3000');
   });
 });

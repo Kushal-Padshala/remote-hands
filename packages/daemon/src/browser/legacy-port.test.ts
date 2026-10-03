@@ -64,6 +64,7 @@ describe('LegacyBrowserPort (previous ComputerSession behaviour)', () => {
   it('open refuses unsafe schemes', async () => {
     const d = makeDriver();
     await expect(port(d).open('javascript:alert(1)')).rejects.toThrow('Refusing to open javascript: URLs');
+    await expect(port(d).open('java\tscript:alert(1)')).rejects.toThrow('whitespace or control characters');
     expect(d.openUrl).not.toHaveBeenCalled();
   });
 
