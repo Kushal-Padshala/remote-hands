@@ -746,10 +746,21 @@ describe('do failure context (fix round 1)', () => {
     await engine.focus('docs');
     t.probes = [new BrowserAutomationError('no_tab', 'Google Chrome', 'The target tab is gone.')];
     await expect(engine.do([{ op: 'click', index: 12 }, { op: 'scroll', delta: 1 }])).rejects.toThrow(
-      'step 1 click failed: The target tab is gone. (no steps ok)',
+      'step 1 click ran, but checking the page afterwards failed: The target tab is gone. (step 1 ok)',
     );
     await engine.snapshot();
     expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' });
+  });
+
+  it('a probe failure after a later step counts that step as ok', async () => {
+    await engine.snapshot();
+    t.probes = [new BrowserAutomationError('js_disabled', 'Google Chrome', 'JavaScript from Apple Events is off.')];
+    const err = await engine
+      .do([{ op: 'type', index: 7, text: 'a' }, { op: 'click', index: 12 }, { op: 'scroll', delta: 1 }])
+      .catch((e: Error) => e);
+    expect((err as Error).message.split('\n')[0]).toBe(
+      'step 2 click ran, but checking the page afterwards failed: JavaScript from Apple Events is off. (steps 1-2 ok)',
+    );
   });
 });
 

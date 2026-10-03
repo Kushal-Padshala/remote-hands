@@ -628,7 +628,8 @@ export class FastBrowserEngine implements BrowserPort {
     const done: string[] = [];
     let unverified = false;
     let navigated: string | null = null;
-    const fail = async (n: number, name: string, err: unknown): Promise<never> => {
+    /** `ran`: step n's action ran and only the check afterwards failed (do not invite a redo). */
+    const fail = async (n: number, name: string, err: unknown, ran = false): Promise<never> => {
       const msg = err instanceof Error ? err.message : String(err);
       if (err instanceof BrowserAutomationError) this.transportFailed(ctx, err);
       let state = '';
@@ -642,6 +643,7 @@ export class FastBrowserEngine implements BrowserPort {
           state = '';
         }
       }
+      if (ran) throw new Error(`step ${n} ${name} ran, but checking the page afterwards failed: ${msg} (${okSoFar(n + 1)})${state}`);
       throw new Error(`step ${n} ${name} failed: ${msg} (${okSoFar(n)})${state}`);
     };
     for (let i = 0; i < plan.length; i += 1) {
@@ -669,7 +671,7 @@ export class FastBrowserEngine implements BrowserPort {
           await this.sleep(NAV_PROBE_DELAY_MS);
           probe = await this.probe(ctx);
         } catch (err) {
-          return fail(n, p.name, err);
+          return fail(n, p.name, err, true);
         }
         if (probe && navigatedAway(probe, startUrl, origin)) {
           navigated = `step ${n} ${p.name} ok but the page navigated; remaining steps not run`;
