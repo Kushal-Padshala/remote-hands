@@ -19,6 +19,7 @@
     "typecheck:tests": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "@remote-hands/shared": "0.0.0",
     "ws": "^8.18.0",
     "zod": "^4.6.5"
