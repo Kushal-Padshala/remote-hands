@@ -105,7 +105,7 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
   tools.push({
     name: 'computer_batch',
     description:
-      'Run several tool calls in one round trip, stopping at the first failure. Use for sequences that do not change element indexes (type, key, tab, open). After a click the page may re-layout, so end the batch there. Returns per-step status and the final state.',
+      'Run several tool calls in one round trip, validating all steps first and stopping at the first failure. Every action re-reads the UI, so index-based steps (desktop_click, browser_click, browser_type) refer to the UI state AFTER the previous step, which you have not seen; typing and key presses can reshape the UI. Batch only steps that do not need an index, with at most one index-based step first or last. Returns per-step status and the final state.',
     inputSchema: {
       steps: z
         .array(z.object({ tool: z.string(), args: z.record(z.string(), z.unknown()).default({}) }))
@@ -113,21 +113,36 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
         .max(12),
     },
     handler: async (a) => {
-      const lines: string[] = [];
-      let last = '';
-      for (let i = 0; i < a.steps.length; i += 1) {
-        const step = a.steps[i] as { tool: string; args: Record<string, unknown> };
+      const steps = a.steps as Array<{ tool: string; args?: Record<string, unknown> }>;
+      // Validate every step up front so nothing runs if any step is malformed.
+      const plan = steps.map((step, i) => {
         const n = i + 1;
         const tool = step.tool === 'computer_batch' ? undefined : byName.get(step.tool);
         if (!tool) throw new Error(`step ${n} ${step.tool} failed: unknown or nested tool`);
+        const parsed = z.object(tool.inputSchema).safeParse(step.args ?? {});
+        if (!parsed.success) {
+          const issue = parsed.error.issues[0];
+          const where = issue && issue.path.length > 0 ? issue.path.join('.') : '(args)';
+          throw new Error(
+            `step ${n} ${step.tool} invalid args: ${where}: ${issue?.message ?? 'invalid'}. No steps were run.`,
+          );
+        }
+        return { tool, name: step.tool, args: parsed.data };
+      });
+
+      const lines: string[] = [];
+      let last = '';
+      for (let i = 0; i < plan.length; i += 1) {
+        const step = plan[i]!;
+        const n = i + 1;
         try {
-          last = await tool.handler(step.args ?? {});
+          last = await step.tool.handler(step.args);
         } catch (err: any) {
           const okSoFar = n === 1 ? 'no steps ok' : n === 2 ? 'step 1 ok' : `steps 1-${n - 1} ok`;
-          const remaining = i < a.steps.length - 1 ? `; steps after ${n} not run` : '';
-          throw new Error(`step ${n} ${step.tool} failed: ${err?.message ?? err} (${okSoFar}${remaining})`);
+          const remaining = i < plan.length - 1 ? `; steps after ${n} not run` : '';
+          throw new Error(`step ${n} ${step.name} failed: ${err?.message ?? err} (${okSoFar}${remaining})`);
         }
-        lines.push(`step ${n} ${step.tool} ok`);
+        lines.push(`step ${n} ${step.name} ok`);
       }
       return [...lines, last].join('\n');
     },

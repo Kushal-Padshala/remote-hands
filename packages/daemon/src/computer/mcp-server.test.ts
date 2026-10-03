@@ -35,4 +35,24 @@ describe('createComputerMcpServer', () => {
     expect(res.isError).toBe(true);
     expect(res.content).toEqual([{ type: 'text', text: 'error: nope' }]);
   });
+
+  it('rejects invalid arguments without invoking the handler', async () => {
+    const handler = vi.fn().mockResolvedValue('should not run');
+    const client = await connect([
+      { name: 'num', description: 'Num', inputSchema: { index: z.number().int() }, handler },
+    ]);
+    let isError = false;
+    let text = '';
+    try {
+      const res = await client.callTool({ name: 'num', arguments: { index: 'three' } });
+      isError = res.isError === true;
+      text = JSON.stringify(res.content);
+    } catch (err: any) {
+      isError = true;
+      text = String(err?.message ?? err);
+    }
+    expect(isError).toBe(true);
+    expect(text).toMatch(/num|invalid/i);
+    expect(handler).not.toHaveBeenCalled();
+  });
 });

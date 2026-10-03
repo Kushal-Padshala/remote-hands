@@ -88,4 +88,64 @@ describe('buildComputerTools', () => {
       'step 1 computer_batch failed: unknown or nested tool',
     );
   });
+
+  it('batch validates every step before running any (bad arg type)', async () => {
+    const session = fakeSession();
+    const batch = buildComputerTools(session).find((t) => t.name === 'computer_batch')!;
+    await expect(
+      batch.handler({
+        steps: [
+          { tool: 'desktop_type', args: { text: 'a' } },
+          { tool: 'desktop_click', args: { index: '3' } },
+        ],
+      }),
+    ).rejects.toThrow(/^step 2 desktop_click invalid args: .*No steps were run\.$/);
+    expect(session.desktopType).not.toHaveBeenCalled();
+    expect(session.desktopClick).not.toHaveBeenCalled();
+  });
+
+  it('batch detects an unknown tool before any handler runs', async () => {
+    const session = fakeSession();
+    const batch = buildComputerTools(session).find((t) => t.name === 'computer_batch')!;
+    await expect(
+      batch.handler({
+        steps: [
+          { tool: 'desktop_type', args: { text: 'a' } },
+          { tool: 'desktop_key', args: { combo: 'tab' } },
+          { tool: 'bogus', args: {} },
+        ],
+      }),
+    ).rejects.toThrow('step 3 bogus failed: unknown or nested tool');
+    expect(session.desktopType).not.toHaveBeenCalled();
+    expect(session.desktopKey).not.toHaveBeenCalled();
+  });
+
+  it('batch rejects a step with a missing required arg before running anything', async () => {
+    const session = fakeSession();
+    const batch = buildComputerTools(session).find((t) => t.name === 'computer_batch')!;
+    await expect(
+      batch.handler({
+        steps: [
+          { tool: 'desktop_type', args: { text: 'a' } },
+          { tool: 'browser_type', args: { index: 2 } },
+        ],
+      }),
+    ).rejects.toThrow(/step 2 browser_type invalid args: text: .*No steps were run\./);
+    expect(session.browserType).not.toHaveBeenCalled();
+    expect(session.desktopType).not.toHaveBeenCalled();
+  });
+
+  it('batch passes parsed args to handlers', async () => {
+    const session = fakeSession();
+    const batch = buildComputerTools(session).find((t) => t.name === 'computer_batch')!;
+    const out = await batch.handler({
+      steps: [
+        { tool: 'browser_type', args: { index: 2, text: 'hi', extra: 'dropped' } },
+        { tool: 'desktop_windows' },
+      ],
+    });
+    expect(session.browserType).toHaveBeenCalledWith(2, 'hi');
+    expect(session.desktopWindows).toHaveBeenCalledTimes(1);
+    expect(out).toBe('step 1 browser_type ok\nstep 2 desktop_windows ok\nwins');
+  });
 });
