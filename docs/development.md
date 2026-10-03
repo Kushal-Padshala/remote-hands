@@ -95,6 +95,48 @@ The current daemon foundation is intentionally injectable and test-first. It
 does not yet start a long-running process, store credentials, subscribe to
 Supabase Realtime, capture Chrome frames, or install a launchd agent.
 
+## MCP computer tools, swift cache, warm agy session
+
+### `rh mcp`
+
+- `rh mcp serve` runs a stdio MCP server (the default subcommand) that hosts one long-lived computer session exposing the `desktop_*`, `browser_*` and `computer_batch` tools. It is meant to be launched by an MCP client, not by hand.
+- `rh mcp install` registers the server with `agy` by running `agy mcp add rh-computer -- <node> <rh entry path> mcp serve`. It uses the node binary and `rh` entry file of the process that ran the command, so run it from the `rh` you want `agy` to use. It exits 1 with the `agy` error if registration fails (for example when `agy` is not on `PATH`).
+- `rh mcp remove` runs `agy mcp remove rh-computer`.
+
+Check the registration with `agy mcp list`.
+
+### Installed `rh` runs a copied bundle
+
+The installed `rh` binary runs the bundle copied to `~/.remote-hands/cli/index.js`, which this repo does not track. After `npm run build`, the new bundle is `packages/cli/dist/index.js`; it must be copied over `~/.remote-hands/cli/index.js` before the installed `rh` (and an `rh mcp install` run from it) picks up your changes. Keep a backup of the old bundle before overwriting it.
+
+### Benchmark
+
+```
+node scripts/bench-actions.mjs [runs]
+```
+
+`runs` defaults to 5. It runs `rh desktop window list`, `rh desktop snapshot --no-ocr`, `rh browser tabs` and a cold `agy` turn (`gemini-3.8-flash`, low effort), and prints the median wall time in milliseconds for each. It uses the installed `rh` and `agy` from `PATH`. Run it once first so the swift cache is populated.
+
+### Swift binary cache
+
+Desktop actions that previously ran `swift -e <script>` (a compile on every call) now compile once with `swiftc -O` and run the cached binary. Per-call values are passed through environment variables; scripts whose values cannot be hoisted that way run uncached and are never written to disk.
+
+- Location: `~/.remote-hands/swift-cache`, one directory per template hash. Override with `RH_SWIFT_CACHE_DIR`.
+- Permissions: the cache and its entries are created with mode `0700`.
+- A genuine `swiftc` compile error writes a `failed` marker that makes that template fall back to `swift -e` for 10 minutes; after that it is retried.
+- The cache is safe to delete at any time. Binaries are rebuilt on the next call (the first call after deleting is slower).
+
+### Warm agy session
+
+The daemon keeps one long-lived `agy` process per HUD, using `--input-format stream-json --output-format stream-json`, instead of spawning a cold `agy -p` for every task.
+
+- It is prewarmed when the HUD starts listening, with the HUD task mode, so the first task does not pay process start-up.
+- Later tasks in the same conversation are sent to the same process.
+- The hotkey starts a fresh conversation: the process is reset and a new one is prewarmed. An idle prewarmed process with no history is kept as is.
+- Cancelling a task kills the process group and the next turn respawns it.
+- There is no per-turn timeout (`--print-timeout 0`); cancel is the way to stop a turn.
+- The first turn of a new process is slow because `agy` loads its MCP servers (see the measurements in the fast HUD design spec).
+
 ## Regenerating types from the schema
 
 ```
