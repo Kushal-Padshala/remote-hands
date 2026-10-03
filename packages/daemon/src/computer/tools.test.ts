@@ -302,6 +302,13 @@ describe('buildComputerTools', () => {
     expect(batch.description).toContain('browser_do');
   });
 
+  it('computer_batch description says only desktop indexes shift; browser ids are stable', () => {
+    const batch = buildComputerTools(fakeSession()).find((t) => t.name === 'computer_batch')!;
+    expect(batch.description).toMatch(/only DESKTOP indexes/i);
+    expect(batch.description).toMatch(/browser ids are stable/i);
+    expect(batch.description).not.toMatch(/browser_click, browser_type\) refer to the UI state AFTER/);
+  });
+
   it('browser tool descriptions teach the stable-id model', () => {
     const tools = buildComputerTools(fakeSession());
     const d = (n: string) => tools.find((t) => t.name === n)!.description;

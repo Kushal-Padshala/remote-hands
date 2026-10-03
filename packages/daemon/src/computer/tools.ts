@@ -181,7 +181,7 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
   tools.push({
     name: 'computer_batch',
     description:
-      'Run several tool calls in one round trip, validating all steps first and stopping at the first failure. Every action re-reads the UI, so index-based steps (desktop_click, browser_click, browser_type) refer to the UI state AFTER the previous step, which you have not seen; typing and key presses can reshape the UI. Batch only steps that do not need an index, with at most one index-based step first or last. For browser sequences and forms use browser_do instead: it takes several steps with the stable ids you already saw. Returns per-step status and the final state.',
+      'Run several tool calls in one round trip, validating all steps first and stopping at the first failure. Only DESKTOP indexes shift: every action re-reads the UI, so a desktop_click index refers to the desktop state AFTER the previous step, which you have not seen; typing and key presses can reshape the UI. Batch only desktop steps that do not need an index, with at most one desktop_click first or last. Browser ids are stable numbers, but for browser sequences and forms use browser_do instead: it takes several steps with the ids you already saw and stops when the page navigates. Returns per-step status and the final state.',
     inputSchema: {
       steps: z
         .array(z.object({ tool: z.string(), args: z.record(z.string(), z.unknown()).default({}) }))
