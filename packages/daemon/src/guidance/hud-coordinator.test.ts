@@ -689,3 +689,61 @@ describe('HudCoordinator', () => {
     );
   });
 });
+
+describe('HudCoordinator default warm runner lifecycle', () => {
+  function makeDeps() {
+    const hudRunner: any = {
+      openPrompt: vi.fn(),
+      startListener: vi.fn().mockReturnValue({ stop: vi.fn() }),
+      openInteractivePrompt: vi.fn().mockReturnValue({ close: vi.fn() }),
+    };
+    const fakeRunner = {
+      run: vi.fn(),
+      prewarm: vi.fn(),
+      newConversation: vi.fn(),
+      stop: vi.fn(),
+    };
+    const defaultRunnerFactory = vi.fn(() => fakeRunner as any);
+    const deps = {
+      hudRunner,
+      intentResolver: { resolve: vi.fn() } as any,
+      guidanceManager: { startSession: vi.fn() } as any,
+      macosDriver: { getActiveWindowContext: vi.fn(), focusWindow: vi.fn() } as any,
+      store: {} as any,
+      defaultRunnerFactory,
+    };
+    return { hudRunner, fakeRunner, defaultRunnerFactory, deps };
+  }
+
+  it('prewarms the default runner on startListening and stops it on stop()', () => {
+    const { fakeRunner, defaultRunnerFactory, deps } = makeDeps();
+    const listener = new HudCoordinator(deps).startListening();
+    expect(defaultRunnerFactory).toHaveBeenCalledTimes(1);
+    expect(fakeRunner.prewarm).toHaveBeenCalledTimes(1);
+    expect(fakeRunner.stop).not.toHaveBeenCalled();
+    listener.stop();
+    expect(fakeRunner.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts a fresh warm conversation on a new hotkey session and on cancel', async () => {
+    const { hudRunner, fakeRunner, deps } = makeDeps();
+    const coordinator = new HudCoordinator(deps);
+    coordinator.startListening();
+    const cb = hudRunner.startListener.mock.calls[0]![0];
+    await cb({ event: 'hotkey', app: 'Google Chrome' });
+    expect(fakeRunner.newConversation).toHaveBeenCalledTimes(1);
+    await coordinator.cancelActiveTask();
+    expect(fakeRunner.newConversation).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not create or prewarm a default runner when a runner is injected', () => {
+    const { hudRunner, fakeRunner, defaultRunnerFactory, deps } = makeDeps();
+    const injected = { run: vi.fn() };
+    const listener = new HudCoordinator({ ...deps, runner: injected as any }).startListening();
+    expect(hudRunner.startListener).toHaveBeenCalled();
+    listener.stop();
+    expect(defaultRunnerFactory).not.toHaveBeenCalled();
+    expect(fakeRunner.prewarm).not.toHaveBeenCalled();
+    expect(fakeRunner.stop).not.toHaveBeenCalled();
+  });
+});

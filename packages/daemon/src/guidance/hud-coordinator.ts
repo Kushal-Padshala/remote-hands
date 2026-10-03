@@ -8,7 +8,9 @@ import { GuidanceManager } from './guidance-manager.js';
 import { MacOsDriver, type ActiveWindowContext } from '../desktop/macos-driver.js';
 import { LocalTaskStore } from '../local-task-store.js';
 import type { TaskStore } from '../task-store.js';
-import { ProcessAgentRunner, type AgentRunner } from '../agy-runner.js';
+import { ProcessAgentRunner, parseAgyStreamLine, type AgentRunner } from '../agy-runner.js';
+import { WarmAgySession } from '../warm-agy-session.js';
+import { SLIM_COMPUTER_PROMPT } from '../computer/prompt.js';
 import { DynamicPowerManager } from '../system/power-manager.js';
 
 
@@ -232,6 +234,8 @@ export interface HudCoordinatorOptions {
   macosDriver?: MacOsDriver | undefined;
   store?: TaskStore | undefined;
   runner?: AgentRunner | undefined;
+  /** Test seam: builds the default warm runner used when no `runner` is injected. */
+  defaultRunnerFactory?: (() => ProcessAgentRunner) | undefined;
   autoExecute?: boolean | undefined;
   onTaskCreated?: ((task: Task) => Promise<void> | void) | undefined;
   onTaskCompleted?: ((task: Task, summary: string) => Promise<void> | void) | undefined;
@@ -245,6 +249,8 @@ export class HudCoordinator {
   private macosDriver: MacOsDriver;
   private store?: TaskStore | undefined;
   private runner?: AgentRunner | undefined;
+  private defaultRunner?: ProcessAgentRunner | undefined;
+  private defaultRunnerFactory?: (() => ProcessAgentRunner) | undefined;
   private autoExecute: boolean;
   private onTaskCreated?: ((task: Task) => Promise<void> | void) | undefined;
   private onTaskCompleted?: ((task: Task, summary: string) => Promise<void> | void) | undefined;
@@ -268,6 +274,7 @@ export class HudCoordinator {
       this.macosDriver = opts.macosDriver || new MacOsDriver();
       this.store = opts.store;
       this.runner = opts.runner;
+      this.defaultRunnerFactory = opts.defaultRunnerFactory;
       this.autoExecute = opts.autoExecute ?? false;
       this.onTaskCreated = opts.onTaskCreated;
       this.onTaskCompleted = opts.onTaskCompleted;
@@ -329,8 +336,24 @@ export class HudCoordinator {
     }
   }
 
+  private getRunner(): AgentRunner {
+    if (this.runner) return this.runner;
+    if (!this.defaultRunner) {
+      this.defaultRunner =
+        this.defaultRunnerFactory?.() ??
+        new ProcessAgentRunner(
+          'agy',
+          SLIM_COMPUTER_PROMPT,
+          undefined,
+          new WarmAgySession({ command: 'agy', parseLine: parseAgyStreamLine }),
+        );
+    }
+    return this.defaultRunner;
+  }
+
   async cancelActiveTask(reason = 'Task cancelled by user from HUD'): Promise<void> {
     this.currentConversationId = undefined;
+    this.defaultRunner?.newConversation();
     await this.stopActiveTask(reason);
   }
 
@@ -394,7 +417,7 @@ export class HudCoordinator {
         this.macosDriver.focusWindow('Google Chrome').catch(() => {});
       }
 
-      const runner = this.runner || new ProcessAgentRunner('agy');
+      const runner = this.getRunner();
       const res = await runner.run(running, async (event) => {
         if (store.appendEvent) {
           await store.appendEvent(running!.id, event as any).catch(() => {});
@@ -604,6 +627,10 @@ export class HudCoordinator {
   }
 
   startListening(): { stop: () => void } {
+    if (!this.runner) {
+      this.getRunner();
+      this.defaultRunner?.prewarm();
+    }
     let activePrompt: { close: () => void } | null = null;
     const runnerListener = this.hudRunner.startListener(async (event: any) => {
       try {
@@ -616,6 +643,7 @@ export class HudCoordinator {
             activePrompt = null;
           }
           this.currentConversationId = undefined;
+          this.defaultRunner?.newConversation();
           const promptArgs: any[] = [
             event.app,
             async (result: any, sendUpdate: any) => {
@@ -648,6 +676,7 @@ export class HudCoordinator {
           activePrompt = null;
         }
         runnerListener.stop();
+        this.defaultRunner?.stop();
       },
     };
 
