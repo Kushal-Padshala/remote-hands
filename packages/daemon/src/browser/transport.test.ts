@@ -9,7 +9,7 @@ import {
   buildRunningScript,
   buildTabsScript,
 } from './applescript.js';
-import { AppleScriptTransport, type RunOsascript } from './transport.js';
+import { AppleScriptTransport, normalizeTimeout, osascriptResult, type RunOsascript } from './transport.js';
 
 const brave = findBrowser('brave')!;
 const safari = findBrowser('safari')!;
@@ -147,5 +147,42 @@ describe('AppleScriptTransport tab operations', () => {
     expect((err as BrowserAutomationError).code).toBe('no_tab');
     const err2 = await t.listTabs(brave).catch((e: unknown) => e);
     expect((err2 as BrowserAutomationError).code).toBe('no_tab');
+  });
+});
+
+describe('fix round 1: transport hardening', () => {
+  const secretJs = 'window.secretToken = "abc123-SECRET"';
+
+  it('never leaks the runner error message (command line) into the error', async () => {
+    const run: RunOsascript = async () => {
+      throw new Error(`Command failed: osascript -e on run argv -- ${secretJs}`);
+    };
+    const t = new AppleScriptTransport({ run });
+    const err = await t.evaluate(brave, null, secretJs).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BrowserAutomationError);
+    expect((err as BrowserAutomationError).code).toBe('script_error');
+    expect((err as BrowserAutomationError).message).not.toContain('SECRET');
+  });
+
+  it('maps an execFile failure with empty stderr to a fixed message', () => {
+    const e = Object.assign(new Error(`Command failed: osascript -e x -- ${secretJs}`), { code: 2 });
+    expect(osascriptResult(e, '', '')).toEqual({ stdout: '', stderr: '', status: 2 });
+    const spawnErr = Object.assign(new Error(`spawn osascript ENOENT ${secretJs}`), { code: 'ENOENT' });
+    const r = osascriptResult(spawnErr, '', '');
+    expect(r.status).toBe(1);
+    expect(r.stderr).not.toContain('SECRET');
+    expect(osascriptResult(Object.assign(new Error('killed'), { killed: true, signal: 'SIGKILL', code: null }), '', '').status).toBeNull();
+  });
+
+  it('does not let a non-positive or non-finite timeout disable the timeout', async () => {
+    expect(normalizeTimeout(0)).toBe(8000);
+    expect(normalizeTimeout(-5)).toBe(8000);
+    expect(normalizeTimeout(Number.NaN)).toBe(8000);
+    expect(normalizeTimeout(Number.POSITIVE_INFINITY)).toBe(8000);
+    expect(normalizeTimeout(250)).toBe(250);
+    const f = fake({ stdout: '' });
+    const t = new AppleScriptTransport({ run: f.run });
+    await t.evaluate(brave, null, '1', 0);
+    expect(f.calls[0]!.timeoutMs).toBe(8000);
   });
 });
