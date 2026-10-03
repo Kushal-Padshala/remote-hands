@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { createDefaultComputerSession, serveComputerMcp } from '@remote-hands/daemon';
 import type { CommandContext } from './setup.js';
+import { agyMcpRule, ensureAgyMcpPermission, removeAgyMcpPermission } from '../system/agy-permissions.js';
 
 export const AGY_MCP_NAME = 'rh-computer';
 
@@ -57,6 +58,18 @@ export async function mcpCommand(args: string[], context: McpCommandContext = {}
       return 1;
     }
     stdout(`Registered MCP server ${AGY_MCP_NAME} with agy.`);
+    // Headless agy auto-denies MCP tool calls unless permissions.allow names the server.
+    const rule = agyMcpRule(AGY_MCP_NAME);
+    const perm = await ensureAgyMcpPermission(context.fs, AGY_MCP_NAME);
+    for (const s of perm.skipped) stderr(`Skipped ${s.path}: ${s.reason}`);
+    if (perm.updated.length > 0) {
+      stdout(`Allowed MCP tools of ${AGY_MCP_NAME} for headless agy (permissions.allow: ${rule}).`);
+    } else if (perm.alreadyPresent.length > 0) {
+      stdout(`MCP tools of ${AGY_MCP_NAME} already allowed for headless agy (permissions.allow: ${rule}).`);
+    } else {
+      stderr(`Could not allow the ${AGY_MCP_NAME} tools for headless agy; add "${rule}" to permissions.allow in ~/.gemini/antigravity-cli/settings.json.`);
+      return 1;
+    }
     return 0;
   }
 
@@ -67,6 +80,9 @@ export async function mcpCommand(args: string[], context: McpCommandContext = {}
       return 1;
     }
     stdout(`Removed MCP server ${AGY_MCP_NAME}.`);
+    const perm = await removeAgyMcpPermission(context.fs, AGY_MCP_NAME);
+    for (const s of perm.skipped) stderr(`Skipped ${s.path}: ${s.reason}`);
+    if (perm.updated.length > 0) stdout(`Removed ${agyMcpRule(AGY_MCP_NAME)} from permissions.allow.`);
     return 0;
   }
 

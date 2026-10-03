@@ -100,8 +100,8 @@ Supabase Realtime, capture Chrome frames, or install a launchd agent.
 ### `rh mcp`
 
 - `rh mcp serve` runs a stdio MCP server (the default subcommand) that hosts one long-lived computer session exposing the `desktop_*`, `browser_*` and `computer_batch` tools. It is meant to be launched by an MCP client, not by hand.
-- `rh mcp install` registers the server with `agy` by running `agy mcp add rh-computer -- <node> <rh entry path> mcp serve`. It uses the node binary and `rh` entry file of the process that ran the command, so run it from the `rh` you want `agy` to use. It exits 1 with the `agy` error if registration fails (for example when `agy` is not on `PATH`).
-- `rh mcp remove` runs `agy mcp remove rh-computer`.
+- `rh mcp install` registers the server with `agy` by running `agy mcp add rh-computer -- <node> <rh entry path> mcp serve`. It uses the node binary and `rh` entry file of the process that ran the command, so run it from the `rh` you want `agy` to use. It exits 1 with the `agy` error if registration fails (for example when `agy` is not on `PATH`). After registering, it adds `mcp(rh-computer/*)` to `permissions.allow` in `~/.gemini/antigravity-cli/settings.json` (created if missing) and in `~/.gemini/antigravity-ide/settings.json` when that file exists, because headless agy auto-denies MCP tool calls otherwise. The merge is additive (other keys and entries keep their order), a file that fails to parse is reported and left alone, and the first change to an existing file keeps a `settings.json.bak-rh-mcp` backup. It never adds `mcp(*)`. `rh permissions fix` includes the same rule.
+- `rh mcp remove` runs `agy mcp remove rh-computer` and then removes exactly the `mcp(rh-computer/*)` rule.
 
 Check the registration with `agy mcp list`.
 
