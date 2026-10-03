@@ -407,7 +407,7 @@ export function parseAgyStreamLine(line: string): AgentStreamRecord | null {
     if (!summary) {
       summary = isError ? 'Task failed' : 'Task completed';
     }
-    const payload: Record<string, unknown> = {
+    const payload: { summary: string; conversation_id?: string | undefined; duration_seconds?: number | undefined; is_error?: boolean } = {
       summary,
       conversation_id: res.conversation_id,
       duration_seconds: res.duration_seconds,
