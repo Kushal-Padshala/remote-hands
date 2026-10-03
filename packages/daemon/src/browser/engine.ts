@@ -4,6 +4,7 @@ import type { AppleScriptTransport, TabInfo } from './transport.js';
 import {
   buildActionScript,
   buildExtractScript,
+  buildNavigateScript,
   buildReadyProbe,
   buildSnapshotCall,
   type PageOp,
@@ -68,6 +69,20 @@ function withoutHash(url: string): string {
 }
 
 /** A probe shows a different document: pending unload, new origin, or a new path/query. */
+/** Same page for `open`: trailing slashes ignored; the tab's hash is ignored when `wanted` has none. */
+function sameUrl(tabUrl: string, wanted: string): boolean {
+  const norm = (u: string): string => {
+    try {
+      const p = new URL(u);
+      return `${p.protocol}//${p.host}${p.pathname.replace(/\/+$/, '')}${p.search}${p.hash}`;
+    } catch {
+      return u;
+    }
+  };
+  const a = wanted.includes('#') ? tabUrl : withoutHash(tabUrl);
+  return norm(a) === norm(wanted);
+}
+
 function navigatedAway(p: Probe, startUrl: string | null, origin: number | string | null): boolean {
   if (p.p) return true;
   if (origin !== null && p.o !== null && String(p.o) !== String(origin)) return true;
@@ -344,7 +359,10 @@ export class FastBrowserEngine implements BrowserPort {
    * document than `origin` is still loading, or (with `avoidBlank`) while the tab shows
    * about:blank. Returns a note when the 3 s cap is hit.
    */
-  private async waitStable(ctx: Ctx, opts: { origin?: number | string | null; avoidBlank?: boolean } = {}): Promise<string | null> {
+  private async waitStable(
+    ctx: Ctx,
+    opts: { origin?: number | string | null; avoidBlank?: boolean; leaveOrigin?: number | string | null } = {},
+  ): Promise<string | null> {
     const start = this.now();
     await this.sleep(FIRST_PROBE_MS);
     let prev: Probe | null = null;
@@ -354,7 +372,8 @@ export class FastBrowserEngine implements BrowserPort {
       if (p) {
         pending = p.p;
         const otherDoc = opts.origin != null && p.o !== null && String(p.o) !== String(opts.origin);
-        const busy = p.p || (otherDoc && p.r !== 'complete') || (opts.avoidBlank === true && p.u === 'about:blank');
+        const stillOld = opts.leaveOrigin != null && p.o !== null && String(p.o) === String(opts.leaveOrigin);
+        const busy = stillOld || p.p || (otherDoc && p.r !== 'complete') || (opts.avoidBlank === true && p.u === 'about:blank')
         const agrees = prev !== null && prev.r === 'complete' && prev.u === p.u && prev.t === p.t && String(prev.o) === String(p.o);
         if (!busy && p.r === 'complete' && agrees) return null;
       }
@@ -535,7 +554,10 @@ export class FastBrowserEngine implements BrowserPort {
         const tabs = await this.t.listTabs(ctx.browser);
         const hp = /^(https?|file):/i.test(url.trim()) ? hostPath(url.trim()) : null;
         const same = hp ? tabs.find((t) => hostPath(t.url) === hp) : undefined;
-        if (same) return this.focusAndShow(ctx.browser, same, `opened ${url} (reused tab ${same.title} - ${same.url})`);
+        if (same) {
+          if (sameUrl(same.url, url)) return this.focusAndShow(ctx.browser, same, `opened ${url} (reused tab)`);
+          return this.navigateReused(ctx.browser, same, url);
+        }
         const front = tabs.find((t) => t.windowIndex === 1) ?? tabs[0];
         await this.t.openUrl(ctx.browser, url, front?.windowId);
         const after = await this.t.listTabs(ctx.browser);
@@ -551,6 +573,22 @@ export class FastBrowserEngine implements BrowserPort {
       () => this.legacy.open(url),
       true,
     );
+  }
+
+  /** Focuses an existing same-path tab, navigates it to `url` and renders the new page. */
+  private async navigateReused(browser: BrowserApp, tab: TabInfo, url: string): Promise<string> {
+    const target: TabTarget = { windowId: tab.windowId, tabKey: tab.tabKey };
+    await this.t.focusTab(browser, target);
+    this.pin = { browser, target, at: this.now() };
+    const c: Ctx = { browser, target };
+    const text = await this.t.evaluate(browser, target, buildNavigateScript(url));
+    const res = parsePage(text) as { ok?: unknown; o?: unknown } | null;
+    if (!res || res.ok !== true) throw new Error(`unexpected page result: ${text.slice(0, 80)}`);
+    // A hash-only change stays in the same document; otherwise wait for a new document.
+    const leave = withoutHash(tab.url) !== withoutHash(url) && (typeof res.o === 'number' || typeof res.o === 'string') ? res.o : null;
+    const loading = await this.waitStable(c, { avoidBlank: true, leaveOrigin: leave });
+    const state = await this.show(c);
+    return [`opened ${url} (reused tab)`, renderFull(state, { text: false }), ...(loading ? [loading] : [])].join('\n');
   }
 
   private async focusAndShow(browser: BrowserApp, tab: TabInfo, head: string): Promise<string> {

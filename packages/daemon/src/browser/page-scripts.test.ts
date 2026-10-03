@@ -683,7 +683,7 @@ describe('fix round 1: identity guard, navigation flag, navigate script', () => 
     const url = 'https://example.com/form#a"b</script>';
     const js = buildNavigateScript(url);
     expect(js).not.toContain('</script>');
-    expect(page.evalJson(js)).toEqual({ ok: true });
+    expect(page.evalJson(js)).toEqual({ ok: true, o: page.win.performance.timeOrigin });
     expect(page.win.location.hash).toBe('#a%22b%3C/script%3E');
   });
 });

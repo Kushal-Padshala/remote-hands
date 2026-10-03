@@ -352,7 +352,10 @@ export function buildReadyProbe(): string {
   return `JSON.stringify({ u: location.href, r: document.readyState, t: document.title, o: typeof performance !== 'undefined' ? performance.timeOrigin : null, p: !!window.__rhNavPending })`;
 }
 
-/** Navigates the tab to `url` (embedded safely); evaluates to `{"ok":true}`. */
+/**
+ * Navigates the tab to `url` (embedded safely); evaluates to `{"ok":true,"o":<timeOrigin>}`
+ * where `o` identifies the document that was navigated away from.
+ */
 export function buildNavigateScript(url: string): string {
-  return `(() => { location.href = ${embed(url)}; return JSON.stringify({ ok: true }); })()`;
+  return `(() => { const o = typeof performance !== 'undefined' ? performance.timeOrigin : null; location.href = ${embed(url)}; return JSON.stringify({ ok: true, o: o }); })()`;
 }

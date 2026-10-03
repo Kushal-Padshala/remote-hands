@@ -55,6 +55,8 @@ class FakeTransport {
       r = this.probes.shift() ?? JSON.stringify({ u: this.currentUrl(), r: 'complete', t: 'Sign up' });
     } else if (js.includes('__rhFast = window.__jevFast')) {
       r = (this.snapshots.length > 1 ? this.snapshots.shift() : this.snapshots[0])!;
+    } else if (js.includes('location.href = ')) {
+      r = JSON.stringify({ ok: true });
     } else if (js.includes('const op = ')) {
       r = this.actions.shift() ?? JSON.stringify({ ok: true, label: 'x' });
     } else {
@@ -459,11 +461,36 @@ describe('tabs, focus and open', () => {
     expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' }); // front tab, not null
   });
 
-  it('open reuses a tab with the same host and path', async () => {
-    const out = await engine.open('https://docs.test/a/b/');
+  it('open reuses a tab with the same url without navigating it', async () => {
+    const out = await engine.open('https://docs.test/a/b?x=1');
     expect(t.opened).toHaveLength(0);
     expect(t.focused).toEqual([{ windowId: '11', tabKey: '102' }]);
-    expect(out.split('\n')[0]).toBe('opened https://docs.test/a/b/ (reused tab Docs - https://docs.test/a/b?x=1)');
+    expect(t.evals.filter((e) => e.js.includes('location.href = '))).toHaveLength(0);
+    expect(out.split('\n')[0]).toBe('opened https://docs.test/a/b?x=1 (reused tab)');
+  });
+
+  it('open navigates a same-path tab whose query differs instead of creating a tab', async () => {
+    const out = await engine.open('https://docs.test/a/b/?x=2');
+    expect(t.opened).toHaveLength(0);
+    expect(t.focused).toEqual([{ windowId: '11', tabKey: '102' }]);
+    const nav = t.evals.filter((e) => e.js.includes('location.href = '));
+    expect(nav).toHaveLength(1);
+    expect(nav[0]!.target).toEqual({ windowId: '11', tabKey: '102' });
+    expect(nav[0]!.js).toContain('"https://docs.test/a/b/?x=2"');
+    expect(out.split('\n')[0]).toBe('opened https://docs.test/a/b/?x=2 (reused tab)');
+  });
+
+  it('open navigates an SPA tab whose url differs only by hash', async () => {
+    t.tabList = [{ windowId: '11', windowIndex: 1, tabKey: '101', tabIndex: 1, title: 'App', url: 'https://app.test/#/home', active: true }];
+    await engine.open('https://app.test/#/settings');
+    expect(t.opened).toHaveLength(0);
+    expect(t.evals.filter((e) => e.js.includes('location.href = '))).toHaveLength(1);
+  });
+
+  it('open ignores the tab hash when the requested url has none', async () => {
+    t.tabList = [{ windowId: '11', windowIndex: 1, tabKey: '101', tabIndex: 1, title: 'Doc', url: 'https://d.test/x/#top', active: true }];
+    await engine.open('https://d.test/x');
+    expect(t.evals.filter((e) => e.js.includes('location.href = '))).toHaveLength(0);
   });
 
   it('open creates a tab in the front window and pins it', async () => {
@@ -677,5 +704,17 @@ describe('do failure context (fix round 1)', () => {
     );
     await engine.snapshot();
     expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' });
+  });
+});
+
+describe('open reuse waits for the new document (fix round 1)', () => {
+  it('keeps polling while the reused tab still shows the old document', async () => {
+    t.tabList = TABS;
+    const ev = t.evaluate.bind(t);
+    t.evaluate = async (b, target, js) => (js.includes('location.href = ') ? (t.evals.push({ browser: b.name, target, js }), JSON.stringify({ ok: true, o: 1 })) : ev(b, target, js));
+    const pr = (o: number, u: string): string => JSON.stringify({ u, r: 'complete', t: 'Docs', o, p: false });
+    t.probes = [pr(1, 'https://docs.test/a/b?x=1'), pr(1, 'https://docs.test/a/b?x=1'), pr(2, 'https://docs.test/a/b?x=2'), pr(2, 'https://docs.test/a/b?x=2')];
+    await engine.open('https://docs.test/a/b?x=2');
+    expect(t.probes).toHaveLength(0);
   });
 });
