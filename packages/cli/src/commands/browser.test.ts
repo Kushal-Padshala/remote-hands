@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { BrowserAutomationError, BROWSERS } from '@remote-hands/daemon';
 import { browserCommand, ensureChromeAutomationReady } from './browser.js';
 
 const mockSnapshot = vi.fn();
@@ -10,7 +11,10 @@ const mockListTabs = vi.fn();
 const mockFocusTab = vi.fn();
 const mockFindTab = vi.fn();
 
-vi.mock('@remote-hands/daemon', () => ({
+vi.mock('@remote-hands/daemon', async () => ({
+  // Real registry, error class and picker (pure modules): the doctor uses them; the rest stays faked.
+  ...(await import('../../../daemon/src/browser/browsers.js')),
+  ...(await import('../../../daemon/src/browser/applescript.js')),
   BrowserDriver: class {
     snapshot = mockSnapshot;
     clickIndex = mockClickIndex;
@@ -51,6 +55,167 @@ describe('browserCommand', () => {
   const getCtx = () => ({
     stdout: (m: string) => stdoutMessages.push(m),
     stderr: (m: string) => stderrMessages.push(m),
+  });
+
+  describe('doctor subcommand', () => {
+    const browserByName = (name: string) => BROWSERS.find((b) => b.name === name)!;
+
+    function fakeTransport(opts: {
+      frontmost?: string | null;
+      running: string[];
+      probe?: Record<string, string | BrowserAutomationError>;
+    }) {
+      const evaluate = vi.fn(async (b: { name: string }) => {
+        const r = opts.probe?.[b.name] ?? '1';
+        if (r instanceof BrowserAutomationError) throw r;
+        return r;
+      });
+      const environment = vi.fn(async () => ({ frontmost: opts.frontmost ?? null, running: opts.running }));
+      return { environment, evaluate };
+    }
+
+    const jsDisabled = (name: string) =>
+      new BrowserAutomationError(
+        'js_disabled',
+        name,
+        `${name} has JavaScript from Apple Events turned off. Enable it once: ${name} menu bar > View > Developer > Allow JavaScript from Apple Events.`,
+      );
+
+    it('prints a ready line for a browser whose probe succeeds and never touches CDP', async () => {
+      const transport = fakeTransport({ frontmost: 'Google Chrome', running: ['Google Chrome'] });
+      const code = await browserCommand(['doctor'], { ...getCtx(), browserTransport: transport });
+      const out = stdoutMessages.join('\n');
+      expect(code).toBe(0);
+      expect(out).toContain('✔ Google Chrome');
+      expect(out).toContain('fast path ready');
+      expect(transport.evaluate).toHaveBeenCalledTimes(1);
+      expect(transport.evaluate).toHaveBeenCalledWith(browserByName('Google Chrome'), null, '1');
+      expect(fetch).not.toHaveBeenCalled();
+      expect(mockSpawn).not.toHaveBeenCalled();
+      expect(stderrMessages).toEqual([]);
+    });
+
+    it('prints the cross mark and the menu path for js_disabled, and still exits 0', async () => {
+      const transport = fakeTransport({
+        frontmost: 'Brave Browser',
+        running: ['Brave Browser'],
+        probe: { 'Brave Browser': jsDisabled('Brave Browser') },
+      });
+      const code = await browserCommand(['doctor'], { ...getCtx(), browserTransport: transport });
+      const out = stdoutMessages.join('\n');
+      expect(code).toBe(0);
+      expect(out).toContain('✖ Brave Browser');
+      expect(out).toContain('View > Developer > Allow JavaScript from Apple Events');
+      expect(out).toContain('not available');
+    });
+
+    it('reports a closed browser as not running without probing it', async () => {
+      const transport = fakeTransport({ frontmost: 'Google Chrome', running: ['Google Chrome'] });
+      await browserCommand(['doctor'], { ...getCtx(), browserTransport: transport });
+      const out = stdoutMessages.join('\n');
+      expect(out).toMatch(/– Safari\s+not running/);
+      const probed = transport.evaluate.mock.calls.map((c) => c[0].name);
+      expect(probed).toEqual(['Google Chrome']);
+    });
+
+    it('says a running browser without a window has an unknown setting', async () => {
+      const transport = fakeTransport({
+        running: ['Arc'],
+        probe: { Arc: new BrowserAutomationError('no_window', 'Arc', 'Arc has no open window.') },
+      });
+      await browserCommand(['doctor'], { ...getCtx(), browserTransport: transport });
+      const out = stdoutMessages.join('\n');
+      expect(out).toContain('Arc has no open window.');
+      expect(out).toContain('setting unknown');
+    });
+
+    it('maps automation_denied and timeout to the error message', async () => {
+      const transport = fakeTransport({
+        running: ['Google Chrome', 'Microsoft Edge'],
+        probe: {
+          'Google Chrome': new BrowserAutomationError('automation_denied', 'Google Chrome', 'macOS blocked this app from controlling Google Chrome. Allow it in System Settings > Privacy & Security > Automation.'),
+          'Microsoft Edge': new BrowserAutomationError('timeout', 'Microsoft Edge', 'Microsoft Edge did not answer in time.'),
+        },
+      });
+      const code = await browserCommand(['doctor'], { ...getCtx(), browserTransport: transport });
+      const out = stdoutMessages.join('\n');
+      expect(code).toBe(0);
+      expect(out).toContain('Privacy & Security > Automation');
+      expect(out).toContain('did not answer in time');
+    });
+
+    it('prints the target browser and a security note', async () => {
+      const transport = fakeTransport({ frontmost: 'Brave Browser', running: ['Google Chrome', 'Brave Browser'] });
+      await browserCommand(['doctor'], { ...getCtx(), browserTransport: transport });
+      const out = stdoutMessages.join('\n');
+      expect(out).toContain('Target browser: Brave Browser');
+      expect(out).toContain('any app with Automation permission can run JavaScript in your tabs');
+    });
+
+    it('honours RH_BROWSER for the target', async () => {
+      vi.stubEnv('RH_BROWSER', 'chrome');
+      try {
+        const transport = fakeTransport({ frontmost: 'Brave Browser', running: ['Google Chrome', 'Brave Browser'] });
+        await browserCommand(['doctor'], { ...getCtx(), browserTransport: transport });
+        expect(stdoutMessages.join('\n')).toContain('Target browser: Google Chrome');
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it('prints no target when no browser is running', async () => {
+      const transport = fakeTransport({ running: [] });
+      await browserCommand(['doctor'], { ...getCtx(), browserTransport: transport });
+      const out = stdoutMessages.join('\n');
+      expect(out).toContain('Target browser: none');
+      expect(transport.evaluate).not.toHaveBeenCalled();
+    });
+
+    it('--json prints one parseable object and nothing else', async () => {
+      const transport = fakeTransport({
+        frontmost: 'Brave Browser',
+        running: ['Brave Browser', 'Google Chrome'],
+        probe: { 'Brave Browser': jsDisabled('Brave Browser') },
+      });
+      const code = await browserCommand(['doctor', '--json'], { ...getCtx(), browserTransport: transport });
+      expect(code).toBe(0);
+      expect(stdoutMessages).toHaveLength(1);
+      const parsed = JSON.parse(stdoutMessages[0]!);
+      expect(parsed.target).toBe('Brave Browser');
+      expect(parsed.browsers).toHaveLength(BROWSERS.length);
+      const brave = parsed.browsers.find((b: any) => b.name === 'Brave Browser');
+      expect(brave).toMatchObject({ family: 'chromium', running: true, ready: false, code: 'js_disabled' });
+      expect(brave.message).toContain('Allow JavaScript from Apple Events');
+      const chrome = parsed.browsers.find((b: any) => b.name === 'Google Chrome');
+      expect(chrome).toMatchObject({ running: true, ready: true });
+      expect(chrome.code).toBeUndefined();
+      const safari = parsed.browsers.find((b: any) => b.name === 'Safari');
+      expect(safari).toMatchObject({ running: false, ready: false });
+    });
+
+    it('--json reports a null target when nothing runs', async () => {
+      const transport = fakeTransport({ running: [] });
+      await browserCommand(['doctor', '--json'], { ...getCtx(), browserTransport: transport });
+      expect(JSON.parse(stdoutMessages[0]!).target).toBeNull();
+    });
+
+    it('rejects unknown doctor arguments as a usage error', async () => {
+      const transport = fakeTransport({ running: [] });
+      const code = await browserCommand(['doctor', '--bogus'], { ...getCtx(), browserTransport: transport });
+      expect(code).toBe(1);
+      expect(stderrMessages.join('\n')).toContain('Usage: rh browser doctor [--json]');
+      expect(transport.environment).not.toHaveBeenCalled();
+    });
+
+    it('exits 0 with a message when the environment cannot be read', async () => {
+      const transport = fakeTransport({ running: [] });
+      transport.environment.mockRejectedValueOnce(
+        new BrowserAutomationError('automation_denied', 'osascript', 'macOS blocked this app.'),
+      );
+      const code = await browserCommand(['doctor'], { ...getCtx(), browserTransport: transport });
+      expect(code).toBe(0);
+      expect(stdoutMessages.join('\n')).toContain('macOS blocked this app.');
+    });
   });
 
   describe('snapshot subcommand', () => {

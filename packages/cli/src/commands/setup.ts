@@ -80,6 +80,8 @@ export interface CommandContext {
   frameSource?: any;
   localStore?: any;
   hudServiceManager?: any | undefined;
+  /** Injected AppleScript transport for `rh browser doctor` (tests). */
+  browserTransport?: import('./browser-doctor.js').BrowserDoctorTransport | undefined;
 }
 
 async function setupAgentAndPermissions(
