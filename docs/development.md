@@ -123,6 +123,12 @@ The `browser_*` computer tools drive the browser you already use through AppleSc
 
 **Which browsers.** Google Chrome, Brave Browser, Arc, Microsoft Edge and Safari are in the registry (`packages/daemon/src/browser/browsers.ts`). The target is the `RH_BROWSER` override when that browser is running, else the frontmost supported browser, else the first running one in that order. The engine never launches a closed browser.
 
+**`RH_BROWSER`.** Set it to a browser name or alias (`chrome`, `brave`, `arc`, `edge`, `safari`, case-insensitive) to prefer that browser whenever it is running. It is read by the MCP server process (`rh mcp serve`), which agy spawns from the HUD's environment, so it must be in that environment (for example the environment the HUD service is started with). Setting it in an interactive shell does not reach the server.
+
+**Tab pin.** `browser_focus` and `browser_open` pin the tab they show for 5 minutes (refreshed on each use), so later calls stay on it. The pin remembers which tab was in front when it was set: if you switch to another tab, the next `browser_snapshot` or `browser_find` drops the pin, follows your current tab and says `note: following your current tab`. Actions (`browser_click`, `browser_type`, `browser_do`) always act on the tab of the page last shown.
+
+**`file:` URLs.** `browser_open` allows `http(s):`, `file:`, `data:` and `about:blank`. A malicious page could try to get the model to open and read local files through `browser_extract`. agy already has file tools, so this adds little exposure.
+
 **Verification status (update after live run).** The AppleScript for Arc, Edge and Safari is written from the browsers' documented AppleScript dictionaries; Arc, Edge and Safari have not been run on this machine. Only browsers verified live are claimed supported. At the time of writing, tab listing was verified live on Chrome and Brave; JavaScript execution through the fast path has not been verified live yet (it needs the setting below enabled in a browser).
 
 **One-time setting (per browser).** JavaScript from Apple Events is off by default. Turn it on once:
