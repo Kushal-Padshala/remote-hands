@@ -583,6 +583,18 @@ describe('concrete tab targets (fix round 1)', () => {
     expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' });
   });
 
+  it('extract reads the snapshot tab after the user switches tabs, else a concrete front tab', async () => {
+    t.tabList = FRONT;
+    await engine.extract();
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '102' });
+    await engine.snapshot();
+    t.tabList = FRONT.map((x) => ({ ...x, active: x.tabKey === '101' || x.tabKey === '201' }));
+    await engine.extract();
+    const ex = t.evals.at(-1)!;
+    expect(ex.js).toContain('const max = ');
+    expect(ex.target).toEqual({ windowId: '11', tabKey: '102' });
+  });
+
   it('falls back to the front tab with an origin guard when listTabs fails', async () => {
     t.listTabs = async () => { throw new Error('boom'); };
     t.snapshots = [JSON.stringify(page({ page_key: [1234.5, 'x'] }))];

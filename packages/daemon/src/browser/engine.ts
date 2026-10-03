@@ -512,7 +512,11 @@ export class FastBrowserEngine implements BrowserPort {
 
   async extract(maxChars = 4000): Promise<string> {
     return this.run(
-      async (ctx) => {
+      async (resolved) => {
+        // Read the page the model is looking at (the snapshot's tab), like find/click do;
+        // without a shown page, bind a concrete front tab like snapshot does.
+        const shown = this.shown?.mode === 'fast' && this.shown.browser.name === resolved.browser.name ? this.shown : null;
+        const ctx: Ctx = shown ? { browser: shown.browser, target: shown.target } : await this.concrete(resolved);
         const text = await this.t.evaluate(ctx.browser, ctx.target, buildExtractScript(maxChars));
         const v = parsePage(text);
         if (!v || typeof v !== 'object') throw new Error(`unexpected page result: ${text.slice(0, 80)}`);
