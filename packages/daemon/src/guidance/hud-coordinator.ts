@@ -336,6 +336,29 @@ export class HudCoordinator {
     }
   }
 
+  private inflight = new Set<Promise<void>>();
+
+  private trackExecution(promise: Promise<void>): void {
+    const tracked = promise.catch(() => {}).finally(() => {
+      this.inflight.delete(tracked);
+    });
+    this.inflight.add(tracked);
+  }
+
+  /** Resolves once every auto-executed task started so far has finished. */
+  async whenIdle(): Promise<void> {
+    while (this.inflight.size > 0) {
+      await Promise.all([...this.inflight]);
+    }
+  }
+
+  /** Stops the default warm runner (if any) so one-shot callers can exit. Safe to call repeatedly. */
+  dispose(): void {
+    const runner = this.defaultRunner;
+    this.defaultRunner = undefined;
+    runner?.stop();
+  }
+
   private getRunner(): AgentRunner {
     if (this.runner) return this.runner;
     if (!this.defaultRunner) {
@@ -532,7 +555,7 @@ export class HudCoordinator {
         await this.onTaskCreated(task);
       }
       if (this.autoExecute) {
-        this.executeTaskStandalone(task, sendUpdate, signal).catch(() => {});
+        this.trackExecution(this.executeTaskStandalone(task, sendUpdate, signal));
       }
       return true;
     }
@@ -572,7 +595,7 @@ export class HudCoordinator {
           await this.onTaskCreated(task);
         }
         if (this.autoExecute) {
-          this.executeTaskStandalone(task, sendUpdate, signal).catch(() => {});
+          this.trackExecution(this.executeTaskStandalone(task, sendUpdate, signal));
         }
         return true;
       }

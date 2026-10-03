@@ -72,6 +72,32 @@ describe('CLI hud command', () => {
     expect(logs.some((l) => l.includes('Action initiated'))).toBe(true);
   });
 
+  it('disposes the coordinator after rh hud prompt finishes', async () => {
+    mockCoordinator.dispose = vi.fn();
+    await hudCommand(['prompt'], { coordinator: mockCoordinator, stdout: (msg) => logs.push(msg) });
+    expect(mockCoordinator.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for the in-flight task before disposing the coordinator', async () => {
+    const order: string[] = [];
+    mockCoordinator.dispose = vi.fn(() => order.push('dispose'));
+    mockCoordinator.whenIdle = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      order.push('idle');
+    });
+    await hudCommand(['prompt'], { coordinator: mockCoordinator, stdout: (msg) => logs.push(msg) });
+    expect(order).toEqual(['idle', 'dispose']);
+  });
+
+  it('disposes the coordinator even when the prompt task throws', async () => {
+    mockCoordinator.dispose = vi.fn();
+    mockCoordinator.triggerPrompt.mockRejectedValue(new Error('boom'));
+    await expect(
+      hudCommand(['prompt'], { coordinator: mockCoordinator, stdout: (msg) => logs.push(msg) }),
+    ).rejects.toThrow('boom');
+    expect(mockCoordinator.dispose).toHaveBeenCalledTimes(1);
+  });
+
   it('starts background listener on rh hud listen', async () => {
     let stopped = false;
     mockCoordinator.startListening.mockReturnValue({

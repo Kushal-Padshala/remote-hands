@@ -751,6 +751,53 @@ describe('HudCoordinator default warm runner lifecycle', () => {
     expect(fakeRunner.newConversation).toHaveBeenCalledTimes(2);
   });
 
+  it('dispose stops the default runner and is idempotent', () => {
+    const { fakeRunner, deps } = makeDeps();
+    const coordinator = new HudCoordinator(deps);
+    coordinator.startListening();
+    coordinator.dispose();
+    coordinator.dispose();
+    expect(fakeRunner.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('whenIdle resolves only after auto-executed tasks finish', async () => {
+    let finishRun!: (v: any) => void;
+    const runner = { run: vi.fn(() => new Promise((resolve) => { finishRun = resolve; })) };
+    const created: any[] = [];
+    const store = {
+      createTask: vi.fn(async (input: any) => {
+        const t = { id: 'task-idle', ...input };
+        created.push(t);
+        return t;
+      }),
+      claimNextTask: vi.fn(async () => created[0]),
+      markTaskRunning: vi.fn(async (id: string) => ({ id, status: 'running', ...created[0] })),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+      cancelTask: vi.fn().mockResolvedValue({ status: 'cancelled' }),
+    };
+    const { deps } = makeDeps();
+    const coordinator = new HudCoordinator({ ...deps, store: store as any, runner: runner as any, autoExecute: true });
+    deps.intentResolver.resolve.mockResolvedValue({ type: 'task' });
+    deps.macosDriver.getActiveWindowContext.mockResolvedValue({ app: 'Mail', title: 'Inbox', isBrowser: false });
+    await coordinator.handleResult({ query: 'open mail', app: 'Mail' } as any, () => {});
+    let idle = false;
+    const idlePromise = coordinator.whenIdle().then(() => { idle = true; });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(runner.run).toHaveBeenCalled();
+    expect(idle).toBe(false);
+    finishRun({ status: 'done', summary: 'ok', conversationId: 'c' });
+    await idlePromise;
+    expect(idle).toBe(true);
+  });
+
+  it('dispose is a no-op when a runner was injected or none was created', () => {
+    const { fakeRunner, deps } = makeDeps();
+    expect(() => new HudCoordinator(deps).dispose()).not.toThrow();
+    expect(() => new HudCoordinator({ ...deps, runner: { run: vi.fn() } as any }).dispose()).not.toThrow();
+    expect(fakeRunner.stop).not.toHaveBeenCalled();
+  });
+
   it('does not create or prewarm a default runner when a runner is injected', () => {
     const { hudRunner, fakeRunner, defaultRunnerFactory, deps } = makeDeps();
     const injected = { run: vi.fn() };

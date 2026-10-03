@@ -103,11 +103,18 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
         stdout(c.brightGreen(`\n✔ [Spotlight HUD] Task completed: ${summary}`));
       },
     });
-    const success = await coordinator.triggerPrompt(app);
-    if (success) {
-      stdout('✓ Action initiated from Spotlight HUD');
-    } else {
-      stdout('Spotlight HUD prompt cancelled');
+    try {
+      const success = await coordinator.triggerPrompt(app);
+      if (success) {
+        stdout('✓ Action initiated from Spotlight HUD');
+      } else {
+        stdout('Spotlight HUD prompt cancelled');
+      }
+      // triggerPrompt starts the task in the background; wait for it before stopping the runner.
+      await coordinator.whenIdle?.();
+    } finally {
+      // Stop the warm agy child so the one-shot process can exit.
+      coordinator.dispose?.();
     }
     return 0;
   }
