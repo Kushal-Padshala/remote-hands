@@ -20,10 +20,39 @@ describe('compactDesktopElements', () => {
     expect(out).toBe('[2] Button "Next"\n[4] TextField "Email"');
   });
 
-  it('collapses consecutive duplicates and truncates long labels', () => {
+  it('collapses consecutive non-interactive duplicates and truncates long labels', () => {
     const long = 'x'.repeat(100);
-    const out = compactDesktopElements([el(1, 'AXLink', 'Home'), el(2, 'AXLink', 'Home'), el(3, 'AXButton', long)]);
-    expect(out.split('\n')).toEqual(['[1] Link "Home"', `[3] Button "${'x'.repeat(59)}…"`]);
+    const out = compactDesktopElements([el(1, 'AXStaticText', 'Home'), el(2, 'AXStaticText', 'Home'), el(3, 'AXButton', long)]);
+    expect(out.split('\n')).toEqual(['[1] StaticText "Home"', `[3] Button "${'x'.repeat(59)}…"`]);
+  });
+
+  it('never collapses consecutive interactive duplicates', () => {
+    const out = compactDesktopElements([el(1, 'AXLink', 'Home'), el(2, 'AXLink', 'Home')]);
+    expect(out.split('\n')).toEqual(['[1] Link "Home"', '[2] Link "Home"']);
+  });
+
+  it('lists every repeated unlabeled button', () => {
+    const out = compactDesktopElements([el(1, 'AXButton', ''), el(2, 'AXButton', ''), el(3, 'AXButton', '')]);
+    expect(out.split('\n')).toEqual(['[1] Button ""', '[2] Button ""', '[3] Button ""']);
+  });
+
+  it('shows all same-label matches when a filter is active', () => {
+    const out = compactDesktopElements(
+      [
+        el(1, 'AXButton', 'Delete'),
+        el(2, 'AXStaticText', 'Row one'),
+        el(3, 'AXButton', 'Delete'),
+        el(4, 'AXStaticText', 'Row two'),
+        el(5, 'AXButton', 'Delete'),
+      ],
+      { filter: 'delete' },
+    );
+    expect(out.split('\n')).toEqual(['[1] Button "Delete"', '[3] Button "Delete"', '[5] Button "Delete"']);
+  });
+
+  it('does not dedupe non-interactive duplicates while filtering', () => {
+    const out = compactDesktopElements([el(1, 'AXStaticText', 'Total'), el(2, 'AXStaticText', 'Total')], { filter: 'total' });
+    expect(out.split('\n')).toEqual(['[1] StaticText "Total"', '[2] StaticText "Total"']);
   });
 
   it('caps the number of lines and reports how many were hidden', () => {
