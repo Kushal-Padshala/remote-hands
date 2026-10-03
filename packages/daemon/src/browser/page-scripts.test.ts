@@ -4,6 +4,7 @@ import { DOM_SNAPSHOT_SCRIPT } from '../browser-snapshot.js';
 import {
   buildActionScript,
   buildExtractScript,
+  buildNavigateScript,
   buildReadyProbe,
   buildSnapshotCall,
   type PageOp,
@@ -126,6 +127,8 @@ describe('snapshot in jsdom', () => {
       u: 'https://example.com/form',
       r: page.doc.readyState,
       t: 'Test Page',
+      o: page.win.performance.timeOrigin,
+      p: false,
     });
   });
 });
@@ -622,5 +625,65 @@ describe('review fixes', () => {
     const page = makePage(FORM);
     page.doc.querySelectorAll = () => { throw new Error('boom'); };
     expect(page.evalJson(buildSnapshotCall())).toEqual({ error: 'snapshot failed: boom' });
+  });
+});
+
+describe('fix round 1: identity guard, navigation flag, navigate script', () => {
+  it('an action with a mismatching origin is stale; a matching or missing origin proceeds', () => {
+    const page = makePage(FORM);
+    const snap = page.snapshot();
+    const origin = snap.page_key[0];
+    expect(origin).toBe(page.win.performance.timeOrigin);
+    const node = page.node('#go');
+    expect(page.run({ op: 'click', node, label: 'Go now', origin: origin + 1 })).toEqual({
+      ok: false,
+      error: 'stale',
+      message: 'page changed since the snapshot',
+    });
+    expect(page.run({ op: 'click', node, label: 'Go now', origin }).ok).toBe(true);
+    expect(page.run({ op: 'click', node, label: 'Go now' }).ok).toBe(true);
+  });
+
+  it('press also honours the origin guard', () => {
+    const page = makePage(FORM);
+    expect(page.run({ op: 'press', key: 'Tab', origin: -1 })).toMatchObject({ ok: false, error: 'stale' });
+  });
+
+  it('click, type and press install the navigation-pending flag before acting', () => {
+    for (const op of ['click', 'type', 'press'] as const) {
+      const page = makePage(FORM);
+      page.snapshot();
+      const res =
+        op === 'click'
+          ? page.run({ op, node: page.node('#go'), label: 'Go now' })
+          : op === 'type'
+            ? page.run({ op, node: page.node('#name'), label: 'Full name', text: 'x' })
+            : page.run({ op, key: 'Tab' });
+      expect(res.ok).toBe(true);
+      expect(page.win.__rhNavPending).toBe(false);
+      expect(page.evalJson(buildReadyProbe()).p).toBe(false);
+      page.win.dispatchEvent(new page.win.Event('beforeunload'));
+      expect(page.win.__rhNavPending).toBe(true);
+      expect(page.evalJson(buildReadyProbe()).p).toBe(true);
+    }
+  });
+
+  it('pagehide also sets the flag and handlers are installed once', () => {
+    const page = makePage(FORM);
+    page.snapshot();
+    page.run({ op: 'click', node: page.node('#go'), label: 'Go now' });
+    page.run({ op: 'click', node: page.node('#go'), label: 'Go now' });
+    page.win.dispatchEvent(new page.win.Event('pagehide'));
+    expect(page.win.__rhNavPending).toBe(true);
+    expect(page.win.__rhNavHooked).toBe(true);
+  });
+
+  it('buildNavigateScript sets location.href and returns JSON', () => {
+    const page = makePage(FORM);
+    const url = 'https://example.com/form#a"b</script>';
+    const js = buildNavigateScript(url);
+    expect(js).not.toContain('</script>');
+    expect(page.evalJson(js)).toEqual({ ok: true });
+    expect(page.win.location.hash).toBe('#a%22b%3C/script%3E');
   });
 });

@@ -7,13 +7,17 @@ import { DOM_SNAPSHOT_SCRIPT } from '../browser-snapshot.js';
  * single argv argument and inside any JS evaluation context.
  */
 
-export type PageOp =
+export type PageOp = (
   | { op: 'click'; node: number; label: string }
   | { op: 'type'; node: number; label: string; text: string; submit?: boolean }
   | { op: 'select'; node: number; label: string; value: string }
   | { op: 'check'; node: number; label: string; checked: boolean }
   | { op: 'press'; key: string }
-  | { op: 'scroll'; delta: number };
+  | { op: 'scroll'; delta: number }
+) & {
+  /** `performance.timeOrigin` from the snapshot: a different document makes the op `stale`. */
+  origin?: number | string;
+};
 
 export type PageOpError = 'no_snapshot' | 'stale' | 'changed' | 'unsupported' | 'no_option' | 'failed';
 
@@ -82,6 +86,26 @@ const PRELUDE = String.raw`
   };
   const TEXT_TYPES = ['text', 'search', 'email', 'url', 'tel', 'password'];
   const NON_TYPABLE = ['checkbox', 'radio', 'button', 'submit', 'reset', 'image', 'file', 'hidden', 'range', 'color'];
+`;
+
+// Identity guard: the document must be the one that was snapshotted (when the caller says which).
+const GUARD = String.raw`
+  if (op.origin !== undefined && op.origin !== null && typeof performance !== 'undefined' &&
+      String(performance.timeOrigin) !== String(op.origin)) {
+    return fail('stale', { message: 'page changed since the snapshot' });
+  }
+`;
+
+// Marks a pending navigation (beforeunload/pagehide) so the engine does not mistake the old
+// document for the result. Installed once per document; the flag is cleared before each action.
+const NAV_HOOK = String.raw`
+  if (!window.__rhNavHooked && typeof window.addEventListener === 'function') {
+    const markNav = () => { window.__rhNavPending = true; };
+    window.addEventListener('beforeunload', markNav);
+    window.addEventListener('pagehide', markNav);
+    window.__rhNavHooked = true;
+  }
+  window.__rhNavPending = false;
 `;
 
 // Resolves `el` and verifies the label; runs for every op that targets a node.
@@ -232,13 +256,13 @@ const SCROLL = String.raw`
   return out({ ok: true });
 `;
 
-const BODIES: Record<PageOp['op'], string> = {
-  click: RESOLVE + CLICK,
-  type: RESOLVE + TYPE,
-  select: RESOLVE + SELECT,
-  check: RESOLVE + CHECK,
-  press: PRESS,
-  scroll: SCROLL,
+const BODIES: Record<PageOp["op"], string> = {
+  click: GUARD + RESOLVE + NAV_HOOK + CLICK,
+  type: GUARD + RESOLVE + NAV_HOOK + TYPE,
+  select: GUARD + RESOLVE + SELECT,
+  check: GUARD + RESOLVE + CHECK,
+  press: GUARD + NAV_HOOK + PRESS,
+  scroll: GUARD + SCROLL,
 };
 
 /** Builds an IIFE that performs `op` on the snapshotted page and evaluates to a JSON string. */
@@ -323,7 +347,12 @@ export function buildSnapshotCall(): string {
 })()`;
 }
 
-/** Cheap probe of url, readyState and title as a JSON string. */
+/** Cheap probe as a JSON string: url, readyState, title, document origin (timeOrigin), navigation pending. */
 export function buildReadyProbe(): string {
-  return `JSON.stringify({ u: location.href, r: document.readyState, t: document.title })`;
+  return `JSON.stringify({ u: location.href, r: document.readyState, t: document.title, o: typeof performance !== 'undefined' ? performance.timeOrigin : null, p: !!window.__rhNavPending })`;
+}
+
+/** Navigates the tab to `url` (embedded safely); evaluates to `{"ok":true}`. */
+export function buildNavigateScript(url: string): string {
+  return `(() => { location.href = ${embed(url)}; return JSON.stringify({ ok: true }); })()`;
 }
