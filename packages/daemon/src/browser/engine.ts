@@ -91,6 +91,19 @@ function navigatedAway(p: Probe, startUrl: string | null, origin: number | strin
   return startUrl !== null && p.u !== '' && withoutHash(p.u) !== withoutHash(startUrl);
 }
 
+/** The active tab of the lowest-index (front) window. */
+function frontTab(tabs: TabInfo[]): TabInfo | undefined {
+  let front: TabInfo | undefined;
+  for (const tab of tabs) if (tab.active && (!front || tab.windowIndex < front.windowIndex)) front = tab;
+  return front;
+}
+
+function tabId(t: { windowId: string; tabKey: string }): string {
+  return `${t.windowId}:${t.tabKey}`;
+}
+
+const FOLLOWING_NOTE = 'note: following your current tab';
+
 /** A snapshot result as page state plus its document origin; `{error}` throws. */
 function snapshotOf(raw: unknown): { state: PageState; origin: number | string | null } {
   if (raw && typeof raw === 'object' && 'error' in raw) {
@@ -214,7 +227,7 @@ export class FastBrowserEngine implements BrowserPort {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
   private envCache: { at: number; value: { frontmost: string | null; running: string[] } } | null = null;
-  private pin: (Ctx & { target: TabTarget; at: number }) | null = null;
+  private pin: (Ctx & { target: TabTarget; at: number; frontAtPin: string }) | null = null;
   private shown: Shown | null = null;
   private readonly disabled = new Map<string, { until: number; reason: string }>();
   private noteShown = false;
@@ -346,7 +359,9 @@ export class FastBrowserEngine implements BrowserPort {
   // ---- page primitives ---------------------------------------------------------------
 
   private async readState(ctx: Ctx): Promise<{ state: PageState; origin: number | string | null }> {
-    return snapshotOf(parsePage(await this.t.evaluate(ctx.browser, ctx.target, buildSnapshotCall())));
+    const res = snapshotOf(parsePage(await this.t.evaluate(ctx.browser, ctx.target, buildSnapshotCall())));
+    res.state.browser = ctx.browser.name;
+    return res;
   }
 
   /**
@@ -367,6 +382,7 @@ export class FastBrowserEngine implements BrowserPort {
     const o = v as { snap?: unknown; probe?: unknown };
     const snap = o.snap as Record<string, unknown> | null | undefined;
     const { state, origin } = snapshotOf(snap ?? null);
+    state.browser = ctx.browser.name;
     return {
       state,
       origin,
@@ -397,9 +413,37 @@ export class FastBrowserEngine implements BrowserPort {
       if (err instanceof BrowserAutomationError && ['automation_denied', 'not_running', 'no_window'].includes(err.code)) throw err;
       return ctx;
     }
-    let front: TabInfo | undefined;
-    for (const tab of tabs) if (tab.active && (!front || tab.windowIndex < front.windowIndex)) front = tab;
+    const front = frontTab(tabs);
     return front ? { browser: ctx.browser, target: { windowId: front.windowId, tabKey: front.tabKey } } : ctx;
+  }
+
+  /**
+   * A pin remembers which tab was in front when it was set (focusing a tab brings it to the
+   * front, so by default the pinned tab itself).
+   */
+  private makePin(browser: BrowserApp, target: TabTarget, front?: TabInfo) {
+    return { browser, target, at: this.now(), frontAtPin: tabId(front ?? target) };
+  }
+
+  /**
+   * Target for snapshot/find. Unpinned: the concrete front tab. Pinned: one listTabs; if the
+   * front tab is no longer the one recorded at pin time the user moved on, so the pin is
+   * dropped and the front tab followed (with a note); otherwise the pin stays.
+   */
+  private async target(ctx: Ctx): Promise<{ ctx: Ctx; note: string | null }> {
+    const pin = this.pin;
+    if (!pin || !ctx.target || tabId(ctx.target) !== tabId(pin.target)) return { ctx: await this.concrete(ctx), note: null };
+    let tabs: TabInfo[];
+    try {
+      tabs = await this.t.listTabs(ctx.browser);
+    } catch (err) {
+      if (err instanceof BrowserAutomationError && ['automation_denied', 'not_running', 'no_window'].includes(err.code)) throw err;
+      return { ctx, note: null };
+    }
+    const front = frontTab(tabs);
+    if (!front || tabId(front) === pin.frontAtPin) return { ctx, note: null };
+    this.pin = null;
+    return { ctx: { browser: ctx.browser, target: { windowId: front.windowId, tabKey: front.tabKey } }, note: FOLLOWING_NOTE };
   }
 
   /** Adds the shown document's origin to an op (identity guard). */
@@ -552,7 +596,11 @@ export class FastBrowserEngine implements BrowserPort {
 
   async snapshot(opts: { text?: boolean } = {}): Promise<string> {
     return this.run(
-      async (ctx) => renderFull(await this.show(await this.concrete(ctx)), { text: opts.text === true }),
+      async (resolved) => {
+        const { ctx, note } = await this.target(resolved);
+        const out = renderFull(await this.show(ctx), { text: opts.text === true });
+        return note ? `${note}\n${out}` : out;
+      },
       () => this.legacy.snapshot(opts),
       true,
     );
@@ -581,17 +629,19 @@ export class FastBrowserEngine implements BrowserPort {
 
   async find(query: string, limit = 8): Promise<string> {
     return this.run(
-      async (ctx) => {
-        const state = await this.show(await this.concrete(ctx));
+      async (resolved) => {
+        const { ctx, note } = await this.target(resolved);
+        const state = await this.show(ctx);
         const total = state.elements.length;
         const hits = findElements(state, query, limit);
+        const lines = note ? [note] : [];
         if (hits.length > 0) {
-          return [`found ${hits.length} of ${total} elements for "${clean(query)}":`, ...hits.map((e) => renderElement(e, FIND_MAX_OPTIONS))].join('\n');
+          lines.push(`found ${hits.length} of ${total} elements for "${clean(query)}":`, ...hits.map((e) => renderElement(e, FIND_MAX_OPTIONS)));
+        } else {
+          const first = state.elements.slice(0, Math.max(0, limit));
+          lines.push(`no match for "${clean(query)}"; first ${first.length} of ${total} elements:`, ...first.map((e) => renderElement(e)));
         }
-        const first = state.elements.slice(0, Math.max(0, limit));
-        return [`no match for "${clean(query)}"; first ${first.length} of ${total} elements:`, ...first.map(renderElement)].join(
-          '\n',
-        );
+        return lines.join('\n');
       },
       () => this.legacy.find(query, limit),
       true,
@@ -658,7 +708,7 @@ export class FastBrowserEngine implements BrowserPort {
         const isNew = (t: TabInfo): boolean => !tabs.some((o) => o.windowId === t.windowId && o.tabKey === t.tabKey);
         const fresh = after.find((t) => inFront(t) && isNew(t)) ?? after.find(inFront);
         const c: Ctx = { browser: ctx.browser, target: fresh ? { windowId: fresh.windowId, tabKey: fresh.tabKey } : null };
-        this.pin = c.target ? { browser: c.browser, target: c.target, at: this.now() } : null;
+        this.pin = c.target ? this.makePin(c.browser, c.target, frontTab(after)) : null;
         const loading = await this.waitStable(c, { avoidBlank: url.toLowerCase() !== 'about:blank' });
         const state = await this.show(c);
         return [`opened ${url}`, renderFull(state, { text: false }), ...(loading ? [loading] : [])].join('\n');
@@ -672,7 +722,7 @@ export class FastBrowserEngine implements BrowserPort {
   private async navigateReused(browser: BrowserApp, tab: TabInfo, url: string): Promise<string> {
     const target: TabTarget = { windowId: tab.windowId, tabKey: tab.tabKey };
     await this.t.focusTab(browser, target);
-    this.pin = { browser, target, at: this.now() };
+    this.pin = this.makePin(browser, target);
     const c: Ctx = { browser, target };
     const text = await this.t.evaluate(browser, target, buildNavigateScript(url));
     const res = parsePage(text) as { ok?: unknown; o?: unknown } | null;
@@ -687,7 +737,7 @@ export class FastBrowserEngine implements BrowserPort {
   private async focusAndShow(browser: BrowserApp, tab: TabInfo, head: string): Promise<string> {
     const target: TabTarget = { windowId: tab.windowId, tabKey: tab.tabKey };
     await this.t.focusTab(browser, target);
-    this.pin = { browser, target, at: this.now() };
+    this.pin = this.makePin(browser, target);
     const state = await this.show({ browser, target });
     return `${head}\n${renderFull(state, { text: false })}`;
   }

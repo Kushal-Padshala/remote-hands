@@ -22,6 +22,8 @@ export interface PageState {
   elements: PageElement[];
   /** Actions the snapshot dropped beyond its 250-action cap. */
   omitted?: number;
+  /** Browser the page was read from (shown in the header). */
+  browser?: string;
 }
 
 export interface RenderOpts {
@@ -125,7 +127,8 @@ export function renderElement(el: PageElement, maxOptions = MAX_OPTIONS): string
 }
 
 function header(state: PageState): string {
-  return `page: ${clean(state.title, 200)} — ${clean(state.url, 500)}`;
+  const browser = state.browser ? `browser: ${clean(state.browser, 60)} · ` : '';
+  return `${browser}page: ${clean(state.title, 200)} — ${clean(state.url, 500)}`;
 }
 
 function textLine(text: string, chars: number): string | null {

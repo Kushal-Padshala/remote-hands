@@ -99,8 +99,16 @@ class FakeTransport {
     return this.tabList;
   }
 
+  /** Like the real browsers: the tab becomes active and its window comes to the front. */
   async focusTab(_b: BrowserApp, target: TabTarget): Promise<void> {
     this.focused.push(target);
+    const w = this.tabList.find((x) => x.windowId === target.windowId)?.windowIndex;
+    if (w === undefined) return;
+    this.tabList = this.tabList.map((x) =>
+      x.windowId === target.windowId
+        ? { ...x, active: x.tabKey === target.tabKey, windowIndex: 1 }
+        : { ...x, windowIndex: x.windowIndex < w ? x.windowIndex + 1 : x.windowIndex },
+    );
   }
 
   async openUrl(_b: BrowserApp, url: string, windowId?: string): Promise<void> {
@@ -199,7 +207,7 @@ describe('snapshot and actions', () => {
   it('renders the snapshot with node ids', async () => {
     const out = await engine.snapshot();
     expect(out.split('\n')).toEqual([
-      'page: Sign up — https://example.com/signup',
+      'browser: Google Chrome · page: Sign up — https://example.com/signup',
       '[7] textbox "Email"',
       '[3] select "Country" = "US" options: US | Canada',
       '[9] checkbox "I agree"',
@@ -218,7 +226,7 @@ describe('snapshot and actions', () => {
     expect(opOf(t.actionEvals()[0]!)).toEqual({ op: 'click', node: 9, label: 'I agree' });
     expect(out.split('\n')).toEqual([
       'clicked [9] I agree',
-      'page: Sign up — https://example.com/signup (same page)',
+      'browser: Google Chrome · page: Sign up — https://example.com/signup (same page)',
       '~ [9] checkbox "I agree" [checked]',
       '(4 unchanged)',
     ]);
@@ -482,6 +490,34 @@ describe('tabs, focus and open', () => {
     t.tabList = TABS;
   });
 
+  it('snapshot follows the user to another tab after a pin, once with a note (I6)', async () => {
+    await engine.focus('docs');
+    t.tabList = t.tabList.map((x) => ({ ...x, active: x.windowIndex === 1 ? x.tabKey === '101' : x.active }));
+    const out = await engine.snapshot();
+    expect(out.split('\n')[0]).toBe('note: following your current tab');
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' });
+    const again = await engine.snapshot();
+    expect(again).not.toContain('following your current tab');
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' });
+  });
+
+  it('snapshot and find keep the pin while the front tab is unchanged (I6)', async () => {
+    await engine.focus('docs');
+    const out = await engine.snapshot();
+    expect(out).not.toContain('following');
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '102' });
+    await engine.find('next');
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '102' });
+  });
+
+  it('find follows the user to another tab after a pin (I6)', async () => {
+    await engine.focus('docs');
+    t.tabList = t.tabList.map((x) => ({ ...x, active: x.windowIndex === 1 ? x.tabKey === '101' : x.active }));
+    const out = await engine.find('next');
+    expect(out.split('\n')[0]).toBe('note: following your current tab');
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' });
+  });
+
   it('lists tabs with the browser header', async () => {
     expect(await engine.tabs()).toBe(
       [
@@ -505,7 +541,7 @@ describe('tabs, focus and open', () => {
     expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '102' });
     clock += 5 * 60_000 + 1;
     await engine.snapshot();
-    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' }); // front tab, not null
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '102' }); // the front tab (focusing docs brought it to the front), not null
   });
 
   it('focus matches numbers, titles and urls; reset() drops the pin', async () => {
@@ -518,7 +554,7 @@ describe('tabs, focus and open', () => {
     await expect(engine.focus('nothing-like-this')).rejects.toThrow('No tab matching "nothing-like-this"');
     engine.reset();
     await engine.snapshot();
-    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' }); // front tab, not null
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '12', tabKey: '201' }); // the front tab (last focused), not null
   });
 
   it('no_tab clears the pin and throws the actionable message', async () => {
@@ -527,7 +563,7 @@ describe('tabs, focus and open', () => {
     await expect(engine.snapshot()).rejects.toThrow('The target tab is gone.');
     t.fail = null;
     await engine.snapshot();
-    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' }); // front tab, not null
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '102' }); // the front tab (focusing docs brought it to the front), not null
   });
 
   it('open reuses a tab with the same url without navigating it', async () => {
@@ -812,7 +848,7 @@ describe('do failure context (fix round 1)', () => {
       [
         'step 2 click failed: Element [12] no longer on the page. Call browser_snapshot. (step 1 ok)',
         'current state:',
-        'page: Sign up — https://example.com/signup (same page)',
+        'browser: Google Chrome · page: Sign up — https://example.com/signup (same page)',
         '~ [7] textbox "Email" = "a@b.c"',
         '(4 unchanged)',
       ].join('\n'),
@@ -851,7 +887,7 @@ describe('do failure context (fix round 1)', () => {
       'step 1 click ran, but checking the page afterwards failed: The target tab is gone. (step 1 ok)',
     );
     await engine.snapshot();
-    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '101' });
+    expect(t.evals.at(-1)!.target).toEqual({ windowId: '11', tabKey: '102' }); // the front tab (focusing docs brought it to the front), not null
   });
 
   it('a probe failure after a later step counts that step as ok', async () => {

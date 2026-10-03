@@ -86,6 +86,14 @@ describe('renderFull', () => {
   });
 });
 
+describe('header with the browser name (fix pass 4)', () => {
+  it('renderFull and renderDelta lead with "browser: <Name> · page: <title> — <url>"', () => {
+    const s = { ...normalizeSnapshot({ url: 'https://a.test/', title: 'A', text: '', actions: [] }), browser: 'Brave Browser' };
+    expect(renderFull(s, { text: false }).split('\n')[0]).toBe('browser: Brave Browser · page: A — https://a.test/');
+    expect(renderDelta(s, s).split('\n')[0]).toBe('browser: Brave Browser · page: A — https://a.test/ (same page)');
+  });
+});
+
 describe('renderDelta', () => {
   const base = (): PageState => normalizeSnapshot(rawPage());
 
