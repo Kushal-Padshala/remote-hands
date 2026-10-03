@@ -235,9 +235,16 @@ export class WarmAgySession {
           } catch {}
         });
       }
+      const payload = event.payload as any;
+      if (event.kind === 'error' && payload?.fatal === true) {
+        const message = typeof payload.message === 'string' && payload.message ? payload.message : 'agy reported a fatal error';
+        this.kill();
+        turn.finish({ summary: message, failed: true });
+        return;
+      }
       if (event.kind === 'result') {
-        turn.summary = (event.payload as any)?.summary ?? turn.summary;
-        turn.finish({});
+        turn.summary = payload?.summary ?? turn.summary;
+        turn.finish(payload?.is_error ? { failed: true } : {});
       }
     }
   }

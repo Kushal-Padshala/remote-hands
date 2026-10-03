@@ -180,6 +180,19 @@ describe('parseAgyStreamLine', () => {
     expect(parseAgyStreamLine('{"type":"unknown"}')).toBeNull();
   });
 
+  it('marks result payloads as is_error only for ERROR status or an error string', () => {
+    const err = parseAgyStreamLine('{"event":"result","result":{"conversation_id":"c","status":"ERROR","response":"boom"}}');
+    expect(err).toMatchObject({ kind: 'result', payload: { summary: 'boom', is_error: true } });
+    const errStr = parseAgyStreamLine('{"event":"result","result":{"conversation_id":"c","error":"bad"}}');
+    expect(errStr).toMatchObject({ kind: 'result', payload: { summary: 'bad', is_error: true } });
+    const ok = parseAgyStreamLine('{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","response":"fine"}}');
+    expect(ok).toEqual({
+      kind: 'result',
+      payload: { summary: 'fine', conversation_id: 'c', duration_seconds: undefined },
+    });
+    expect(Object.keys((ok as any).payload)).not.toContain('is_error');
+  });
+
   it('parses text stream records into agent events', () => {
     expect(parseAgyStreamLine('{"type":"text","text":"hi"}')).toEqual({
       kind: 'agent_text',
@@ -213,6 +226,7 @@ describe('parseAgyStreamLine', () => {
         summary: 'quota exceeded',
         conversation_id: 'conv-1',
         duration_seconds: undefined,
+        is_error: true,
       },
     });
   });

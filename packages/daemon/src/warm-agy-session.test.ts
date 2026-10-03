@@ -20,9 +20,9 @@ class FakeProc extends EventEmitter {
     this.emit('close', null);
     return true;
   }
-  reply(response: string, conversationId = 'conv-1') {
+  reply(response: string, conversationId = 'conv-1', status = 'SUCCESS') {
     this.stdout.write(
-      JSON.stringify({ event: 'result', result: { conversation_id: conversationId, status: 'SUCCESS', response } }) + '\n',
+      JSON.stringify({ event: 'result', result: { conversation_id: conversationId, status, response } }) + '\n',
     );
   }
 }
@@ -30,7 +30,12 @@ class FakeProc extends EventEmitter {
 function parseLine(line: string): EventInput | null {
   const rec = JSON.parse(line);
   if (rec.event === 'result') {
-    return { kind: 'result', payload: { summary: rec.result.response, conversation_id: rec.result.conversation_id } };
+    const payload: any = { summary: rec.result.response, conversation_id: rec.result.conversation_id };
+    if (rec.result.status === 'ERROR') payload.is_error = true;
+    return { kind: 'result', payload };
+  }
+  if (rec.event === 'fatal') {
+    return { kind: 'error', payload: { message: rec.message, fatal: true } };
   }
   return { kind: 'agent_text', payload: { text: line } };
 }
@@ -299,5 +304,33 @@ describe('WarmAgySession lifecycle hardening', () => {
     session.reset();
     expect(killFn).toHaveBeenCalledTimes(1);
     expect(session.hasHistory()).toBe(false);
+  });
+
+  it('resolves failed when the result event is an error, keeping the summary', async () => {
+    const { session, procs } = makeSession();
+    const t = session.runTurn('a', config);
+    await Promise.resolve();
+    procs[0]!.reply('quota exceeded', 'conv-1', 'ERROR');
+    expect(await t).toMatchObject({ failed: true, aborted: false, summary: 'quota exceeded' });
+  });
+
+  it('a fatal error event fails the turn, kills the process, and the next turn resumes the conversation', async () => {
+    const { session, procs, spawnFn, killFn } = makeSession();
+    const t1 = session.runTurn('a', config);
+    await Promise.resolve();
+    procs[0]!.reply('A', 'conv-7');
+    await t1;
+    const t2 = session.runTurn('b', config);
+    await Promise.resolve();
+    procs[0]!.stdout.write('{"event":"fatal","message":"agy crashed hard"}\n');
+    const r2 = await t2;
+    expect(r2).toMatchObject({ failed: true, aborted: false, summary: 'agy crashed hard' });
+    expect(killFn).toHaveBeenCalledWith(procs[0], 'SIGTERM');
+    const t3 = session.runTurn('c', config);
+    await Promise.resolve();
+    expect(spawnFn).toHaveBeenCalledTimes(2);
+    expect(spawnFn.mock.calls[1]![1]).toEqual(expect.arrayContaining(['--conversation', 'conv-7']));
+    procs[1]!.reply('C', 'conv-7');
+    expect((await t3).summary).toBe('C');
   });
 });

@@ -407,14 +407,13 @@ export function parseAgyStreamLine(line: string): AgentStreamRecord | null {
     if (!summary) {
       summary = isError ? 'Task failed' : 'Task completed';
     }
-    return {
-      kind: 'result',
-      payload: {
-        summary,
-        conversation_id: res.conversation_id,
-        duration_seconds: res.duration_seconds,
-      },
+    const payload: Record<string, unknown> = {
+      summary,
+      conversation_id: res.conversation_id,
+      duration_seconds: res.duration_seconds,
     };
+    if (isError) payload.is_error = true;
+    return { kind: 'result', payload };
   }
 
   const text = textRecord.safeParse(record);
