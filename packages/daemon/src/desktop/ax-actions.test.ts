@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { performAxAction, getAvailableAxActions, setAxElementValue } from './ax-actions.js';
+import { performAxAction, performAxActionDetailed, getAvailableAxActions, setAxElementValue } from './ax-actions.js';
 
 describe('ax-actions', () => {
   it('dispatches AXPress via swift script with app and index', async () => {
@@ -56,5 +56,48 @@ describe('ax-actions', () => {
     const swiftCode = execMock.mock.calls[0]![1][1];
     expect(swiftCode).toContain('guard let app = targetApp else');
     expect(swiftCode).toContain('App not found');
+  });
+});
+
+describe('performAxActionDetailed', () => {
+  const ok = (stdout: string) => vi.fn().mockReturnValue({ stdout, stderr: '', status: 0 });
+
+  it('reports method ax on a normal AX press', async () => {
+    const res = await performAxActionDetailed('Finder', { role: 'AXButton' }, 'AXPress', ok('{"success":true,"method":"ax"}\n'));
+    expect(res).toEqual({ success: true, method: 'ax' });
+  });
+
+  it('reports method cgevent when the script fell back to a physical click', async () => {
+    const res = await performAxActionDetailed('Finder', { role: 'AXButton' }, 'AXPress', ok('{"success":true,"method":"cgevent"}\n'));
+    expect(res).toEqual({ success: true, method: 'cgevent' });
+  });
+
+  it('surfaces the script error when the element is not found', async () => {
+    const res = await performAxActionDetailed('Finder', 3, 'AXPress', ok('{"success":false,"error":"Element not found"}\n'));
+    expect(res).toEqual({ success: false, error: 'Element not found' });
+  });
+
+  it('reports a swift exec failure', async () => {
+    const exec = vi.fn().mockReturnValue({ stdout: '', stderr: 'boom', status: 1 });
+    expect(await performAxActionDetailed('Finder', 3, 'AXPress', exec)).toEqual({ success: false, error: 'swift exec failed' });
+  });
+
+  it('reports unparsable output', async () => {
+    expect(await performAxActionDetailed('Finder', 3, 'AXPress', ok('not json'))).toEqual({ success: false, error: 'unparsable result' });
+  });
+
+  it('keeps performAxAction as a boolean wrapper', async () => {
+    expect(await performAxAction('Finder', 3, 'AXPress', ok('{"success":true,"method":"cgevent"}'))).toBe(true);
+    expect(await performAxAction('Finder', 3, 'AXPress', ok('{"success":false,"error":"x"}'))).toBe(false);
+  });
+
+  it('tracks physical click usage in the swift script with a non-hoistable declaration', async () => {
+    const exec = ok('{"success":true,"method":"ax"}');
+    await performAxActionDetailed('Finder', { role: 'AXButton' }, 'AXPress', exec);
+    const swift = exec.mock.calls[0]![1][1] as string;
+    expect(swift).toContain('usedPhysicalClick');
+    expect(swift).toMatch(/var usedPhysicalClick: Bool = false/);
+    expect(swift).toContain('cgevent');
+    expect(swift).toContain('usedPhysicalClick = true');
   });
 });

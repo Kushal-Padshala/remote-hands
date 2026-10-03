@@ -15,12 +15,27 @@ function normalizeTarget(target: number | AxElementTarget): AxElementTarget {
   return typeof target === 'number' ? { index: target } : target;
 }
 
+export interface AxActionResult {
+  success: boolean;
+  error?: string;
+  method?: 'ax' | 'cgevent';
+}
+
 export async function performAxAction(
   appName: string,
   target: number | AxElementTarget,
   actionName: string = 'AXPress',
   execFunc: ExecFunction = defaultExec,
 ): Promise<boolean> {
+  return (await performAxActionDetailed(appName, target, actionName, execFunc)).success;
+}
+
+export async function performAxActionDetailed(
+  appName: string,
+  target: number | AxElementTarget,
+  actionName: string = 'AXPress',
+  execFunc: ExecFunction = defaultExec,
+): Promise<AxActionResult> {
   const normTarget = normalizeTarget(target);
   const escapedApp = appName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const escapedAction = actionName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -232,6 +247,7 @@ guard let found = targetEl ?? fallbackEl else {
 
 let action = "${escapedAction}" as CFString
 var res: AXError = AXUIElementPerformAction(found, action)
+var usedPhysicalClick: Bool = false
 if res != .success && action as String == "AXPress" {
     var cur = found
     for _ in 0..<4 {
@@ -278,23 +294,36 @@ if res != .success && action as String == "AXPress", let (x, y, w, h) = getBound
         down.post(tap: .cghidEventTap)
         usleep(30000)
         up.post(tap: .cghidEventTap)
+        usedPhysicalClick = true
         res = .success
     }
 }
 if res == .success {
-    print("{\\"success\\":true}")
+    if usedPhysicalClick {
+        print("{\\"success\\":true,\\"method\\":\\"cgevent\\"}")
+    } else {
+        print("{\\"success\\":true,\\"method\\":\\"ax\\"}")
+    }
 } else {
-    print("{\\"success\\":false}")
+    print("{\\"success\\":false,\\"error\\":\\"AXPress failed\\"}")
 }
 `;
 
+  let res;
   try {
-    const res = execFunc('swift', ['-e', swiftScript]);
-    if (res.status !== 0 || !res.stdout.trim()) return false;
-    const parsed = JSON.parse(res.stdout.trim());
-    return Boolean(parsed.success);
+    res = execFunc('swift', ['-e', swiftScript]);
   } catch {
-    return false;
+    return { success: false, error: 'swift exec failed' };
+  }
+  if (res.status !== 0 || !res.stdout.trim()) return { success: false, error: 'swift exec failed' };
+  try {
+    const parsed = JSON.parse(res.stdout.trim()) as { success?: unknown; error?: unknown; method?: unknown };
+    const out: AxActionResult = { success: Boolean(parsed.success) };
+    if (typeof parsed.error === 'string') out.error = parsed.error;
+    if (parsed.method === 'ax' || parsed.method === 'cgevent') out.method = parsed.method;
+    return out;
+  } catch {
+    return { success: false, error: 'unparsable result' };
   }
 }
 
