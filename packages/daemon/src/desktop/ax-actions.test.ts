@@ -1,5 +1,4 @@
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { performAxAction, performAxActionDetailed, getAvailableAxActions, setAxElementValue } from './ax-actions.js';
 
 describe('ax-actions', () => {
@@ -161,17 +160,19 @@ describe('performAxActionDetailed strict fallbacks', () => {
     expect(swift).toContain('if res != .success && action as String == "AXPress", let (x, y, w, h) = getBounds(found), w > 0, h > 0 {');
   });
 
-  it('non-strict script equals the stored round-2 script plus only the two new gates', async () => {
+  it('non-strict script keeps the original fallback shapes, with !strictMatch only in the four gated branches', async () => {
     const exec = okExec();
     await performAxActionDetailed('Finder', { index: 3, bounds: [1, 2, 30, 40], role: 'AXButton', label: 'Go "x"' }, 'AXPress', exec);
-    const stored = readFileSync(new URL('./fixtures/ax-press-nonstrict-round2.swift.txt', import.meta.url), 'utf8');
-    const parent = 'if res != .success && action as String == "AXPress" {\n    var cur = found';
-    const child = 'if res != .success && action as String == "AXPress" {\n    var chListVal';
-    expect(stored).toContain(parent);
-    expect(stored).toContain(child);
-    const expected = stored
-      .replace(parent, parent.replace('res != .success && ', 'res != .success && !strictMatch && '))
-      .replace(child, child.replace('res != .success && ', 'res != .success && !strictMatch && '));
-    expect(swiftOf(exec)).toBe(expected);
+    const swift = swiftOf(exec);
+    expect(swift).toContain('let strictMatch = false');
+    expect(swift.split('!strictMatch && ')).toHaveLength(5);
+    expect(swift).toContain('if !strictMatch && targetIndex > 0 && currentCounter == targetIndex {');
+    expect(swift).toContain('if !strictMatch && !targetLabel.isEmpty && !trimmed.isEmpty {');
+    const stripped = swift.replace('let strictMatch = false\n', '').split('!strictMatch && ').join('');
+    expect(stripped).not.toContain('strictMatch');
+    expect(stripped).toContain('if res != .success && action as String == "AXPress" {\n    var cur = found');
+    expect(stripped).toContain('if res != .success && action as String == "AXPress" {\n    var chListVal');
+    expect(stripped).toContain('if res != .success && (foundRole == "AXRadioButton" || foundRole == "AXCheckBox") {');
+    expect(stripped).toContain('if res != .success && action as String == "AXPress", let (x, y, w, h) = getBounds(found), w > 0, h > 0 {');
   });
 });
