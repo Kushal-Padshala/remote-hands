@@ -629,6 +629,65 @@ describe('review fixes', () => {
   });
 });
 
+describe('light snapshot (fix pass 4)', () => {
+  const SECRET = 'hunter2-plaintext';
+  const withSecret = (p: Page): void => {
+    (p.doc.getElementById('pw') as any).value = SECRET;
+    (p.doc.getElementById('name') as any).value = 'Ada';
+  };
+
+  it('DOM_SNAPSHOT_SCRIPT without the flag still returns guards, marker and the full page_key', () => {
+    const page = makePage(FORM);
+    withSecret(page);
+    const snap = page.snapshot();
+    expect(snap.guards).toBeDefined();
+    expect(snap.marker).toBeDefined();
+    expect(snap.page_key).toHaveLength(7);
+  });
+
+  it('with window.__rhLight the raw script skips guards/marker and page_key is [timeOrigin]', () => {
+    const page = makePage(FORM);
+    withSecret(page);
+    page.win.__rhLight = true;
+    const snap = page.snapshot();
+    expect('guards' in snap).toBe(false);
+    expect('marker' in snap).toBe(false);
+    expect(snap.page_key).toEqual([page.win.performance.timeOrigin]);
+    expect(JSON.stringify(snap)).not.toContain(SECRET);
+  });
+
+  it('the engine wrappers use light mode, strip rect/guards/marker and never carry a password', () => {
+    for (const build of [buildSnapshotCall, buildSnapshotWithProbe]) {
+      const page = makePage(FORM);
+      withSecret(page);
+      const raw = page.win.eval(build());
+      expect(raw).not.toContain(SECRET);
+      expect(raw).not.toContain('"guards"');
+      expect(raw).not.toContain('"marker"');
+      expect(raw).not.toContain('"rect"');
+      const parsed = JSON.parse(raw);
+      const snap = build === buildSnapshotCall ? parsed : parsed.snap;
+      expect(snap.page_key).toEqual([page.win.performance.timeOrigin]);
+      expect(snap.actions.some((a: any) => a.label === 'Full name' && a.value === 'Ada')).toBe(true);
+      // The flag does not leak: a later plain snapshot (legacy driver) is full again.
+      expect(page.win.__rhLight).not.toBe(true);
+      expect(page.snapshot().guards).toBeDefined();
+    }
+  });
+});
+
+describe('light snapshot normalisation (fix pass 4)', () => {
+  it('normalizeSnapshot still reads the light result', async () => {
+    const { normalizeSnapshot } = await import('./render.js');
+    const page = makePage(FORM);
+    const state = normalizeSnapshot(JSON.parse(page.win.eval(buildSnapshotCall())));
+    expect(state.title).toBe('Test Page');
+    const labels = state.elements.map((e) => e.label);
+    expect(labels).toEqual(expect.arrayContaining(['Full name', 'Password', 'Agree to terms', 'Color', 'Go now']));
+    expect(state.elements.find((e) => e.label === 'Color')?.options).toEqual(['Red', 'Green', 'Blue']);
+  });
+});
+
 describe('buildSnapshotWithProbe (fix pass 4)', () => {
   it('returns the snapshot and the probe from one evaluation', () => {
     const page = makePage(FORM);

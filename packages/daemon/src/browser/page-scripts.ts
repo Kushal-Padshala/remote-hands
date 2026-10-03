@@ -338,15 +338,39 @@ export function buildExtractScript(maxChars: number): string {
 }
 
 /**
- * Wraps DOM_SNAPSHOT_SCRIPT so it evaluates to a JSON string: the snapshot, `null` when the
+ * DOM_SNAPSHOT_SCRIPT in light mode (no guards/marker, page_key = [timeOrigin], so no input
+ * values such as password plaintext leave the page), with the keys the engine does not use
+ * dropped (rect, guards, marker and the duplicate `elements` list). The flag is restored so
+ * a legacy-driver snapshot of the same page stays full. Evaluates to the snapshot or null.
+ */
+const LIGHT_SNAPSHOT = `(() => {
+    const hadLight = Object.prototype.hasOwnProperty.call(window, '__rhLight');
+    const prevLight = window.__rhLight;
+    window.__rhLight = true;
+    let r;
+    try {
+      r = ${DOM_SNAPSHOT_SCRIPT};
+    } finally {
+      if (hadLight) window.__rhLight = prevLight; else delete window.__rhLight;
+    }
+    if (!r || typeof r !== 'object') return r === undefined ? null : r;
+    delete r.guards;
+    delete r.marker;
+    delete r.elements;
+    if (Array.isArray(r.actions)) for (const a of r.actions) if (a && typeof a === 'object') delete a.rect;
+    return r;
+  })()`;
+
+/**
+ * Wraps the light snapshot so it evaluates to a JSON string: the snapshot, `null` when the
  * page has no body, or `{"error":"snapshot failed: <message>"}` when it throws. Callers must
  * treat a result with an `error` key as a failed snapshot.
  */
 export function buildSnapshotCall(): string {
   return `(() => {
   try {
-    const r = ${DOM_SNAPSHOT_SCRIPT};
-    return JSON.stringify(r === undefined ? null : r);
+    const r = ${LIGHT_SNAPSHOT};
+    return JSON.stringify(r);
   } catch (e) {
     return JSON.stringify({ error: 'snapshot failed: ' + String((e && e.message) || e).slice(0, 300) });
   }
@@ -374,8 +398,7 @@ export function buildSnapshotWithProbe(): string {
   return `(() => {
   let snap;
   try {
-    const r = ${DOM_SNAPSHOT_SCRIPT};
-    snap = r === undefined ? null : r;
+    snap = ${LIGHT_SNAPSHOT};
   } catch (e) {
     snap = { error: 'snapshot failed: ' + String((e && e.message) || e).slice(0, 300) };
   }
