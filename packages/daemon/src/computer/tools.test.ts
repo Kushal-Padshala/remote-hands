@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { z } from 'zod';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { createComputerMcpServer } from './mcp-server.js';
 import { buildComputerTools } from './tools.js';
 import type { ComputerSession } from './session.js';
 
@@ -205,6 +208,7 @@ describe('buildComputerTools', () => {
       expect(doOk([{ op: 'hover', index: 1 }])).toBe(false);
       expect(doOk([{ op: 'click' }])).toBe(false);
       expect(doOk([{ op: 'click', index: 0 }])).toBe(false);
+      expect(doOk([{ op: 'click', index: -2 }])).toBe(false);
       expect(doOk([{ op: 'click', index: 1.5 }])).toBe(false);
       expect(doOk([{ op: 'click', index: '1' }])).toBe(false);
       expect(doOk([{ op: 'type', index: 1 }])).toBe(false);
@@ -218,6 +222,36 @@ describe('buildComputerTools', () => {
       expect(doOk(Array.from({ length: 16 }, () => ({ op: 'press', key: 'Tab' })))).toBe(false);
       expect(doOk(Array.from({ length: 15 }, () => ({ op: 'press', key: 'Tab' })))).toBe(true);
       expect(schema('browser_do').safeParse({}).success).toBe(false);
+    });
+
+    it('browser_do per-op required fields name the step number and op', () => {
+      const msgs = (steps: unknown[]) => {
+        const r = schema('browser_do').safeParse({ steps });
+        return r.success ? [] : r.error.issues.map((i) => i.message);
+      };
+      expect(msgs([{ op: 'press', key: 'Tab' }, { op: 'click' }])).toEqual([expect.stringMatching(/step 2 click.*index/)]);
+      expect(msgs([{ op: 'type', index: 1 }])).toEqual([expect.stringMatching(/step 1 type.*text/)]);
+      expect(msgs([{ op: 'select', index: 1 }])).toEqual([expect.stringMatching(/step 1 select.*value/)]);
+      expect(msgs([{ op: 'check', index: 1 }])).toEqual([expect.stringMatching(/step 1 check.*checked/)]);
+      expect(msgs([{ op: 'press' }])).toEqual([expect.stringMatching(/step 1 press.*key/)]);
+      expect(msgs([{ op: 'scroll' }])).toEqual([expect.stringMatching(/step 1 scroll.*delta/)]);
+      expect(msgs([{ op: 'wait' }])).toEqual([expect.stringMatching(/step 1 wait.*ms/)]);
+    });
+
+    it('browser_do steps keep every provided field through parsing', () => {
+      const step = { op: 'type', index: 3, text: 'a', submit: true };
+      const r = schema('browser_do').safeParse({ steps: [step] });
+      expect(r.success && r.data.steps).toEqual([step]);
+    });
+
+    it('browser_click and browser_type ids must be integers >= 1', () => {
+      for (const name of ['browser_click', 'browser_type']) {
+        const base = name === 'browser_type' ? { text: 'x' } : {};
+        expect(schema(name).safeParse({ index: 1, ...base }).success).toBe(true);
+        expect(schema(name).safeParse({ index: 0, ...base }).success).toBe(false);
+        expect(schema(name).safeParse({ index: -3, ...base }).success).toBe(false);
+        expect(schema(name).safeParse({ index: 1.5, ...base }).success).toBe(false);
+      }
     });
 
     it('browser_find limits are 1-20 integers and query is required', () => {
@@ -255,6 +289,9 @@ describe('buildComputerTools', () => {
       batch.handler({ steps: [{ tool: 'browser_do', args: { steps: [{ op: 'bogus' }] } }] }),
     ).rejects.toThrow(/step 1 browser_do invalid args: .*No steps were run\./);
     expect(session.browserDo).not.toHaveBeenCalled();
+    await expect(
+      batch.handler({ steps: [{ tool: 'browser_do', args: { steps: [{ op: 'click' }] } }] }),
+    ).rejects.toThrow('step 1 browser_do invalid args: steps.0.index: step 1 click needs index. No steps were run.');
     const steps = [{ op: 'click', index: 1 }];
     await batch.handler({ steps: [{ tool: 'browser_do', args: { steps } }] });
     expect(session.browserDo).toHaveBeenCalledWith(steps);
@@ -275,5 +312,63 @@ describe('buildComputerTools', () => {
     expect(d('browser_do')).toMatch(/form/i);
     expect(d('browser_find')).toMatch(/large|big/i);
     expect(d('browser_extract')).toMatch(/long text/i);
+  });
+
+  it('no tool advertises oneOf, anyOf, allOf, $ref, const, exclusive bounds, not, if or then in its JSON Schema', async () => {
+    const server = createComputerMcpServer(buildComputerTools(fakeSession()));
+    const client = new Client({ name: 'test', version: '0.0.0' });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(a), client.connect(b)]);
+    const { tools } = await client.listTools();
+    expect(tools).toHaveLength(17);
+    const banned = new Set(['oneOf', 'anyOf', 'allOf', '$ref', 'const', 'exclusiveMinimum', 'exclusiveMaximum', 'not', 'if', 'then']);
+    const found: string[] = [];
+    const walk = (node: unknown, where: string, inProperties = false): void => {
+      if (Array.isArray(node)) return node.forEach((v, i) => walk(v, `${where}[${i}]`));
+      if (!node || typeof node !== 'object') return;
+      for (const [k, v] of Object.entries(node)) {
+        // keys of a `properties` map are field names, not schema keywords
+        if (!inProperties && banned.has(k)) found.push(`${where}.${k}`);
+        walk(v, `${where}.${k}`, !inProperties && k === 'properties');
+      }
+    };
+    for (const t of tools) walk(t.inputSchema, t.name);
+    expect(found).toEqual([]);
+  });
+
+  it('browser_do schema is a flat step object with a plain string enum op', async () => {
+    const server = createComputerMcpServer(buildComputerTools(fakeSession()));
+    const client = new Client({ name: 'test', version: '0.0.0' });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(a), client.connect(b)]);
+    const { tools } = await client.listTools();
+    const items = (tools.find((t) => t.name === 'browser_do')!.inputSchema as any).properties.steps.items;
+    expect(items.type).toBe('object');
+    expect(items.properties.op).toMatchObject({ type: 'string', enum: ['click', 'type', 'select', 'check', 'press', 'scroll', 'wait'] });
+    expect(items.required).toEqual(['op']);
+    expect(Object.keys(items.properties).sort()).toEqual(
+      ['checked', 'delta', 'index', 'key', 'ms', 'op', 'submit', 'text', 'value'],
+    );
+  });
+
+  it('browser_do and browser_snapshot descriptions carry the example, per-op fields and pseudo-line mapping', () => {
+    const tools = buildComputerTools(fakeSession());
+    const d = (n: string) => tools.find((t) => t.name === n)!.description;
+    expect(d('browser_do')).toContain('[{"op":"type","index":3,"text":"me@x.com"},{"op":"click","index":7}]');
+    expect(d('browser_do')).toMatch(/click\/type\/select\/check need index/);
+    expect(d('browser_do')).toMatch(/remaining steps not run/);
+    expect(d('browser_do')).toMatch(/fallback.*only click, type and wait/i);
+    for (const n of ['browser_do', 'browser_snapshot']) {
+      expect(d(n)).toContain('[scroll_down]');
+      expect(d(n)).toContain('[scroll_up]');
+      expect(d(n)).toContain('[wait]');
+      expect(d(n)).toMatch(/\{op:"scroll",delta:560\|-560\}/);
+    }
+  });
+
+  it('browser_find query description does not promise surrounding-text matching', () => {
+    const find = buildComputerTools(fakeSession()).find((t) => t.name === 'browser_find')!;
+    expect(JSON.stringify(z.toJSONSchema(find.inputSchema.query!))).not.toMatch(/surrounding/);
+    expect(find.description).not.toMatch(/surrounding/);
   });
 });

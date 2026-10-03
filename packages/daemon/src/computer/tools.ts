@@ -10,17 +10,46 @@ export interface ComputerTool {
 
 const app = z.string().optional().describe('Application name. Omit for the frontmost app.');
 
-const stableId = z.number().int().positive().describe('Stable id from the last page state.');
+const stableId = z.number().int().min(1).describe('Stable id from the last page state.');
 
-const doStepSchema = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('click'), index: stableId }),
-  z.object({ op: z.literal('type'), index: stableId, text: z.string(), submit: z.boolean().optional() }),
-  z.object({ op: z.literal('select'), index: stableId, value: z.string() }),
-  z.object({ op: z.literal('check'), index: stableId, checked: z.boolean() }),
-  z.object({ op: z.literal('press'), key: z.string().describe('Key name such as Enter, Tab, Escape.') }),
-  z.object({ op: z.literal('scroll'), delta: z.number().describe('Pixels to scroll; negative scrolls up.') }),
-  z.object({ op: z.literal('wait'), ms: z.number().int().min(0).max(5000) }),
-]);
+// Flat on purpose: oneOf/anyOf/const unions are not reliably accepted by every MCP client's schema dialect.
+const DO_OPS = ['click', 'type', 'select', 'check', 'press', 'scroll', 'wait'] as const;
+
+const doStepSchema = z.object({
+  op: z.enum(DO_OPS),
+  index: stableId.optional(),
+  text: z.string().optional(),
+  value: z.string().optional(),
+  checked: z.boolean().optional(),
+  key: z.string().optional().describe('Key name such as Enter, Tab, Escape.'),
+  delta: z.number().optional().describe('Pixels to scroll; negative scrolls up.'),
+  ms: z.number().int().min(0).max(5000).optional(),
+  submit: z.boolean().optional().describe('type only: press Enter after typing.'),
+});
+
+const REQUIRED_BY_OP: Record<(typeof DO_OPS)[number], Array<keyof z.infer<typeof doStepSchema>>> = {
+  click: ['index'],
+  type: ['index', 'text'],
+  select: ['index', 'value'],
+  check: ['index', 'checked'],
+  press: ['key'],
+  scroll: ['delta'],
+  wait: ['ms'],
+};
+
+const doStepsSchema = z
+  .array(doStepSchema)
+  .min(1)
+  .max(15)
+  .superRefine((steps, ctx) => {
+    steps.forEach((step, i) => {
+      for (const field of REQUIRED_BY_OP[step.op]) {
+        if (step[field] === undefined) {
+          ctx.addIssue({ code: 'custom', path: [i, field], message: `step ${i + 1} ${step.op} needs ${field}` });
+        }
+      }
+    });
+  });
 
 export function buildComputerTools(session: ComputerSession): ComputerTool[] {
   const tools: ComputerTool[] = [
@@ -98,7 +127,7 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
     {
       name: 'browser_snapshot',
       description:
-        'Re-read the active tab as "[id] role \\"label\\"" lines. Ids in brackets are stable numbers that stay valid while the element stays on the page. Every browser action result already includes the updated state, so only call this to start from an unknown page or to recover from an error.',
+        'Re-read the active tab as "[id] role \\"label\\"" lines. Ids in brackets are stable numbers that stay valid while the element stays on the page. Every browser action result already includes the updated state, so only call this to start from an unknown page or to recover from an error. Pseudo lines [scroll_down], [scroll_up] and [wait] are not ids: use browser_do steps {op:"scroll",delta:560|-560} (down|up) and {op:"wait",ms:...} instead.',
       inputSchema: {},
       handler: () => session.browserSnapshot(),
     },
@@ -106,7 +135,7 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
       name: 'browser_click',
       description:
         'Click a page element by its stable id from the last state you saw. The result already includes the updated page state, so do not call browser_snapshot again. For several steps or forms use browser_do.',
-      inputSchema: { index: z.number().int().describe('Stable id from the last page state.') },
+      inputSchema: { index: stableId },
       handler: (a) => session.browserClick(a.index),
     },
     {
@@ -114,7 +143,7 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
       description:
         'Type text into a page element by its stable id from the last state you saw; set submit to press Enter afterwards. The result already includes the updated page state, so do not call browser_snapshot again. To fill and submit a whole form in one call use browser_do.',
       inputSchema: {
-        index: z.number().int().describe('Stable id from the last page state.'),
+        index: stableId,
         text: z.string(),
         submit: z.boolean().optional().describe('Press Enter after typing (for example to submit a search).'),
       },
@@ -125,7 +154,7 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
       description:
         'Search the active page for elements matching a query and return only the best matches with their stable ids. Use it on large pages instead of dumping everything with browser_snapshot. Results use the same ids as the page state.',
       inputSchema: {
-        query: z.string().describe('Words from the label, role, placeholder or surrounding text.'),
+        query: z.string().describe('Words from the label, value, role or select options.'),
         limit: z.number().int().min(1).max(20).optional().describe('Maximum matches to return (1-20).'),
       },
       handler: (a) => session.browserFind(a.query, a.limit),
@@ -133,8 +162,7 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
     {
       name: 'browser_do',
       description:
-        'Run up to 15 browser steps in ONE call, stopping at the first failure: click, type (optional submit), select, check, press, scroll, wait. Prefer this for forms and multi-step sequences: use ids from the last state you saw (they are stable). Returns the final page state, so do not call browser_snapshot again.',
-      inputSchema: { steps: z.array(doStepSchema).min(1).max(15) },
+        'Run up to 15 browser steps in ONE call, stopping at the first failure. Prefer this for forms and multi-step sequences, using stable ids from the last state you saw. Required fields per op: click/type/select/check need index; type needs text (optional submit); select needs value; check needs checked; press needs key; scroll needs delta; wait needs ms (0-5000). Example: [{"op":"type","index":3,"text":"me@x.com"},{"op":"click","index":7}]. A click, Enter or submit that navigates ends the batch (remaining steps not run) and the new page state is returned; otherwise the final page state is returned, so do not call browser_snapshot again. Pseudo lines [scroll_down], [scroll_up] and [wait] map to {op:"scroll",delta:560|-560} (down|up) and {op:"wait",ms:...}. On the slower fallback path only click, type and wait are supported.',      inputSchema: { steps: doStepsSchema },
       handler: (a) => session.browserDo(a.steps),
     },
     {
