@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { findBrowser } from './browsers.js';
-import { classifyOsascriptError, buildEvalScript, buildTabsScript, buildOpenScript } from './applescript.js';
+import { classifyOsascriptError, buildEvalScript, buildTabsScript, buildOpenScript, buildRunningScript } from './applescript.js';
 
 const brave = findBrowser('brave')!;
 const safari = findBrowser('safari')!;
@@ -62,5 +62,56 @@ describe('script builders', () => {
     const open = buildOpenScript(brave).join('\n');
     expect(open).toContain('item 1 of argv');
     expect(open).toContain('is running');
+  });
+});
+
+describe('fix round 1', () => {
+  const edge = findBrowser('edge')!;
+
+  it('running script derives the frontmost name without info for', () => {
+    const text = buildRunningScript().join('\n');
+    expect(text).not.toContain('info for');
+    expect(text).toContain('path to frontmost application');
+  });
+
+  it('only matches script markers in their exact raised form', () => {
+    expect(classifyOsascriptError(brave, '618:629: execution error: rh:no_tab (-2700)\n', 1).code).toBe('no_tab');
+    const pageLike =
+      '600:620: execution error: Can’t make {"rh:no_tab", "rh:not_running", "Allow JavaScript from Apple Events", "(-1743)"} into type text. (-1700)';
+    expect(classifyOsascriptError(brave, pageLike, 1).code).toBe('script_error');
+    const pageLike2 =
+      'execution error: Can’t make "Executing JavaScript through AppleScript is turned off Not authorized to send Apple events to Brave Browser. (-1743)" into type text. (-1700)';
+    expect(classifyOsascriptError(brave, pageLike2, 1).code).toBe('script_error');
+  });
+
+  it('still maps the real js_disabled and -1743 shapes', () => {
+    expect(
+      classifyOsascriptError(brave, '648:676: execution error: Brave Browser got an error: Executing JavaScript through AppleScript is turned off. To turn it on ... (12)\n', 1).code,
+    ).toBe('js_disabled');
+    expect(classifyOsascriptError(brave, '44:60: execution error: Not authorized to send Apple events to Brave Browser. (-1743)', 1).code).toBe(
+      'automation_denied',
+    );
+  });
+
+  it('maps an uninstalled browser to not_running with an install hint', () => {
+    for (const stderr of [
+      '318:321: syntax error: Expected end of line but found property. (-2741)\n',
+      '12:30: syntax error: Expected class name but found identifier. (-2740)',
+      'execution error: Can’t get application "Microsoft Edge". (-1728)',
+    ]) {
+      const err = classifyOsascriptError(edge, stderr, 1);
+      expect(err.code).toBe('not_running');
+      expect(err.message).toBe('Microsoft Edge is not installed or not running.');
+    }
+    expect(classifyOsascriptError(brave, 'execution error: Brave Browser got an error: Can’t get window id 1. (-1728)', 1).code).toBe(
+      'script_error',
+    );
+  });
+
+  it('treats only a null status as timeout', () => {
+    expect(classifyOsascriptError(brave, '', null).code).toBe('timeout');
+    const err = classifyOsascriptError(brave, '', 3);
+    expect(err.code).toBe('script_error');
+    expect(err.message).toContain('osascript exited with status 3');
   });
 });

@@ -73,21 +73,37 @@ export function classifyOsascriptError(
 ): BrowserAutomationError {
   const make = (code: BrowserErrorCode, detail = ''): BrowserAutomationError =>
     new BrowserAutomationError(code, browser.name, messageFor(code, browser, detail));
-  if (stderr.includes('rh:not_running')) return make('not_running');
-  if (stderr.includes('rh:no_window')) return make('no_window');
-  if (stderr.includes('rh:no_tab')) return make('no_tab');
-  if (stderr.includes('(-1743)') || /Not authorized to send Apple events/i.test(stderr)) {
+  if (status === null) return make('timeout');
+  // Every pattern is anchored at the start of osascript's own error line, so page data
+  // quoted later in an error (e.g. "Can't make {...} into type text") cannot change the class.
+  const text = stderr.trim();
+  const name = escapeRegExp(browser.name);
+  const prefix = String.raw`^(?:-?\d+:-?\d+: )?`;
+  const marker = new RegExp(`${prefix}execution error: rh:(not_running|no_window|no_tab) \\(-2700\\)$`).exec(text);
+  if (marker) return make(marker[1] as BrowserErrorCode);
+  if (new RegExp(`${prefix}(?:execution error: )?(?:${name} got an error: )?Not authorized to send Apple events to ${name}\\. \\(-1743\\)`).test(text)) {
     return make('automation_denied');
   }
   if (
-    /JavaScript through AppleScript is turned off/i.test(stderr) ||
-    /Allow JavaScript from Apple Events/i.test(stderr)
+    new RegExp(
+      `${prefix}(?:execution error: )?${name} got an error: (?:Executing JavaScript through AppleScript is turned off|You must enable [^\\n]{0,60}Allow JavaScript from Apple Events)`,
+    ).test(text)
   ) {
     return make('js_disabled');
   }
-  const detail = condense(stderr);
-  if (status === null || detail === '') return make('timeout');
-  return make('script_error', detail);
+  // The script names the app with literal terminology; when the app is not installed
+  // osascript cannot load its dictionary and the script fails to compile.
+  if (
+    new RegExp(`${prefix}syntax error: [^\\n]*\\((?:-2741|-2740)\\)$`).test(text) ||
+    new RegExp(`${prefix}(?:execution error: )?Can[’']t get application "${name}"\\. \\(-1728\\)$`).test(text)
+  ) {
+    return new BrowserAutomationError('not_running', browser.name, `${browser.name} is not installed or not running.`);
+  }
+  return make('script_error', text === '' ? `osascript exited with status ${status}` : condense(text));
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +186,11 @@ function tellApp(b: BrowserApp, body: readonly string[]): string[] {
  * argv: js, windowId, tabKey. An empty windowId targets the front window's active
  * (chromium) / current (Safari) tab. Prints the JavaScript result as text; an
  * undefined / missing result prints an empty line.
+ *
+ * The `is running` guard and the `tell` are not atomic: if the user quits the browser
+ * between the two, the `tell` relaunches it. The window is milliseconds wide and
+ * inherent to AppleScript; the guard exists to avoid launching browsers that were
+ * never running.
  */
 export function buildEvalScript(b: BrowserApp): string[] {
   const exec =
@@ -362,8 +383,15 @@ export function buildRunningScript(): string[] {
   return [
     'on run argv',
     'set out to ""',
+    // Derive the name from the bundle path: `info for` would compute the bundle size
+    // (seconds for large apps such as Xcode).
     'try',
-    'set out to name of (info for (path to frontmost application))',
+    'set p to (path to frontmost application) as text',
+    'if p ends with ":" then set p to text 1 thru -2 of p',
+    'set oldDelims to AppleScript\'s text item delimiters',
+    'set AppleScript\'s text item delimiters to ":"',
+    'set out to last text item of p',
+    'set AppleScript\'s text item delimiters to oldDelims',
     'end try',
     'if out ends with ".app" then set out to text 1 thru -5 of out',
     ...BROWSERS.map(
