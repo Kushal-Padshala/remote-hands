@@ -132,8 +132,9 @@ The daemon keeps one long-lived `agy` process per HUD, using `--input-format str
 
 - It is prewarmed when the HUD starts listening, with the HUD task mode, so the first task does not pay process start-up.
 - Later tasks in the same conversation are sent to the same process.
-- The hotkey starts a fresh conversation: the process is reset and a new one is prewarmed. An idle prewarmed process with no history is kept as is.
-- Cancelling a task kills the process group and the next turn respawns it.
+- The hotkey starts a fresh conversation: the process is reset and a new one is prewarmed. An idle prewarmed process that has never served a turn is kept as is.
+- Cancelling a HUD task kills the warm process group, drops the conversation history and prewarms a fresh process immediately.
+- The warm process is spawned once, so it does not get the per-task `REMOTE_HANDS_TASK_ID` environment variable. The HUD adds a `Task id: <id>` line to every turn, and approvals must pass it as `rh approve "<action>" --task=<id> ...`.
 - There is no per-turn timeout (`--print-timeout 0`); cancel is the way to stop a turn.
 - The first turn of a new process is slow because `agy` loads its MCP servers (see the measurements in the fast HUD design spec).
 

@@ -34,14 +34,15 @@ Keep the HUD, approval gate (`rh approve`), AX engine and `BrowserDriver`. Chang
 
 ## Success criteria
 
-- AX calls (snapshot, AX action) at least 3x faster than the `swift -e` path they replace.
-- Second and later HUD turns run without the `agy` cold start.
+- AX script execution about 10x faster than the `swift -e` path it replaces; `rh desktop snapshot --no-ocr` end to end 494 ms to about 350 ms, including process start-up.
+- Second and later turns within one HUD conversation run without the `agy` cold start. Each hotkey press starts a fresh conversation: the warm process is kept when it is idle and has never served a turn, otherwise it is respawned.
 - All tests pass.
 
 ### Measurements so far
 
-- Cached swift binaries (implementer, 7-run median on the repo build): snapshot 1216 ms to 368 ms (first call in a session, the cold case); AX action script 711 ms to 73 ms.
-- Warm `agy` session (real `agy`, gemini-3.8-flash, low effort): first turn 22.2 s cold (`agy` loads its MCP servers), second turn 3.2 s, turn after an abort 7.1 s.
+- Snapshot: the implementer measured 1216 ms for the uncached snapshot on a loaded machine; the controller's earlier bench baseline for `rh desktop snapshot --no-ocr` was 494 ms (installed `rh`). Medians of the cached path were about 330-368 ms; they exclude a one-time compile of 2.4-3.1 s per template. The improvement is about 1.4x against the 494 ms baseline and about 3x against 1216 ms.
+- AX action script alone (implementer, 7-run median on the repo build): 711 ms to 73 ms, about 10x.
+- Warm `agy` session (real `agy`, gemini-3.8-flash, low effort): first turn 22.2 s cold (`agy` loads its MCP servers), second turn 3.2 s, turn after an abort 7.1 s. These figures were measured before `rh-computer` was registered with `agy`; end-to-end timings with the MCP server are still to be recorded.
 - End-to-end HUD timings are still to be recorded after the CLI bundle is installed and the HUD is run.
 
 ## Risks
