@@ -718,3 +718,17 @@ describe('open reuse waits for the new document (fix round 1)', () => {
     expect(t.probes).toHaveLength(0);
   });
 });
+
+describe('render hygiene (fix round 1)', () => {
+  it('find renders a matching select with its full option list', async () => {
+    const actions = Array.from({ length: 12 }, (_, i) => ({ node: 4, role: 'combobox', kind: 'select', label: `Place → P${i}`, value: `${i}`, current_value: 'Home' }));
+    t.snapshots = [JSON.stringify(page({ actions }))];
+    const out = await engine.find('p11');
+    expect(out.split('\n')[1]).toBe(`[4] select "Place" = "Home" options: Home | ${Array.from({ length: 12 }, (_, i) => `P${i}`).join(' | ')}`);
+  });
+
+  it('tabs output strips control characters from titles', async () => {
+    t.tabList = [{ windowId: '1', windowIndex: 1, tabKey: '1', tabIndex: 1, title: 'Evil\nline\u0007', url: 'https://e.test/', active: true }];
+    expect(await engine.tabs()).toBe('browser: Google Chrome\n[w1-t1] (active) Evil line - https://e.test/');
+  });
+});

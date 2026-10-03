@@ -49,6 +49,7 @@ const MAX_STEPS = 15;
 const INDEX_OPS = new Set<DoStep['op']>(['click', 'type', 'select', 'check']);
 const ALL_OPS = new Set<string>(['click', 'type', 'select', 'check', 'press', 'scroll', 'wait']);
 const STILL_LOADING = 'note: page still loading';
+const FIND_MAX_OPTIONS = 40;
 const STILL_NAVIGATING = 'note: page is still navigating';
 const NAV_PROBE_DELAY_MS = 80;
 const FAIL_SETTLE_MS = 150;
@@ -143,7 +144,7 @@ export function normalizeOpenUrl(url: string): string {
 }
 
 function tabLine(t: TabInfo): string {
-  return `[w${t.windowIndex}-t${t.tabIndex}] ${t.active ? '(active) ' : ''}${t.title} - ${t.url}`;
+  return `[w${t.windowIndex}-t${t.tabIndex}] ${t.active ? '(active) ' : ''}${clean(t.title, 200)} - ${clean(t.url, 500)}`;
 }
 
 /** BrowserDriver.findTab rules, in priority order across all tabs. */
@@ -497,7 +498,7 @@ export class FastBrowserEngine implements BrowserPort {
         const total = state.elements.length;
         const hits = findElements(state, query, limit);
         if (hits.length > 0) {
-          return [`found ${hits.length} of ${total} elements for "${clean(query)}":`, ...hits.map(renderElement)].join('\n');
+          return [`found ${hits.length} of ${total} elements for "${clean(query)}":`, ...hits.map((e) => renderElement(e, FIND_MAX_OPTIONS))].join('\n');
         }
         const first = state.elements.slice(0, Math.max(0, limit));
         return [`no match for "${clean(query)}"; first ${first.length} of ${total} elements:`, ...first.map(renderElement)].join(

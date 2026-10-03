@@ -2,6 +2,7 @@ import type { BrowserDriver } from '../browser-driver.js';
 import { capLines } from '../computer/compact.js';
 import { buildActionScript, buildExtractScript } from './page-scripts.js';
 import { normalizeOpenUrl } from './engine.js';
+import { clean } from './render.js';
 import { okSoFar, type BrowserPort, type DoStep } from './port.js';
 
 export type LegacyBrowserDriver = Pick<
@@ -118,10 +119,10 @@ export class LegacyBrowserPort implements BrowserPort {
       .sort((a, b) => b.score - a.score || a.i - b.i)
       .slice(0, Math.max(0, limit));
     if (scored.length > 0) {
-      return [`found ${scored.length} of ${lines.length} elements for "${query}":`, ...scored.map((s) => s.line)].join('\n');
+      return [`found ${scored.length} of ${lines.length} elements for "${clean(query)}":`, ...scored.map((s) => s.line)].join('\n');
     }
     const first = lines.slice(0, Math.max(0, limit));
-    return [`no match for "${query}"; first ${first.length} of ${lines.length} elements:`, ...first].join('\n');
+    return [`no match for "${clean(query)}"; first ${first.length} of ${lines.length} elements:`, ...first].join('\n');
   }
 
   async extract(maxChars = 4000): Promise<string> {

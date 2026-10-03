@@ -69,6 +69,7 @@ describe('LegacyBrowserPort (previous ComputerSession behaviour)', () => {
   });
 
   it('find filters the snapshot lines', async () => {
+    expect((await port().find('zz\nqq')).split('\n')[0]).toBe('no match for "zz qq"; first 3 of 3 elements:');
     expect(await port().find('sign in')).toBe('found 1 of 3 elements for "sign in":\n[e3] link     Sign in with Google');
     expect(await port().find('zzz', 1)).toBe('no match for "zzz"; first 1 of 3 elements:\n[e1] button   Go');
   });
