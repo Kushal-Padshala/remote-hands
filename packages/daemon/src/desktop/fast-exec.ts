@@ -73,10 +73,27 @@ export function defaultSwiftCacheDir(): string {
 export interface FastExecOptions {
   cacheDir?: string;
   spawn?: SpawnFn;
+  /** Clock used for failure-marker expiry; injectable for tests. */
+  now?: () => number;
+}
+
+/** A genuine compile diagnostic disables caching for a template only this long. */
+export const COMPILE_FAILURE_TTL_MS = 10 * 60_000;
+
+function failureIsFresh(marker: string, now: number): boolean {
+  try {
+    const at = Number((JSON.parse(fs.readFileSync(marker, 'utf-8')) as { at?: unknown }).at);
+    if (Number.isFinite(at) && now - at < COMPILE_FAILURE_TTL_MS) return true;
+  } catch {
+    // unreadable or legacy marker: treat as expired
+  }
+  fs.rmSync(marker, { force: true });
+  return false;
 }
 
 export function createFastExec(options: FastExecOptions = {}): ExecFunction {
   const run = options.spawn ?? realSpawn;
+  const now = options.now ?? Date.now;
 
   return (command, args) => {
     const cacheDir = options.cacheDir ?? defaultSwiftCacheDir();
@@ -86,33 +103,33 @@ export function createFastExec(options: FastExecOptions = {}): ExecFunction {
     const script = args[1];
     const extraArgs = args.slice(2);
     const { template, env, hoisted } = hoistSwiftParams(script);
+    // Only scripts whose per-call values were hoisted into env vars are cached. A
+    // script that was not hoisted may embed per-call data in its body (coordinates,
+    // key codes, typed text such as passwords), so it must never be written to disk.
+    if (!hoisted) return run(command, args);
     const hash = createHash('sha256').update(template).digest('hex').slice(0, 24);
     const dir = path.join(cacheDir, hash);
     const bin = path.join(dir, 'bin');
     try {
       if (!fs.existsSync(bin)) {
-        fs.mkdirSync(dir, { recursive: true });
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        fs.chmodSync(cacheDir, 0o700);
+        fs.chmodSync(dir, 0o700);
         const failedMarker = path.join(dir, 'failed');
-        if (fs.existsSync(failedMarker)) return run(command, args);
-        // A script without hoistable parameters may embed per-call values (coordinates,
-        // typed text) directly in its body, so each call can be a brand-new template.
-        // Only pay for compilation once the same template has been seen before.
-        if (!hoisted) {
-          const seenMarker = path.join(dir, 'seen');
-          if (!fs.existsSync(seenMarker)) {
-            fs.writeFileSync(seenMarker, '');
-            return run(command, args);
-          }
-        }
+        if (fs.existsSync(failedMarker) && failureIsFresh(failedMarker, now())) return run(command, args);
         const buildDir = path.join(dir, `build-${process.pid}`);
-        fs.mkdirSync(buildDir, { recursive: true });
+        fs.mkdirSync(buildDir, { recursive: true, mode: 0o700 });
         const source = path.join(buildDir, 'main.swift');
         fs.writeFileSync(source, template);
         const tmpBin = path.join(buildDir, 'bin');
         const compiled = run('swiftc', ['-O', source, '-o', tmpBin]);
         if (compiled.status !== 0 || !fs.existsSync(tmpBin)) {
           fs.rmSync(buildDir, { recursive: true, force: true });
-          fs.writeFileSync(failedMarker, compiled.stderr);
+          // Only a real compiler diagnostic is remembered (and only for a while). A
+          // null status means swiftc could not run or was killed: retry next call.
+          if (typeof compiled.status === 'number' && compiled.status !== 0) {
+            fs.writeFileSync(failedMarker, JSON.stringify({ at: now(), stderr: compiled.stderr }));
+          }
           return run(command, args);
         }
         fs.renameSync(tmpBin, bin);

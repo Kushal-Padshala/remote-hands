@@ -130,18 +130,27 @@ describe('createFastExec', () => {
     expect(run.env).toEqual({ RH_P_query: 'A' });
   });
 
-  it('only compiles a parameterless script once it has been seen before', () => {
+  it('never compiles or caches a parameterless script, even when it repeats', () => {
     const { spawn, calls } = makeSpawn();
-    const exec = createFastExec({ cacheDir: fs.mkdtempSync(path.join(os.tmpdir(), 'fx-')), spawn });
-    const script = 'import Cocoa\nprint("windows")\n';
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fx-'));
+    const exec = createFastExec({ cacheDir, spawn });
+    // Typed text embedded in the body (e.g. a password) must never be written to disk.
+    const script = 'import Cocoa\nfor char in "s3cret".utf16 { print(char) }\n';
     exec('swift', ['-e', script]);
-    expect(calls.map((c) => c.command)).toEqual(['swift']);
     exec('swift', ['-e', script]);
-    exec('swift', ['-e', script]);
-    const commands = calls.map((c) => c.command);
-    expect(commands.filter((c) => c === 'swiftc')).toHaveLength(1);
-    expect(commands.slice(1, 2)).toEqual(['swiftc']);
-    expect(commands.filter((c) => c.endsWith('/bin'))).toHaveLength(2);
+    expect(calls.map((c) => c.command)).toEqual(['swift', 'swift']);
+    expect(calls[1]!.args).toEqual(['-e', script]);
+    expect(fs.readdirSync(cacheDir)).toEqual([]);
+  });
+
+  it('creates the cache and template directories with mode 0700', () => {
+    const { spawn } = makeSpawn();
+    const cacheDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fx-')), 'cache');
+    const exec = createFastExec({ cacheDir, spawn });
+    exec('swift', ['-e', 'let query = "A"\n']);
+    expect(fs.statSync(cacheDir).mode & 0o777).toBe(0o700);
+    const [entry] = fs.readdirSync(cacheDir);
+    expect(fs.statSync(path.join(cacheDir, entry!)).mode & 0o777).toBe(0o700);
   });
 
   it('keeps the original script untouched when it falls back', () => {
@@ -167,6 +176,40 @@ describe('createFastExec', () => {
     exec('swift', ['-e', 'let query = "A"\n']);
     exec('swift', ['-e', 'let query = "B"\n']);
     expect(calls).toEqual(['swiftc', 'swift', 'swift']);
+  });
+
+  it('does not mark a template failed when swiftc could not run (status null) and retries next call', () => {
+    const calls: string[] = [];
+    const spawn: SpawnFn = (command) => {
+      calls.push(command);
+      if (command === 'swiftc') return { stdout: '', stderr: '', status: null };
+      return { stdout: 'fallback', stderr: '', status: 0 };
+    };
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fx-'));
+    const exec = createFastExec({ cacheDir, spawn });
+    expect(exec('swift', ['-e', 'let query = "A"\n']).stdout).toBe('fallback');
+    const [entry] = fs.readdirSync(cacheDir);
+    expect(fs.existsSync(path.join(cacheDir, entry!, 'failed'))).toBe(false);
+    exec('swift', ['-e', 'let query = "B"\n']);
+    expect(calls).toEqual(['swiftc', 'swift', 'swiftc', 'swift']);
+  });
+
+  it('retries a genuinely failed compilation once the failure marker expires', () => {
+    const calls: string[] = [];
+    const spawn: SpawnFn = (command) => {
+      calls.push(command);
+      if (command === 'swiftc') return { stdout: '', stderr: 'error: boom', status: 1 };
+      return { stdout: 'fallback', stderr: '', status: 0 };
+    };
+    let now = 1_000_000;
+    const exec = createFastExec({ cacheDir: fs.mkdtempSync(path.join(os.tmpdir(), 'fx-')), spawn, now: () => now });
+    exec('swift', ['-e', 'let query = "A"\n']);
+    now += 9 * 60_000;
+    exec('swift', ['-e', 'let query = "B"\n']);
+    expect(calls).toEqual(['swiftc', 'swift', 'swift']);
+    now += 2 * 60_000;
+    exec('swift', ['-e', 'let query = "C"\n']);
+    expect(calls).toEqual(['swiftc', 'swift', 'swift', 'swiftc', 'swift']);
   });
 });
 
