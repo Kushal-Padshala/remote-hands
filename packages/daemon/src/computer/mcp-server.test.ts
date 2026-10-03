@@ -5,8 +5,8 @@ import { z } from 'zod';
 import { createComputerMcpServer } from './mcp-server.js';
 import type { ComputerTool } from './tools.js';
 
-async function connect(tools: ComputerTool[]) {
-  const server = createComputerMcpServer(tools);
+async function connect(tools: ComputerTool[], opts?: { callTimeoutMs?: number }) {
+  const server = createComputerMcpServer(tools, opts);
   const client = new Client({ name: 'test', version: '0.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(a), client.connect(b)]);
@@ -60,6 +60,34 @@ describe('createComputerMcpServer', () => {
     expect(log).toEqual(['start a', 'end a', 'start b', 'end b', 'start c', 'end c', 'start d', 'end d']);
     expect(results[2]!.isError).toBe(true);
     expect(results[3]!.content).toEqual([{ type: 'text', text: 'd' }]);
+  });
+
+  it('a call that never settles times out and the queue advances (fix pass 5 C)', async () => {
+    const after = vi.fn().mockResolvedValue('next ran');
+    const fast = vi.fn().mockResolvedValue('quick');
+    const client = await connect(
+      [
+        { name: 'hang', description: 'hang', inputSchema: {}, handler: () => new Promise<string>(() => {}) },
+        { name: 'after', description: 'after', inputSchema: {}, handler: after },
+        { name: 'fast', description: 'fast', inputSchema: {}, handler: fast },
+      ],
+      { callTimeoutMs: 50 },
+    );
+    const [hung, next] = await Promise.all([
+      client.callTool({ name: 'hang', arguments: {} }),
+      client.callTool({ name: 'after', arguments: {} }),
+    ]);
+    expect(hung.isError).toBe(true);
+    expect(hung.content).toEqual([{ type: 'text', text: 'error: tool call timed out after 0.05s' }]);
+    expect(next.content).toEqual([{ type: 'text', text: 'next ran' }]);
+    const ok = await client.callTool({ name: 'fast', arguments: {} });
+    expect(ok.isError).toBeFalsy();
+    expect(ok.content).toEqual([{ type: 'text', text: 'quick' }]);
+  });
+
+  it('the default call timeout is 90 s in the message', async () => {
+    const { formatTimeout } = await import('./mcp-server.js');
+    expect(formatTimeout(90_000)).toBe('error: tool call timed out after 90s');
   });
 
   it('computer_batch still works through the serialized server (inner steps do not enqueue)', async () => {

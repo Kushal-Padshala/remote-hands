@@ -8,8 +8,30 @@ import { buildComputerTools, type ComputerTool } from './tools.js';
  * promise chain runs them strictly one after the other (a failing call never blocks the
  * queue). computer_batch calls the raw handlers for its steps, so it never re-enqueues.
  */
-export function createComputerMcpServer(tools: ComputerTool[]): McpServer {
+const DEFAULT_CALL_TIMEOUT_MS = 90_000;
+
+/** The error text for a call that hit the per-call timeout. */
+export function formatTimeout(ms: number): string {
+  return `error: tool call timed out after ${ms / 1000}s`;
+}
+
+export interface ComputerMcpServerOptions {
+  /** Per-call limit so a handler that never settles cannot block the queue (default 90 s). */
+  callTimeoutMs?: number | undefined;
+}
+
+export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcpServerOptions = {}): McpServer {
   const server = new McpServer({ name: 'remote-hands-computer', version: '0.1.0' });
+  const limit = opts.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
+  type Result = { isError?: boolean; content: { type: 'text'; text: string }[] };
+  // The abandoned handler keeps running (it is not cancelled); only the queue moves on.
+  const withTimeout = (work: Promise<Result>): Promise<Result> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<Result>((resolve) => {
+      timer = setTimeout(() => resolve({ isError: true, content: [{ type: 'text', text: formatTimeout(limit) }] }), limit);
+    });
+    return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+  };
   let queue: Promise<unknown> = Promise.resolve();
   const serialized = <T>(fn: () => Promise<T>): Promise<T> => {
     const run = queue.then(fn, fn);
@@ -21,13 +43,17 @@ export function createComputerMcpServer(tools: ComputerTool[]): McpServer {
       tool.name,
       { description: tool.description, inputSchema: tool.inputSchema },
       (args: any) =>
-        serialized(async () => {
-          try {
-            return { content: [{ type: 'text' as const, text: await tool.handler(args) }] };
-          } catch (err: any) {
-            return { isError: true, content: [{ type: 'text' as const, text: `error: ${err?.message ?? String(err)}` }] };
-          }
-        }),
+        serialized(() =>
+          withTimeout(
+            (async (): Promise<Result> => {
+              try {
+                return { content: [{ type: 'text' as const, text: await tool.handler(args) }] };
+              } catch (err: any) {
+                return { isError: true, content: [{ type: 'text' as const, text: `error: ${err?.message ?? String(err)}` }] };
+              }
+            })(),
+          ),
+        ),
     );
   }
   return server;
