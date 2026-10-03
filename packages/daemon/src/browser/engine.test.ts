@@ -283,6 +283,28 @@ describe('fast-path availability cache', () => {
     });
   }
 
+  it('keeps the fast-path reason when the legacy fallback throws (I1)', async () => {
+    legacy.snapshot = async () => {
+      throw new Error('CDP unreachable');
+    };
+    const cases: Array<[BrowserAutomationError, string]> = [
+      [new BrowserAutomationError('js_disabled', 'Google Chrome', 'JS off in Chrome.'), 'JS off in Chrome.'],
+      [new BrowserAutomationError('automation_denied', 'Google Chrome', 'Automation denied.'), 'Automation denied.'],
+      [new BrowserAutomationError('no_window', 'Google Chrome', 'no window'), 'Google Chrome has no open window; use browser_open'],
+      [new BrowserAutomationError('not_running', 'Google Chrome', 'gone'), 'Google Chrome is not running'],
+    ];
+    for (const [err, reason] of cases) {
+      engine.reset();
+      t.fail = err;
+      await expect(engine.snapshot()).rejects.toThrow(`CDP unreachable (fast browser path unavailable: ${reason})`);
+    }
+    // While the 60 s cache is active the reason is still attached.
+    engine.reset();
+    t.fail = new BrowserAutomationError('js_disabled', 'Google Chrome', 'JS off in Chrome.');
+    await expect(engine.snapshot()).rejects.toThrow('(fast browser path unavailable: JS off in Chrome.)');
+    await expect(engine.snapshot()).rejects.toThrow('CDP unreachable (fast browser path unavailable: JS off in Chrome.)');
+  });
+
   it('reset() clears the cache', async () => {
     t.fail = new BrowserAutomationError('js_disabled', 'Google Chrome', 'off');
     await engine.snapshot();

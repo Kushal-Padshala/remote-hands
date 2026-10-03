@@ -247,10 +247,26 @@ export class FastBrowserEngine implements BrowserPort {
     return { kind: 'fast', ctx };
   }
 
-  private async useLegacy(fn: () => Promise<string>, reason: string | null, markShown: boolean): Promise<string> {
-    const out = await fn();
+  /**
+   * Runs the legacy port. `reason` says why the fast path is unavailable: it is noted once
+   * on success (unless `note` is false) and always attached when the fallback itself throws.
+   */
+  private async useLegacy(
+    fn: () => Promise<string>,
+    reason: string | null,
+    markShown: boolean,
+    note = true,
+  ): Promise<string> {
+    let out: string;
+    try {
+      out = await fn();
+    } catch (err) {
+      if (!reason) throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`${msg} (fast browser path unavailable: ${reason})`);
+    }
     if (markShown) this.shown = { mode: 'legacy' };
-    if (reason && !this.noteShown) {
+    if (note && reason && !this.noteShown) {
       this.noteShown = true;
       return `note: fast browser path unavailable (${reason}); using the slower fallback.\n${out}`;
     }
@@ -275,7 +291,9 @@ export class FastBrowserEngine implements BrowserPort {
       }
       if (err.code === 'not_running' || err.code === 'no_window') {
         this.envCache = null;
-        return this.useLegacy(fallback, null, markShown);
+        const name = r.ctx.browser.name;
+        const reason = err.code === 'no_window' ? `${name} has no open window; use browser_open` : `${name} is not running`;
+        return this.useLegacy(fallback, reason, markShown, false);
       }
       if (err.code === 'no_tab') this.dropTarget();
       throw err;
