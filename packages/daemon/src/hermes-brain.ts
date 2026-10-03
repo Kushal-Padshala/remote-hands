@@ -410,7 +410,7 @@ export class HermesBrain {
         return `- Target File: "${att.name}" (${att.path})`;
       });
       snippets.push(
-        `User Attached Targets:\n${targetLines.join('\n')}\nMandate: The user has attached these specific targets. Jump directly to them using \`rh browser focus\`, \`rh desktop window focus\`, or reading the file without exploratory scans.`,
+        `User Attached Targets:\n${targetLines.join('\n')}\nMandate: The user has attached these specific targets. Jump directly to them using the rh-computer MCP tools (browser_focus, desktop_windows, desktop_open) or reading the file without exploratory scans. If those tools are unavailable, use these shell commands as a fallback: \`rh browser focus\` and \`rh desktop window focus\`.`,
       );
     }
 

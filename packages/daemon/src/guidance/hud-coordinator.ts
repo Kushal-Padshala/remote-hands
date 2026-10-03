@@ -150,7 +150,7 @@ export function formatContextualTaskPrompt(
   lines.push('2. Autonomous Research: If this task requires research (such as rental property marketing strategies, campaign setup requirements, ad platform configurations, or client redirection mechanisms), perform targeted web research and synthesize the needed steps immediately.');
   lines.push('3. Full-Speed Execution: Do not stall on exploratory discovery commands. Jump straight into executing the steps at full speed.');
   lines.push('4. Skill Reference: Apply the `remote-hands-operator` skill for blazing-fast in-place browser tab reuse, native window control, and zero-discovery execution.');
-  lines.push('5. ZERO SCREENSHOTS & ZERO PHYSICAL MOUSE MOVEMENTS: Strictly use `rh browser snapshot`, `rh browser click <index>`, `rh browser type <index>`, or `rh desktop ax-action <app> <index> [action]` with zero cursor movement. Never take screenshots and never simulate physical mouse clicks.');
+  lines.push('5. ZERO SCREENSHOTS & ZERO PHYSICAL MOUSE MOVEMENTS: Prefer the rh-computer MCP tools (browser_snapshot, browser_click, browser_type, desktop_snapshot, desktop_click, computer_batch) with zero cursor movement. If those tools are unavailable, use these shell commands as a fallback: `rh browser snapshot`, `rh browser click <index>`, `rh browser type <index>`, or `rh desktop ax-action <app> <index> [action]`. Never take screenshots and never simulate physical mouse clicks.');
   return lines.join('\n');
 }
 

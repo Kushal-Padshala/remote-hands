@@ -208,6 +208,19 @@ describe('HudCoordinator', () => {
     expect(formatted).toContain('Full-Speed Execution:');
   });
 
+  it('execution mandate prefers the rh-computer MCP tools, keeps rh shell commands as fallback and the zero-screenshot/zero-mouse rule', () => {
+    const formatted = formatContextualTaskPrompt('do it', { app: 'Arc', isBrowser: true });
+    const rule5 = formatted.split('\n').find((l) => l.startsWith('5. '))!;
+    expect(rule5).toContain('ZERO SCREENSHOTS & ZERO PHYSICAL MOUSE MOVEMENTS');
+    for (const tool of ['browser_snapshot', 'browser_click', 'browser_type', 'desktop_snapshot', 'desktop_click', 'computer_batch']) {
+      expect(rule5).toContain(tool);
+    }
+    expect(rule5).toMatch(/fallback/i);
+    expect(rule5).toContain('`rh browser snapshot`');
+    expect(rule5).toContain('`rh desktop ax-action <app> <index> [action]`');
+    expect(rule5).toContain('Never take screenshots and never simulate physical mouse clicks');
+  });
+
   it('formats rich contextual task prompt with user attached context', () => {
     const formatted = formatContextualTaskPrompt(
       'launch marketing campaign',
