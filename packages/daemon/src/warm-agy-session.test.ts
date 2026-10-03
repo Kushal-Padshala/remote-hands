@@ -380,3 +380,57 @@ describe('WarmAgySession lifecycle hardening', () => {
     expect(session.hasHistory()).toBe(false);
   });
 });
+
+describe('WarmAgySession workspace', () => {
+  it('replaces a workspace-less prewarmed process when a workspace task arrives', async () => {
+    const { session, procs, spawnFn } = makeSession();
+    session.prewarm(config);
+    const t = session.runTurn('a', { ...config, workspace: '/ws/one' });
+    await Promise.resolve();
+    expect(spawnFn).toHaveBeenCalledTimes(2);
+    expect(procs[0]!.killed).toBe(true);
+    expect(spawnFn.mock.calls[1]![1]).toEqual(expect.arrayContaining(['--add-dir', '/ws/one']));
+    expect(spawnFn.mock.calls[1]![2].cwd).toBe('/ws/one');
+    expect(procs[1]!.written.join('')).toContain('"content":"a"');
+    procs[1]!.reply('A');
+    expect((await t).summary).toBe('A');
+  });
+
+  it('a workspace switch respawns in the new workspace and resumes the conversation', async () => {
+    const { session, procs, spawnFn } = makeSession();
+    const t1 = session.runTurn('a', { ...config, workspace: '/ws/one' });
+    await Promise.resolve();
+    procs[0]!.reply('A', 'conv-c');
+    await t1;
+    const t2 = session.runTurn('b', { ...config, workspace: '/ws/two' });
+    await Promise.resolve();
+    expect(spawnFn).toHaveBeenCalledTimes(2);
+    expect(procs[0]!.killed).toBe(true);
+    const args = spawnFn.mock.calls[1]![1];
+    expect(args).toEqual(expect.arrayContaining(['--conversation', 'conv-c']));
+    expect(args).toEqual(expect.arrayContaining(['--add-dir', '/ws/two']));
+    expect(spawnFn.mock.calls[1]![2].cwd).toBe('/ws/two');
+    procs[1]!.reply('B', 'conv-c');
+    await t2;
+    // A later workspace-less task reuses whatever process is live.
+    const t3 = session.runTurn('c', config);
+    await Promise.resolve();
+    expect(spawnFn).toHaveBeenCalledTimes(2);
+    expect(procs[1]!.written.join('')).toContain('"content":"c"');
+    procs[1]!.reply('C', 'conv-c');
+    await t3;
+  });
+
+  it('reuses the process for the same workspace', async () => {
+    const { session, procs, spawnFn } = makeSession();
+    const t1 = session.runTurn('a', { ...config, workspace: '/ws/one' });
+    await Promise.resolve();
+    procs[0]!.reply('A');
+    await t1;
+    const t2 = session.runTurn('b', { ...config, workspace: '/ws/one' });
+    await Promise.resolve();
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+    procs[0]!.reply('B');
+    await t2;
+  });
+});

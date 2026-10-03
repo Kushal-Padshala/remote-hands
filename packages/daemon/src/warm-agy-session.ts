@@ -60,6 +60,8 @@ interface ActiveTurn {
 export class WarmAgySession {
   private proc: ChildProcess | null = null;
   private procKey = '';
+  /** The workspace the live process was spawned in ('' = none). */
+  private procWorkspace = '';
   private buffer = '';
   private turn: ActiveTurn | null = null;
   private queue: Promise<unknown> = Promise.resolve();
@@ -181,7 +183,12 @@ export class WarmAgySession {
 
   private ensure(config: WarmSessionConfig): ChildProcess {
     const key = JSON.stringify([config.model, config.effort ?? '', config.mode ?? '']);
-    if (this.proc && this.procKey === key) return this.proc;
+    // cwd and --add-dir are fixed at spawn. A request without a workspace reuses any live
+    // process; one with a workspace needs a process spawned there. A respawn keeps
+    // lastConversationId, so the new process resumes the same conversation.
+    const workspace = config.workspace || '';
+    const workspaceMatches = !workspace || workspace === this.procWorkspace;
+    if (this.proc && this.procKey === key && workspaceMatches) return this.proc;
     if (this.proc) this.kill();
 
     const spawnFn = this.opts.spawnFn ?? spawn;
@@ -201,6 +208,7 @@ export class WarmAgySession {
     );
     this.proc = proc;
     this.procKey = key;
+    this.procWorkspace = workspace;
     this.buffer = '';
     this.processServedTurn = false;
 
