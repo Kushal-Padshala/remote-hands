@@ -119,6 +119,7 @@ export interface PreviousTaskDigest {
 
 export const PREVIOUS_TASK_WINDOW_MS = 10 * 60_000;
 export const PREVIOUS_TASK_SUMMARY_MAX = 2000;
+export const PREVIOUS_TASK_GOAL_MAX = 300;
 
 export function formatPreviousTaskSection(prev: PreviousTaskDigest | undefined, nowMs: number): string[] {
   if (!prev) return [];
@@ -290,6 +291,7 @@ export class HudCoordinator {
   private currentTaskId?: string | undefined;
   private currentConversationId?: string | undefined;
   private lastTaskDigest?: PreviousTaskDigest | undefined;
+  private taskQueries = new Map<string, string>();
   private powerManager?: DynamicPowerManager | undefined;
 
   constructor(
@@ -423,6 +425,11 @@ export class HudCoordinator {
     if (!store) return;
 
     this.powerManager?.startTask();
+    // Only a task that finishes successfully leaves a digest; a failed or stopped one must not
+    // let an older digest be presented as "just finished".
+    this.lastTaskDigest = undefined;
+    const query = this.taskQueries.get(task.id);
+    this.taskQueries.delete(task.id);
     const abortController = new AbortController();
     this.activeExecution = { taskId: task.id, abortController };
 
@@ -513,7 +520,7 @@ export class HudCoordinator {
       } else {
         await store.completeTask(running.id, { summary: res.summary, conversationId: res.conversationId });
         this.lastTaskDigest = {
-          goal: String((task as any).goal ?? task.prompt),
+          goal: String(query ?? task.prompt ?? '').slice(0, PREVIOUS_TASK_GOAL_MAX),
           summary: res.summary ?? '',
           finishedAt: Date.now(),
         };
@@ -594,6 +601,7 @@ export class HudCoordinator {
         attachments: result.attachments,
       });
       this.currentTaskId = task.id;
+      this.taskQueries.set(task.id, result.query);
       if (this.onTaskCreated) {
         await this.onTaskCreated(task);
       }
@@ -639,6 +647,7 @@ export class HudCoordinator {
           attachments: result.attachments,
         });
         this.currentTaskId = task.id;
+        this.taskQueries.set(task.id, result.query);
         if (this.onTaskCreated) {
           await this.onTaskCreated(task);
         }

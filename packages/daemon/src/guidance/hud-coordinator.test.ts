@@ -665,6 +665,82 @@ describe('HudCoordinator', () => {
     expect(createdTasks[2].prompt).toContain('Answered 7 survey questions');
   });
 
+  function digestHarness(runResults: Array<{ status: 'done' | 'failed'; summary: string }>, dropGoal: boolean) {
+    let submitCallback: any;
+    mockHudRunner.openInteractivePrompt = vi.fn().mockImplementation((_app: any, onSubmit: any) => {
+      submitCallback = onSubmit;
+      return { close: vi.fn() };
+    });
+    const createdTasks: any[] = [];
+    const mockStore = {
+      createTask: vi.fn().mockImplementation(async (input: any) => {
+        const { goal, ...rest } = input;
+        const t = { id: `task-${createdTasks.length + 1}`, ...(dropGoal ? rest : input) };
+        createdTasks.push(t);
+        return t;
+      }),
+      markTaskRunning: vi.fn().mockImplementation(async (id: string) => ({ id, status: 'running' })),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+      failTask: vi.fn().mockResolvedValue(undefined),
+    };
+    const run = vi.fn();
+    runResults.forEach((r, i) => run.mockResolvedValueOnce({ ...r, conversationId: `conv-${i + 1}` }));
+    const coordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: mockStore as any,
+      runner: { run } as any,
+      autoExecute: true,
+    });
+    coordinator.startListening();
+    const hotkeyCb = mockHudRunner.startListener.mock.calls[0]![0];
+    const newSessionTask = async (query: string) => {
+      await hotkeyCb({ event: 'hotkey', app: 'Google Chrome' });
+      await submitCallback({ query, app: 'Google Chrome' }, () => {});
+      await new Promise((r) => setTimeout(r, 20));
+    };
+    return { createdTasks, newSessionTask };
+  }
+
+  it('digest goal is the user query, not the stored prompt, so digests never nest', async () => {
+    const { createdTasks, newSessionTask } = digestHarness(
+      [
+        { status: 'done', summary: 'Answered 7 survey questions' },
+        { status: 'done', summary: 'Wrote the note' },
+      ],
+      true,
+    );
+    await newSessionTask('complete this survey for me');
+    await newSessionTask('add all the questions and answers in a new note');
+    const second = createdTasks[1].prompt as string;
+    expect(second).toContain('Goal: complete this survey for me');
+    expect(second.match(/Execution Mandate:/g)).toHaveLength(1);
+
+    await newSessionTask('now play shuffled liked songs');
+    const third = createdTasks[2].prompt as string;
+    expect(third).toContain('Goal: add all the questions and answers in a new note');
+    expect(third).not.toContain('Goal: complete this survey for me');
+    expect(third.match(/Execution Mandate:/g)).toHaveLength(1);
+  });
+
+  it('does not reuse an older digest after the next task failed', async () => {
+    const { createdTasks, newSessionTask } = digestHarness(
+      [
+        { status: 'done', summary: 'Answered 7 survey questions' },
+        { status: 'failed', summary: 'Could not open Notes' },
+      ],
+      false,
+    );
+    await newSessionTask('complete this survey for me');
+    await newSessionTask('add the answers to a note');
+    expect(createdTasks[1].prompt).toContain('Answered 7 survey questions');
+    await newSessionTask('try again to add the answers to a note');
+    expect(createdTasks[2].prompt).not.toContain('Previous task');
+  });
+
   it('allows stopping active process and executing follow-up instructions in the same chat session', async () => {
     let submitCallback: any;
     let stopCallback: any;
