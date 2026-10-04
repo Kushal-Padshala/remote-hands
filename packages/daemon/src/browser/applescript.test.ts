@@ -133,3 +133,23 @@ describe('fix round 1', () => {
     expect(err.message).toContain('osascript exited with status 3');
   });
 });
+
+describe('Arc inline-specifier eval script', () => {
+  const arc = findBrowser('arc')!;
+
+  it('never stores tab or window objects in variables and addresses tabs inline', () => {
+    const text = buildEvalScript(arc).join('\n');
+    expect(text).toContain('tell active tab of front window to set res to (execute javascript js)');
+    expect(text).toContain('tell tab id tkey of window id wid to set res to (execute javascript js)');
+    expect(text).not.toContain('set theTab');
+    expect(text).not.toContain('repeat with');
+    expect(text).toContain('application "Arc" is running');
+    expect(text).toContain('rh:no_tab');
+  });
+
+  it('keeps the other chromium browsers on the variable-based script', () => {
+    const text = buildEvalScript(brave).join('\n');
+    expect(text).toContain('set theTab');
+    expect(text).not.toContain('tell tab id');
+  });
+});

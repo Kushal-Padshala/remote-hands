@@ -186,3 +186,25 @@ describe('fix round 1: transport hardening', () => {
     expect(f.calls[0]!.timeoutMs).toBe(8000);
   });
 });
+
+describe('Arc JSON-encoded results', () => {
+  it('unwraps exactly one JSON string level for Arc only', async () => {
+    const { AppleScriptTransport } = await import('./transport.js');
+    const { findBrowser } = await import('./browsers.js');
+    const run = async () => ({ stdout: '"{\\"a\\":1,\\"s\\":\\"q\\\\\\"x\\"}"\n', stderr: '', status: 0 });
+    const t = new AppleScriptTransport({ run });
+    const viaArc = await t.evaluate(findBrowser('arc')!, null, 'x');
+    expect(JSON.parse(viaArc)).toEqual({ a: 1, s: 'q"x' });
+    const viaBrave = await t.evaluate(findBrowser('brave')!, null, 'x');
+    expect(viaBrave.startsWith('"')).toBe(true);
+  });
+
+  it('leaves non-JSON-string output alone', async () => {
+    const { AppleScriptTransport } = await import('./transport.js');
+    const { findBrowser } = await import('./browsers.js');
+    const t = new AppleScriptTransport({ run: async () => ({ stdout: '42\n', stderr: '', status: 0 }) });
+    expect(await t.evaluate(findBrowser('arc')!, null, 'x')).toBe('42');
+    const u = new AppleScriptTransport({ run: async () => ({ stdout: '"not closed\n', stderr: '', status: 0 }) });
+    expect(await u.evaluate(findBrowser('arc')!, null, 'x')).toBe('"not closed');
+  });
+});

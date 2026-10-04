@@ -77,6 +77,19 @@ export function osascriptResult(
   return { stdout, stderr, status: typeof e.code === 'number' ? e.code : 1 };
 }
 
+/** Arc returns a JavaScript string result JSON-encoded (wrapped in quotes); unwrap exactly one level. */
+function unwrapJsonString(s: string): string {
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+    try {
+      const v = JSON.parse(s) as unknown;
+      if (typeof v === 'string') return v;
+    } catch {
+      // not JSON: leave as is
+    }
+  }
+  return s;
+}
+
 function stripOneNewline(s: string): string {
   return s.endsWith('\n') ? s.slice(0, -1) : s;
 }
@@ -118,7 +131,8 @@ export class AppleScriptTransport {
 
   async evaluate(b: BrowserApp, target: TabTarget | null, js: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<string> {
     const out = await this.exec(b, buildEvalScript(b), [js, target?.windowId ?? '', target?.tabKey ?? ''], timeoutMs);
-    return stripOneNewline(out);
+    const text = stripOneNewline(out);
+    return b.jsonEncodedResult ? unwrapJsonString(text) : text;
   }
 
   async listTabs(b: BrowserApp): Promise<TabInfo[]> {

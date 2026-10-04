@@ -7,12 +7,20 @@ export interface BrowserApp {
   family: BrowserFamily;
   /** Lower-case names a user or model may use for this browser. */
   aliases: readonly string[];
+  /**
+   * Arc: tab and window objects cannot be stored in AppleScript variables (they fail with
+   * -1700 "Can't make «class» id ... into type specifier"), so scripts must address tabs
+   * with inline specifiers (`tell tab id X of window id Y`).
+   */
+  inlineTabSpecifier?: boolean;
+  /** Arc returns JavaScript results JSON-encoded (a string arrives wrapped in quotes). */
+  jsonEncodedResult?: boolean;
 }
 
 export const BROWSERS: readonly BrowserApp[] = [
   { name: 'Google Chrome', family: 'chromium', aliases: ['chrome', 'google chrome'] },
   { name: 'Brave Browser', family: 'chromium', aliases: ['brave', 'brave browser'] },
-  { name: 'Arc', family: 'chromium', aliases: ['arc'] },
+  { name: 'Arc', family: 'chromium', aliases: ['arc'], inlineTabSpecifier: true, jsonEncodedResult: true },
   { name: 'Microsoft Edge', family: 'chromium', aliases: ['edge', 'microsoft edge'] },
   { name: 'Safari', family: 'safari', aliases: ['safari'] },
 ];

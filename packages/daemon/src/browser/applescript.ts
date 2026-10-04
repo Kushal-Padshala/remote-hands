@@ -196,6 +196,7 @@ function tellApp(b: BrowserApp, body: readonly string[]): string[] {
  * never running.
  */
 export function buildEvalScript(b: BrowserApp): string[] {
+  if (b.inlineTabSpecifier) return buildInlineEvalScript(b);
   const exec =
     b.family === 'safari' ? 'set res to do JavaScript js in theTab' : 'set res to execute theTab javascript js';
   return [
@@ -206,6 +207,38 @@ export function buildEvalScript(b: BrowserApp): string[] {
     'set res to missing value',
     guard(b),
     ...tellApp(b, [...findTab(b), exec]),
+    'if res is missing value then return ""',
+    'return res as text',
+    'end run',
+  ];
+}
+
+/**
+ * Arc variant of the eval script: objects are never stored in variables (that fails with
+ * -1700 in Arc); the tab is addressed inline by id. A tab id that does not exist raises
+ * -1728, mapped to `rh:no_tab`.
+ */
+function buildInlineEvalScript(b: BrowserApp): string[] {
+  return [
+    'on run argv',
+    'set js to item 1 of argv',
+    'set wid to item 2 of argv',
+    'set tkey to item 3 of argv',
+    'set res to missing value',
+    guard(b),
+    ...tellApp(b, [
+      'if (count of windows) is 0 then error "rh:no_window"',
+      'if wid is "" then',
+      'tell active tab of front window to set res to (execute javascript js)',
+      'else',
+      'try',
+      'tell tab id tkey of window id wid to set res to (execute javascript js)',
+      'on error errMsg number errNum',
+      'if errNum is -1728 then error "rh:no_tab"',
+      'error errMsg number errNum',
+      'end try',
+      'end if',
+    ]),
     'if res is missing value then return ""',
     'return res as text',
     'end run',
