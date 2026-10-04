@@ -25,6 +25,15 @@ export interface WarmAgySessionOptions {
   env?: NodeJS.ProcessEnv;
   /** Injectable for tests. Defaults to killing the whole process group on non-win32. */
   killFn?: (proc: ChildProcess, signal?: NodeJS.Signals) => void;
+  /**
+   * Stop the agy process after this long without a turn (0 or unset: keep it forever). The
+   * next prewarm or turn starts a new one and resumes the conversation, so an idle HUD
+   * holds no agy memory at all.
+   */
+  idleMs?: number;
+  /** Injectable for tests. */
+  setTimer?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimer?: (timer: NodeJS.Timeout) => void;
 }
 
 export function buildWarmAgyArgs(
@@ -72,6 +81,7 @@ export class WarmAgySession {
   private lastConversationId: string | null = null;
   /** The live process has received a turn, so it holds context even if no conversation_id came back. */
   private processServedTurn = false;
+  private idleTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly opts: WarmAgySessionOptions) {}
 
@@ -82,6 +92,7 @@ export class WarmAgySession {
   prewarm(config: WarmSessionConfig): void {
     try {
       this.ensure(config);
+      if (!this.turn) this.armIdle();
     } catch {}
   }
 
@@ -122,6 +133,7 @@ export class WarmAgySession {
           aborted: false,
         });
         if (signal?.aborted) return resolve(cancelled());
+        this.disarmIdle();
 
         let proc: ChildProcess;
         try {
@@ -148,6 +160,7 @@ export class WarmAgySession {
             if (settled || this.turn !== turn) return;
             settled = true;
             this.turn = null;
+            this.armIdle();
             if (onAbort) signal?.removeEventListener('abort', onAbort);
             void turn.chain.then(() =>
               resolve({
@@ -289,7 +302,27 @@ export class WarmAgySession {
     });
   }
 
+  /** (Re)starts the idle countdown; the timer never keeps the Node process alive. */
+  private armIdle(): void {
+    this.disarmIdle();
+    const ms = this.opts.idleMs ?? 0;
+    if (!(ms > 0) || !this.proc) return;
+    const timer = (this.opts.setTimer ?? setTimeout)(() => {
+      this.idleTimer = null;
+      if (!this.turn) this.kill();
+    }, ms);
+    timer?.unref?.();
+    this.idleTimer = timer;
+  }
+
+  private disarmIdle(): void {
+    if (!this.idleTimer) return;
+    (this.opts.clearTimer ?? clearTimeout)(this.idleTimer);
+    this.idleTimer = null;
+  }
+
   private kill(): void {
+    this.disarmIdle();
     const proc = this.proc;
     this.proc = null;
     this.procKey = '';

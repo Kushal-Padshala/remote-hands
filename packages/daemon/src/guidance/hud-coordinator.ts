@@ -13,6 +13,9 @@ import { WarmAgySession } from '../warm-agy-session.js';
 import { SLIM_COMPUTER_PROMPT } from '../computer/prompt.js';
 import { DynamicPowerManager } from '../system/power-manager.js';
 
+/** The warm agy process is stopped after this long unused; the hotkey starts a fresh one while the user types. */
+const HUD_AGY_IDLE_MS = Number(process.env.RH_HUD_AGY_IDLE_MS ?? 10 * 60_000);
+
 
 
 
@@ -368,7 +371,7 @@ export class HudCoordinator {
           'agy',
           SLIM_COMPUTER_PROMPT,
           undefined,
-          new WarmAgySession({ command: 'agy', parseLine: parseAgyStreamLine }),
+          new WarmAgySession({ command: 'agy', parseLine: parseAgyStreamLine, idleMs: HUD_AGY_IDLE_MS }),
         );
     }
     return this.defaultRunner;

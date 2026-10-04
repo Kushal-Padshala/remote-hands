@@ -480,3 +480,79 @@ describe('WarmAgySession requested conversation', () => {
     await t;
   });
 });
+
+describe('WarmAgySession idle shutdown', () => {
+  function idleSession(idleMs = 1000) {
+    const procs: FakeProc[] = [];
+    const timers: Array<{ fn: () => void; ms: number; cleared: boolean }> = [];
+    const spawnFn = vi.fn(() => {
+      const p = new FakeProc();
+      procs.push(p);
+      return p as any;
+    });
+    const session = new WarmAgySession({
+      command: 'agy',
+      parseLine,
+      spawnFn: spawnFn as any,
+      killFn: ((proc: any) => proc.kill()) as any,
+      idleMs,
+      setTimer: ((fn: () => void, ms: number) => {
+        const t = { fn, ms, cleared: false };
+        timers.push(t);
+        return t as any;
+      }) as any,
+      clearTimer: ((t: any) => {
+        t.cleared = true;
+      }) as any,
+    });
+    const fire = () => timers.filter((t) => !t.cleared).forEach((t) => ((t.cleared = true), t.fn()));
+    return { session, procs, timers, spawnFn, fire };
+  }
+
+  it('stops an idle prewarmed process after idleMs and respawns on the next prewarm', () => {
+    const { session, procs, timers, spawnFn, fire } = idleSession(5000);
+    session.prewarm(config);
+    expect(timers.filter((t) => !t.cleared)).toHaveLength(1);
+    expect(timers[0]!.ms).toBe(5000);
+    fire();
+    expect(procs[0]!.killed).toBe(true);
+    session.prewarm(config);
+    expect(spawnFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('never stops the process during a turn and restarts the countdown when the turn ends', async () => {
+    const { session, procs, timers, fire } = idleSession();
+    const run = session.runTurn('hi', config);
+    await Promise.resolve();
+    expect(timers.filter((t) => !t.cleared)).toHaveLength(0);
+    procs[0]!.reply('done');
+    await run;
+    expect(timers.filter((t) => !t.cleared)).toHaveLength(1);
+    fire();
+    expect(procs[0]!.killed).toBe(true);
+  });
+
+  it('a stopped idle process resumes the conversation on the next turn', async () => {
+    const { session, procs, spawnFn, fire } = idleSession();
+    const first = session.runTurn('a', config);
+    await Promise.resolve();
+    procs[0]!.reply('one', 'conv-9');
+    await first;
+    fire();
+    const second = session.runTurn('b', config);
+    await Promise.resolve();
+    procs[1]!.reply('two', 'conv-9');
+    await second;
+    expect(spawnFn.mock.calls[1]![1]).toEqual(expect.arrayContaining(['--conversation', 'conv-9']));
+  });
+
+  it('is off when idleMs is 0 or unset, and kill clears the pending timer', () => {
+    const off = idleSession(0);
+    off.session.prewarm(config);
+    expect(off.timers).toHaveLength(0);
+    const on = idleSession();
+    on.session.prewarm(config);
+    on.session.stop();
+    expect(on.timers.every((t) => t.cleared)).toBe(true);
+  });
+});
