@@ -229,6 +229,14 @@ describe('HudCoordinator', () => {
     expect(rule5).toContain('except the physical-click fallback that desktop_click reports in its result');
   });
 
+  it('execution mandate tells the agent not to open SKILL.md and keeps rule numbering', () => {
+    const formatted = formatContextualTaskPrompt('do it', { app: 'Arc', isBrowser: true });
+    const rule4 = formatted.split('\n').find((l) => l.startsWith('4. '))!;
+    expect(rule4).toContain('Do not open or read any SKILL.md');
+    expect(formatted).not.toContain('Apply the `remote-hands-operator` skill');
+    expect(formatted.split('\n').some((l) => l.startsWith('5. '))).toBe(true);
+  });
+
   it('formats rich contextual task prompt with user attached context', () => {
     const formatted = formatContextualTaskPrompt(
       'launch marketing campaign',

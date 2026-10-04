@@ -180,7 +180,7 @@ export function formatContextualTaskPrompt(
   lines.push('1. Active Context Awareness: The user triggered this task while actively in this window. Target and interact with this application directly.');
   lines.push('2. Autonomous Research: If this task requires research (such as rental property marketing strategies, campaign setup requirements, ad platform configurations, or client redirection mechanisms), perform targeted web research and synthesize the needed steps immediately.');
   lines.push('3. Full-Speed Execution: Do not stall on exploratory discovery commands. Jump straight into executing the steps at full speed.');
-  lines.push('4. Skill Reference: Apply the `remote-hands-operator` skill for blazing-fast in-place browser tab reuse, native window control, and zero-discovery execution.');
+  lines.push('4. Rules Loaded: The operating rules are already in your context. Do not open or read any SKILL.md or other skill file; make your first tool call on the task itself.');
   lines.push('5. ZERO SCREENSHOTS & ZERO PHYSICAL MOUSE MOVEMENTS: Prefer the rh-computer MCP tools (browser_snapshot, browser_click, browser_type, browser_do for forms and multi-step browser sequences, desktop_snapshot, desktop_click, computer_batch) with zero cursor movement. If those tools are unavailable, use these shell commands as a fallback: `rh browser snapshot`, `rh browser click <index>`, `rh browser type <index>`, or `rh desktop ax-action <app> <index> [action]`. Never take screenshots and never simulate physical mouse clicks (except the physical-click fallback that desktop_click reports in its result).');
   lines.push(...formatPreviousTaskSection(previous, Date.now()));
   return lines.join('\n');
