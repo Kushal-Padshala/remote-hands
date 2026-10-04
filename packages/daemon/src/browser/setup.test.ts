@@ -355,3 +355,28 @@ describe('BrowserSetup.diagnose', () => {
     expect(lines.join('\n')).toContain('system_events_denied');
   });
 });
+
+describe('BrowserSetup.diagnose per-window probes', () => {
+  it('reports one probe per window using explicit tab targets', async () => {
+    const evaluate = vi
+      .fn()
+      .mockRejectedValueOnce(new BrowserAutomationError('js_disabled', 'Brave Browser', 'off')) // probe before
+      .mockResolvedValueOnce('1') // window 1
+      .mockRejectedValueOnce(new BrowserAutomationError('js_disabled', 'Brave Browser', 'off')); // window 2
+    const transport = {
+      environment: async () => ({ frontmost: null, running: ['Brave Browser'] }),
+      evaluate,
+      listTabs: async () => [
+        { windowId: 'w1', windowIndex: 1, tabKey: 't1', tabIndex: 1, title: '', url: '', active: true },
+        { windowId: 'w1', windowIndex: 1, tabKey: 't2', tabIndex: 2, title: '', url: '', active: false },
+        { windowId: 'w2', windowIndex: 2, tabKey: 't9', tabIndex: 1, title: '', url: '', active: true },
+      ],
+    };
+    const { run } = scriptedRun([{ stdout: 'a' }, { stdout: 'b' }]);
+    const lines = await new BrowserSetup({ transport: transport as any, run, sleep: async () => {} }).diagnose(brave, { click: false });
+    expect(lines).toContain('window 1: ready');
+    expect(lines).toContain('window 2: js_disabled');
+    expect(evaluate.mock.calls[1]![1]).toEqual({ windowId: 'w1', tabKey: 't1' });
+    expect(evaluate.mock.calls[2]![1]).toEqual({ windowId: 'w2', tabKey: 't9' });
+  });
+});

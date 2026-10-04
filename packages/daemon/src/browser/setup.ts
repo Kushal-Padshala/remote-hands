@@ -234,7 +234,7 @@ export function menuMissingMessage(b: BrowserApp): string {
 }
 
 export interface BrowserSetupDeps {
-  transport: Pick<AppleScriptTransport, 'evaluate' | 'environment'>;
+  transport: Pick<AppleScriptTransport, 'evaluate' | 'environment'> & Partial<Pick<AppleScriptTransport, 'listTabs'>>;
   run?: RunOsascript;
   open?: (url: string) => Promise<void>;
   sleep?: (ms: number) => Promise<void>;
@@ -319,6 +319,25 @@ export class BrowserSetup {
     };
     lines.push(`probe before: ${(await this.inspect(b)).status}`);
     await info('before');
+    // One probe per window (its active tab): different windows can belong to different
+    // profiles, and the setting is per profile.
+    if (this.transport.listTabs) {
+      try {
+        const tabs = (await this.transport.listTabs(b)).filter((t) => t.active);
+        for (const t of tabs) {
+          let status = 'ready';
+          try {
+            await this.transport.evaluate(b, { windowId: t.windowId, tabKey: t.tabKey }, '1');
+          } catch (err) {
+            status = err instanceof BrowserAutomationError ? err.code : 'error';
+          }
+          lines.push(`window ${t.windowIndex}: ${status}`);
+        }
+        if (tabs.length === 0) lines.push('windows: none listed');
+      } catch (err) {
+        lines.push(`windows: could not list (${err instanceof Error ? condense(err.message) : 'error'})`);
+      }
+    }
     const front = await this.runScript(b, buildMenuInfoOpenScript());
     lines.push(`front+open menu: ${front.ok ? front.stdout.trim() : `${front.reason}: ${front.message}`}`);
     if (opts.click) {
