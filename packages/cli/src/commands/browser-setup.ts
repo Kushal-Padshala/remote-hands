@@ -23,6 +23,7 @@ export interface BrowserSetupLike {
   disableJs: BrowserSetup['disableJs'];
   diagnose?: BrowserSetup['diagnose'];
   windowStatuses?: BrowserSetup['windowStatuses'];
+  enableForActiveProfiles?: BrowserSetup['enableForActiveProfiles'];
   openAutomationPane: BrowserSetup['openAutomationPane'];
   openAccessibilityPane: BrowserSetup['openAccessibilityPane'];
 }
@@ -56,7 +57,7 @@ const USAGE = [
 const WHY =
   'Remote Hands controls your browser tabs through AppleScript. Browsers keep that off until you allow it. ' +
   'While it is on, any app that macOS lets control your browser can run JavaScript in your tabs. ' +
-  'I will open an empty window in the browser for a moment to switch it on, then close that window. ' +
+  'I will open an empty window in the browser for a moment to switch it on (for every profile you have open, since browsers keep it per profile), then close those windows. ' +
   'You can switch it off again any time (rh browser setup --disable).';
 
 export type BrowserOutcome = 'ready' | 'declined' | 'skipped' | 'manual' | 'failed';
@@ -83,6 +84,34 @@ interface Ctx {
   yes: boolean;
   interactive: boolean;
   record: (b: BrowserApp, d: SetupDecision) => Promise<void>;
+}
+
+/**
+ * Chromium keeps the setting per profile. When some window still has it off, switch it on
+ * for every profile in use (an empty window of each profile is opened and closed again).
+ * Nothing changes without a terminal or --yes; consent was given when the setting was offered.
+ */
+async function ensureAllWindows(b: BrowserApp, ctx: Ctx): Promise<void> {
+  if (!ctx.setup.windowStatuses) return;
+  const off = (await ctx.setup.windowStatuses(b)).filter((w) => w.status === 'js_disabled');
+  if (off.length === 0) return;
+  if (!ctx.setup.enableForActiveProfiles || (!ctx.yes && !ctx.interactive)) {
+    ctx.out(`  Note: ${off.length} ${b.name} window${off.length === 1 ? '' : 's'} (${off.map((w) => w.windowIndex).join(', ')}) still ha${off.length === 1 ? 's' : 've'} it off (another profile). Run "rh browser setup" in a terminal to switch it on there too.`);
+    return;
+  }
+  ctx.out(`  ${b.name} keeps this setting per profile; switching it on for the profiles you have open...`);
+  const results = await ctx.setup.enableForActiveProfiles(b, {
+    onGuide: (m) => ctx.out(`  ${m}`),
+    onProgress: (m) => ctx.out(`  ${m}`),
+  });
+  for (const r of results) {
+    const who = r.profile.email ? `${r.profile.name} (${r.profile.email})` : r.profile.name;
+    ctx.out(r.ok ? `  ✔ ${who}${r.changed ? '  switched on' : '  already on'}` : `  ✖ ${who}  ${r.message ?? 'failed'}`);
+  }
+  const stillOff = (await ctx.setup.windowStatuses(b)).filter((w) => w.status === 'js_disabled');
+  if (stillOff.length > 0) {
+    ctx.out(`  Note: ${stillOff.length} window${stillOff.length === 1 ? '' : 's'} (${stillOff.map((w) => w.windowIndex).join(', ')}) still ha${stillOff.length === 1 ? 's' : 've'} it off. Bring one to the front and run "rh browser setup" again.`);
+  }
 }
 
 async function enableFlow(b: BrowserApp, ctx: Ctx): Promise<BrowserOutcome> {
@@ -130,13 +159,7 @@ async function enableFlow(b: BrowserApp, ctx: Ctx): Promise<BrowserOutcome> {
   if (after.status === 'ready') {
     await ctx.record(b, 'enabled');
     ctx.out(`✔ ${b.name}  fast path is on${res.changed ? '' : ' (it already was)'}. Undo: rh browser setup --disable`);
-    const windows = ctx.setup.windowStatuses ? await ctx.setup.windowStatuses(b) : [];
-    const off = windows.filter((w) => w.status === 'js_disabled');
-    if (off.length > 0) {
-      ctx.out(
-        `  Note: ${b.name} keeps this setting per profile. ${off.length} window${off.length === 1 ? '' : 's'} (${off.map((w) => w.windowIndex).join(', ')}) still ${off.length === 1 ? 'has' : 'have'} it off. Bring one of them to the front and run "rh browser setup" again.`,
-      );
-    }
+    await ensureAllWindows(b, ctx);
     return 'ready';
   }
   ctx.out(`✖ ${b.name}  turned the setting on but the probe still fails: ${after.message}`);
@@ -162,6 +185,7 @@ async function ensureReady(b: BrowserApp, ctx: Ctx): Promise<BrowserOutcome> {
   if (res.status === 'ready') {
     await ctx.record(b, 'enabled');
     ctx.out(`✔ ${b.name}  fast path ready`);
+    await ensureAllWindows(b, ctx);
     return 'ready';
   }
   if (res.status === 'no_window') {

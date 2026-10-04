@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import * as fsp from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { BrowserAutomationError } from './applescript.js';
 import type { BrowserApp } from './browsers.js';
@@ -326,6 +327,61 @@ export function buildMouseClickSwift(x: number, y: number): string {
   ].join('\n');
 }
 
+/** Prints the id of the front window (Chromium family; ids are integers there). */
+export function buildFrontWindowIdScript(b: BrowserApp): string[] {
+  return [
+    'on run argv',
+    `if not (application "${b.name}" is running) then error "rh:not_running"`,
+    `tell application "${b.name}"`,
+    'if (count of windows) is 0 then error "rh:no_window"',
+    'return (id of front window) as text',
+    'end tell',
+    'end run',
+  ];
+}
+
+export interface BrowserProfile {
+  dir: string;
+  name: string;
+  email: string;
+}
+
+/** User-data directory (relative to ~/Library/Application Support) per Chromium browser. */
+const USER_DATA_DIRS: Record<string, string> = {
+  'Google Chrome': 'Google/Chrome',
+  'Brave Browser': 'BraveSoftware/Brave-Browser',
+  'Microsoft Edge': 'Microsoft Edge',
+};
+
+export function localStatePath(b: BrowserApp, home: string = os.homedir()): string | null {
+  const rel = USER_DATA_DIRS[b.name];
+  return rel ? path.join(home, 'Library', 'Application Support', rel, 'Local State') : null;
+}
+
+/**
+ * The profiles that are in use: the ones that had windows open (`last_active_profiles`) plus
+ * the last used one, from the browser's Local State. Guest and system profiles are skipped.
+ */
+export function parseActiveProfiles(localStateJson: string): BrowserProfile[] {
+  try {
+    const profile = (JSON.parse(localStateJson) as { profile?: Record<string, any> }).profile ?? {};
+    const info: Record<string, any> = profile.info_cache ?? {};
+    const dirs: string[] = [];
+    for (const d of [profile.last_used, ...(Array.isArray(profile.last_active_profiles) ? profile.last_active_profiles : [])]) {
+      if (typeof d === 'string' && d && !dirs.includes(d)) dirs.push(d);
+    }
+    return dirs
+      .filter((d) => d !== 'Guest Profile' && d !== 'System Profile')
+      .map((d) => ({
+        dir: d,
+        name: String(info[d]?.name ?? d),
+        email: String(info[d]?.user_name ?? ''),
+      }));
+  } catch {
+    return [];
+  }
+}
+
 /** Escapes any open menus. */
 export function buildEscapeScript(): string[] {
   return ['on run argv', 'tell application "System Events"', 'key code 53', 'delay 0.1', 'key code 53', 'end tell', 'return "escaped"', 'end run'];
@@ -413,6 +469,10 @@ export interface BrowserSetupDeps {
   sleep?: (ms: number) => Promise<void>;
   /** One real mouse click at screen coordinates (injectable; default runs a cached Swift helper). */
   clickAt?: (x: number, y: number) => Promise<boolean>;
+  /** Reads the browser's Local State file (null when absent); injectable. */
+  readLocalState?: (b: BrowserApp) => Promise<string | null>;
+  /** Opens an empty window of a profile in the running browser; injectable. */
+  openProfileWindow?: (b: BrowserApp, profileDir: string) => Promise<void>;
 }
 
 const MENU_TIMEOUT_MS = 10_000;
@@ -423,6 +483,24 @@ const defaultClickAt = async (x: number, y: number): Promise<boolean> => {
   const res = fastExec('swift', ['-e', buildMouseClickSwift(x, y)]);
   return res.status === 0 && res.stdout.trim() === 'clicked';
 };
+
+const defaultReadLocalState = async (b: BrowserApp): Promise<string | null> => {
+  const file = localStatePath(b);
+  if (!file) return null;
+  try {
+    return await fsp.readFile(file, 'utf-8');
+  } catch {
+    return null;
+  }
+};
+
+/** `open -n -a <browser> --args --profile-directory=<dir> about:blank` hands a new window to the running instance. */
+const defaultOpenProfileWindow = (b: BrowserApp, profileDir: string): Promise<void> =>
+  new Promise((resolve, reject) => {
+    execFile('open', ['-n', '-a', b.name, '--args', `--profile-directory=${profileDir}`, 'about:blank'], (err) =>
+      err ? reject(new Error('could not open a profile window')) : resolve(),
+    );
+  });
 
 const defaultOpen = (url: string): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -435,6 +513,8 @@ export class BrowserSetup {
   private readonly open: (url: string) => Promise<void>;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly clickAt: (x: number, y: number) => Promise<boolean>;
+  private readonly readLocalState: (b: BrowserApp) => Promise<string | null>;
+  private readonly openProfileWindow: (b: BrowserApp, profileDir: string) => Promise<void>;
 
   constructor(deps: BrowserSetupDeps) {
     this.transport = deps.transport;
@@ -443,6 +523,8 @@ export class BrowserSetup {
     this.sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     // Never let a test (or any process that has not injected a clicker) post a real mouse click by accident.
     this.clickAt = deps.clickAt ?? (process.env.VITEST === 'true' ? async () => false : defaultClickAt);
+    this.readLocalState = deps.readLocalState ?? defaultReadLocalState;
+    this.openProfileWindow = deps.openProfileWindow ?? defaultOpenProfileWindow;
   }
 
   /** Probes a RUNNING browser with a harmless evaluate. Never touches a closed browser. */
@@ -488,6 +570,54 @@ export class BrowserSetup {
   /** Turns the setting off; reads first and clicks only when it is checked. */
   async disableJs(b: BrowserApp, opts: { onGuide?: (message: string) => void } = {}): Promise<ToggleOutcome> {
     return this.toggleTo(b, 'unchecked', opts.onGuide);
+  }
+
+  /** Profiles in use (see parseActiveProfiles); empty for browsers without a readable Local State. */
+  async activeProfiles(b: BrowserApp): Promise<BrowserProfile[]> {
+    const raw = await this.readLocalState(b);
+    return raw ? parseActiveProfiles(raw) : [];
+  }
+
+  /**
+   * Chromium keeps this setting per profile. For each profile in use: open an empty window of
+   * that profile, switch the setting on there when it is off, and close the window again.
+   */
+  async enableForActiveProfiles(
+    b: BrowserApp,
+    opts: { onGuide?: (message: string) => void; onProgress?: (message: string) => void } = {},
+  ): Promise<Array<{ profile: BrowserProfile; ok: boolean; changed: boolean; message?: string }>> {
+    const results: Array<{ profile: BrowserProfile; ok: boolean; changed: boolean; message?: string }> = [];
+    for (const profile of await this.activeProfiles(b)) {
+      const label = profile.email ? `${profile.name} (${profile.email})` : profile.name;
+      opts.onProgress?.(`Checking ${b.name} profile ${label}...`);
+      let windowId: string | null = null;
+      try {
+        await this.openProfileWindow(b, profile.dir);
+        await this.sleep(1500);
+        const res = await this.run(buildFrontWindowIdScript(b), [], MENU_TIMEOUT_MS);
+        windowId = res.status === 0 && res.stdout.trim() ? res.stdout.trim() : null;
+        if (!windowId) {
+          results.push({ profile, ok: false, changed: false, message: 'could not open a window for this profile' });
+          continue;
+        }
+        const state = await this.inspect(b);
+        if (state.status === 'ready') {
+          results.push({ profile, ok: true, changed: false });
+          continue;
+        }
+        if (state.status !== 'js_disabled') {
+          results.push({ profile, ok: false, changed: false, message: state.message });
+          continue;
+        }
+        const out = await this.flip(b, 'checked', 'on', opts.onGuide);
+        results.push(out.ok ? { profile, ok: true, changed: out.changed } : { profile, ok: false, changed: false, message: out.message });
+      } catch (err) {
+        results.push({ profile, ok: false, changed: false, message: err instanceof Error ? condense(err.message) : 'error' });
+      } finally {
+        if (windowId) await this.closeTempWindow(b, windowId);
+      }
+    }
+    return results;
   }
 
   /** Probes the active tab of every window; used to spot profiles where the setting is still off. */

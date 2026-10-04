@@ -10,6 +10,7 @@ import {
   AUTOMATION_PANE_URL,
   BrowserSetup,
   buildEscapeScript,
+  buildFrontWindowIdScript,
   buildHelpSearchScript,
   buildLocateMenuItemScript,
   buildMouseClickSwift,
@@ -22,6 +23,8 @@ import {
   buildTempWindowOpenScript,
   classifyToggleError,
   JS_MENU_ITEM,
+  localStatePath,
+  parseActiveProfiles,
   readSetupState,
   recordDecision,
   shouldOffer,
@@ -70,7 +73,7 @@ describe('menu scripts', () => {
 
   const hasOsacompile = spawnSync('osacompile', ['-h']).error === undefined && process.platform === 'darwin';
   it.skipIf(!hasOsacompile)('both scripts compile (syntax only, nothing is executed)', () => {
-    for (const lines of [buildMenuStateScript(), buildMenuToggleScript(), buildMenuInfoScript(), buildMenuInfoOpenScript(), buildTempWindowOpenScript(brave), buildTempWindowCloseScript(brave), buildHelpSearchScript(), buildOpenMenuForUserScript(), buildEscapeScript(), buildLocateMenuItemScript()]) {
+    for (const lines of [buildMenuStateScript(), buildMenuToggleScript(), buildMenuInfoScript(), buildMenuInfoOpenScript(), buildTempWindowOpenScript(brave), buildTempWindowCloseScript(brave), buildHelpSearchScript(), buildOpenMenuForUserScript(), buildEscapeScript(), buildLocateMenuItemScript(), buildFrontWindowIdScript(brave)]) {
       const args = ['-o', `/tmp/rh-setup-compile-${process.pid}.scpt`];
       for (const l of lines) args.push('-e', l);
       expect(() => execFileSync('osacompile', args, { stdio: 'pipe' })).not.toThrow();
@@ -521,5 +524,84 @@ describe('real mouse click helper', () => {
     expect(text).toContain('position of foundItem');
     expect(text).toContain('size of foundItem');
     expect(text).not.toContain('click foundItem');
+  });
+});
+
+describe('profiles', () => {
+  const localState = JSON.stringify({
+    profile: {
+      last_used: 'Profile 4',
+      last_active_profiles: ['Profile 4', 'Profile 5', 'Guest Profile'],
+      info_cache: {
+        'Profile 4': { name: 'kushal', user_name: 'k@example.com' },
+        'Profile 5': { name: 'Work', user_name: '' },
+        'Profile 8': { name: 'Unused', user_name: 'u@example.com' },
+      },
+    },
+  });
+
+  it('parseActiveProfiles keeps the last used and last active profiles, skips guest/system, and never throws', () => {
+    expect(parseActiveProfiles(localState)).toEqual([
+      { dir: 'Profile 4', name: 'kushal', email: 'k@example.com' },
+      { dir: 'Profile 5', name: 'Work', email: '' },
+    ]);
+    expect(parseActiveProfiles('{nope')).toEqual([]);
+    expect(parseActiveProfiles('{}')).toEqual([]);
+  });
+
+  it('localStatePath knows the Chromium browsers and nothing else', () => {
+    expect(localStatePath(findBrowser('chrome')!, '/h')).toBe('/h/Library/Application Support/Google/Chrome/Local State');
+    expect(localStatePath(findBrowser('brave')!, '/h')).toBe('/h/Library/Application Support/BraveSoftware/Brave-Browser/Local State');
+    expect(localStatePath(findBrowser('safari')!, '/h')).toBeNull();
+  });
+
+  it('the front-window-id script is guarded and prints an id', () => {
+    const text = buildFrontWindowIdScript(brave).join('\n');
+    expect(text).toContain('application "Brave Browser" is running');
+    expect(text).toContain('id of front window');
+  });
+
+  it('enableForActiveProfiles opens each profile window, flips only where the setting is off, and always closes the window', async () => {
+    const opened: string[] = [];
+    // P4 already works; P5 is off, then the accessibility press works.
+    const transport = probeTransport(['on', 'off', 'off', 'on']);
+    const { run, calls } = scriptedRun([{ stdout: '101' }, { stdout: 'closed' }, { stdout: '102' }, { stdout: 'clicked' }]);
+    const progress: string[] = [];
+    const setup = new BrowserSetup({
+      transport,
+      run,
+      sleep: async () => {},
+      readLocalState: async () => localState,
+      openProfileWindow: async (_b, dir) => void opened.push(dir),
+    });
+    const res = await setup.enableForActiveProfiles(brave, { onProgress: (m) => progress.push(m) });
+    expect(opened).toEqual(['Profile 4', 'Profile 5']);
+    expect(res.map((r) => [r.profile.dir, r.ok, r.changed])).toEqual([
+      ['Profile 4', true, false],
+      ['Profile 5', true, true],
+    ]);
+    expect(progress[0]).toContain('kushal (k@example.com)');
+    const closes = calls.filter((c) => c.lines.join('\n') === buildTempWindowCloseScript(brave).join('\n'));
+    expect(closes.map((c) => c.argv)).toEqual([['101'], ['102']]);
+  });
+
+  it('reports a profile whose window cannot be opened and carries on', async () => {
+    const setup = new BrowserSetup({
+      transport: probeTransport(['on']),
+      run: scriptedRun([{ stdout: '' }]).run,
+      sleep: async () => {},
+      readLocalState: async () => localState,
+      openProfileWindow: async (_b, dir) => {
+        if (dir === 'Profile 4') throw new Error('open failed');
+      },
+    });
+    const res = await setup.enableForActiveProfiles(brave);
+    expect(res[0]).toMatchObject({ ok: false });
+    expect(res[1]).toMatchObject({ ok: false, message: 'could not open a window for this profile' });
+  });
+
+  it('returns nothing for browsers without a readable Local State', async () => {
+    const setup = new BrowserSetup({ transport: probeTransport(['on']), readLocalState: async () => null });
+    expect(await setup.enableForActiveProfiles(safari)).toEqual([]);
   });
 });

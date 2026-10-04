@@ -29,7 +29,8 @@ interface Script {
   menu?: Record<string, any>;
   disable?: Record<string, any>;
   diagnose?: string[];
-  windows?: Array<{ windowIndex: number; status: string }>;
+  windows?: Array<{ windowIndex: number; status: string }[]> | Array<{ windowIndex: number; status: string }>;
+  profiles?: Array<{ profile: { dir: string; name: string; email: string }; ok: boolean; changed: boolean; message?: string }>;
 }
 
 function fakeSetup(script: Script = {}) {
@@ -52,7 +53,18 @@ function fakeSetup(script: Script = {}) {
     }) as any,
     openAutomationPane: vi.fn(async () => void calls.push('open:automation')) as any,
     openAccessibilityPane: vi.fn(async () => void calls.push('open:accessibility')) as any,
-    windowStatuses: vi.fn(async () => script.windows ?? []) as any,
+    windowStatuses: vi.fn(async () => {
+      const w = script.windows ?? [];
+      if (Array.isArray(w[0])) {
+        const queue = w as Array<{ windowIndex: number; status: string }[]>;
+        return (queue.length > 1 ? queue.shift() : queue[0]) ?? [];
+      }
+      return w as Array<{ windowIndex: number; status: string }>;
+    }) as any,
+    enableForActiveProfiles: vi.fn(async () => {
+      calls.push('profiles');
+      return script.profiles ?? [];
+    }) as any,
     diagnose: vi.fn(async (b: any, o: any) => {
       calls.push(`diagnose:${b.name}:${o.click}`);
       return script.diagnose ?? ['probe before: js_disabled'];
@@ -210,14 +222,55 @@ describe('rh browser setup', () => {
     expect(h.out.join('\n')).toContain('greyed out');
   });
 
-  it('warns that the setting is per profile when other windows are still off', async () => {
+  it('switches it on for every profile in use when some window still has it off', async () => {
     const h = harness({
-      script: { inspect: { 'Brave Browser': ['js_disabled', 'ready'] }, windows: [{ windowIndex: 1, status: 'ready' }, { windowIndex: 2, status: 'js_disabled' }] },
+      script: {
+        inspect: { 'Brave Browser': ['js_disabled', 'ready'] },
+        windows: [
+          [{ windowIndex: 1, status: 'ready' }, { windowIndex: 2, status: 'js_disabled' }],
+          [{ windowIndex: 1, status: 'ready' }, { windowIndex: 2, status: 'ready' }],
+        ],
+        profiles: [
+          { profile: { dir: 'Profile 4', name: 'kushal', email: 'k@example.com' }, ok: true, changed: false },
+          { profile: { dir: 'Profile 5', name: 'Work', email: '' }, ok: true, changed: true },
+        ],
+      },
       answers: ['y'],
     });
+    expect(await browserSetupCommand([], h.options)).toBe(0);
+    expect(h.calls).toContain('profiles');
+    const text = h.out.join('\n');
+    expect(text).toContain('keeps this setting per profile');
+    expect(text).toContain('✔ kushal (k@example.com)  already on');
+    expect(text).toContain('✔ Work  switched on');
+    expect(text).not.toContain('still have it off');
+  });
+
+  it('does the per-profile pass for an already-ready browser too, and says what is left over', async () => {
+    const h = harness({
+      script: {
+        windows: [{ windowIndex: 3, status: 'js_disabled' }],
+        profiles: [{ profile: { dir: 'Profile 8', name: 'rey', email: '' }, ok: false, changed: false, message: 'could not open a window for this profile' }],
+      },
+    });
     await browserSetupCommand([], h.options);
-    expect(h.out.join('\n')).toContain('per profile');
-    expect(h.out.join('\n')).toContain('(2)');
+    const text = h.out.join('\n');
+    expect(h.calls).toContain('profiles');
+    expect(text).toContain('✖ rey  could not open a window for this profile');
+    expect(text).toContain('(3) still has it off');
+  });
+
+  it('does not touch other profiles without a terminal or --yes', async () => {
+    const h = harness({ isTTY: false, script: { windows: [{ windowIndex: 2, status: 'js_disabled' }] } });
+    await browserSetupCommand([], h.options);
+    expect(h.calls).not.toContain('profiles');
+    expect(h.out.join('\n')).toContain('Run "rh browser setup" in a terminal');
+  });
+
+  it('does nothing extra when every window already works', async () => {
+    const h = harness({ script: { windows: [{ windowIndex: 1, status: 'ready' }] } });
+    await browserSetupCommand([], h.options);
+    expect(h.calls).not.toContain('profiles');
   });
 
   it('records manual when the menu item is missing', async () => {
