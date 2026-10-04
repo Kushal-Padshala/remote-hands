@@ -490,6 +490,15 @@ describe('Setup Command Flow', () => {
     expect(outputLines.join('\n')).toContain('Desktop Overlay installation skipped');
   });
 
+  it('prints usage for --help without running any step', async () => {
+    const out: string[] = [];
+    const runner = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    const code = await setupCommand(['--help'], { stdout: (l) => out.push(l), runner: runner as any, isTTY: false });
+    expect(code).toBe(0);
+    expect(out.join('\n')).toContain('Usage: rh setup');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
   describe('what to set up', () => {
     const files: Record<string, string> = {};
     const mockFs: FileSystemAdapter = {

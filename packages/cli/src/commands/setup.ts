@@ -192,6 +192,16 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   const fetchFn = context.fetchFn ?? globalThis.fetch.bind(globalThis);
   const projectRoot = resolveProjectRoot(context.projectRoot);
 
+  if (args.includes('--help') || args.includes('-h')) {
+    stdout('Usage: rh setup [--hud | --remote] [--yes] [--local] [--skip-permissions]');
+    stdout('');
+    stdout('Guided setup. Without a flag it asks what to set up first:');
+    stdout('  --hud     Desktop HUD on this computer: agent, permissions, browsers, tools, background service');
+    stdout('  --remote  Remote use from your phone: Cloudflare Worker, D1 and pairing');
+    stdout('  --yes     do not ask before turning on the fast browser setting');
+    return 0;
+  }
+
   const isLocal = args.includes('--local') || (context as any).local === true;
 
   // `rh setup` asks what to set up first. The desktop HUD flow does everything it needs
