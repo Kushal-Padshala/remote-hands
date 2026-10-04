@@ -12,7 +12,6 @@ import { c } from '../output/ui.js';
 import { ensureAgyPermissions } from '../system/agy-permissions.js';
 import { offerForContext } from './browser-setup.js';
 import {
-  grantMacAutomationPermissions,
   ensureMacPermissions,
   checkMacScreenCapture,
 } from '../system/mac-permissions.js';
@@ -48,7 +47,6 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
   if (subcommand === 'install') {
     stdout('Configuring system permissions for desktop overlay assistant...');
     await ensureAgyPermissions(context.fs);
-    grantMacAutomationPermissions();
     await offerForContext(context);
     stdout('Installing Remote Hands Desktop Overlay background service...');
     const res = serviceManager.install();
@@ -123,7 +121,6 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
 
   if (subcommand === 'listen') {
     await ensureAgyPermissions(context.fs);
-    grantMacAutomationPermissions();
     await offerForContext(context);
     if (process.platform === 'darwin' && !context.runner && !args.includes('--skip-permissions') && !checkMacScreenCapture()) {
       await ensureMacPermissions(stdout);

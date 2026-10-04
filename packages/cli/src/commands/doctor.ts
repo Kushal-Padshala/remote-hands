@@ -12,7 +12,6 @@ import {
   checkMacAccessibility,
   ensureMacPermissions,
   detectHostAppName,
-  grantMacAutomationPermissions,
 } from '../system/mac-permissions.js';
 
 export async function doctorCommand(args: string[], context: CommandContext = {}): Promise<number> {
@@ -104,8 +103,6 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
 
     if (fdaGranted) {
       stdout('[✓] macOS Full Disk Access: granted');
-      grantMacAutomationPermissions();
-      stdout('[✓] macOS Desktop Automation: pre-authorized for Notes, Safari, Chrome, System Events');
     } else {
       stdout('[!] macOS Full Disk Access: not granted (System Settings -> Privacy & Security -> Full Disk Access)');
       stdout(`    Grant Full Disk Access to ${hostApp} (and Terminal) to prevent permission prompts when away`);

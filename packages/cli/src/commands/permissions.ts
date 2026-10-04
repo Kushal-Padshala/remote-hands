@@ -2,7 +2,6 @@ import {
   checkMacFullDiskAccess,
   checkMacScreenCapture,
   checkMacAccessibility,
-  grantMacAutomationPermissions,
   ensureMacPermissions,
 } from '../system/mac-permissions.js';
 import {
@@ -17,7 +16,6 @@ export interface PermissionsReport {
   fullDiskAccess: boolean;
   accessibility: boolean;
   antigravity: boolean;
-  automation: boolean;
   allGranted: boolean;
 }
 
@@ -27,7 +25,6 @@ export async function checkAllPermissions(context: CommandContext = {}): Promise
   const fullDiskAccess = isDarwin ? checkMacFullDiskAccess() : true;
   const accessibility = isDarwin ? checkMacAccessibility() : true;
   const antigravity = await checkAgyPermissions(context.fs);
-  const automation = isDarwin ? grantMacAutomationPermissions() : true;
 
   const allGranted = screenCapture && fullDiskAccess && accessibility && antigravity;
 
@@ -36,7 +33,6 @@ export async function checkAllPermissions(context: CommandContext = {}): Promise
     fullDiskAccess,
     accessibility,
     antigravity,
-    automation,
     allGranted,
   };
 }
@@ -59,7 +55,6 @@ export async function permissionsCommand(args: string[], context: CommandContext
   }
 
   await ensureAgyPermissions(context.fs);
-  grantMacAutomationPermissions();
 
   if (isFix && process.platform === 'darwin' && !context.runner && !isJson) {
     await ensureMacPermissions(stdout);
@@ -77,7 +72,7 @@ export async function permissionsCommand(args: string[], context: CommandContext
   stdout(`  Screen & Audio Recording: ${report.screenCapture ? c.brightGreen('✔ Granted') : c.yellow('✘ Missing')}`);
   stdout(`  Full Disk Access:         ${report.fullDiskAccess ? c.brightGreen('✔ Granted') : c.yellow('✘ Missing')}`);
   stdout(`  Accessibility:            ${report.accessibility ? c.brightGreen('✔ Granted') : c.yellow('✘ Missing')}`);
-  stdout(`  App & Browser Automation: ${report.automation ? c.brightGreen('✔ Pre-authorized (Arc, Chrome, Safari, Notes, System Events)') : c.yellow('✘ Not configured')}`);
+  stdout(`  Browser control:          ${c.dim('asked on first use (run "rh browser setup")')}`);
   stdout(`  Antigravity Permissions:  ${report.antigravity ? c.brightGreen('✔ Blanket Access Enabled') : c.yellow('✘ Missing')}`);
   stdout('');
 
