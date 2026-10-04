@@ -57,7 +57,7 @@ const WHY =
 
 export type BrowserOutcome = 'ready' | 'declined' | 'skipped' | 'manual' | 'failed';
 
-function defaultAsk(question: string): Promise<string> {
+export function defaultAsk(question: string): Promise<string> {
   return new Promise((resolve) => {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     let answered = false;

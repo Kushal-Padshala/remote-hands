@@ -164,7 +164,9 @@ Install globally via npm or run directly with `npx`:
 # Global install (provides "rh" and "remote-hands" commands)
 npm install -g remote-hands-cli
 
-# Run the automated guided setup wizard
+# Run the guided setup. It first asks what to set up right now:
+#   1) Desktop HUD  - Shift + Cmd + Space on this computer (recommended)
+#   2) Remote use   - control this computer from your phone
 rh setup
 
 # Or execute without installing
@@ -185,9 +187,11 @@ rh start --browser-profile="Work"
 
 Scan the generated terminal QR code with your phone camera to pair your mobile browser with your computer.
 
-### 4. First run: fast browser control (macOS)
+### 4. Desktop HUD: what `rh setup` does for you (macOS)
 
-Run `rh browser setup` once (it is also offered automatically by `rh hud install` and `rh setup`). It checks the browsers you have open (Chrome, Brave, Arc, Edge, Safari) and, with your permission, turns on each browser's "Allow JavaScript from Apple Events" setting so the HUD can drive your own signed-in tabs quickly. macOS asks you to allow the control once per browser; click Allow. Undo any time with `rh browser setup --disable`. Without it, browser tasks still work through a slower Chrome-only fallback. `rh browser doctor` shows what is ready.
+Choosing the Desktop HUD does the whole setup in one pass: sign-in and permissions for the agent, macOS permissions, the fast browser setup below, registering the computer-use tools with the agent, and starting the HUD in the background. You only answer a few yes/no questions and click Allow on the macOS prompts. `rh setup --hud` skips the question; `rh setup --remote` is the phone/Cloudflare flow.
+
+The browser part is also available on its own: run `rh browser setup` (it is also offered automatically by `rh hud install`). It checks the browsers you have open (Chrome, Brave, Arc, Edge, Safari) and, with your permission, turns on each browser's "Allow JavaScript from Apple Events" setting so the HUD can drive your own signed-in tabs quickly. macOS asks you to allow the control once per browser; click Allow. Undo any time with `rh browser setup --disable`. Without it, browser tasks still work through a slower Chrome-only fallback. `rh browser doctor` shows what is ready.
 
 ---
 
@@ -195,7 +199,7 @@ Run `rh browser setup` once (it is also offered automatically by `rh hud install
 
 | Command | Description |
 |:---|:---|
-| `rh setup` | Guided wizard: Cloudflare Worker deployment, D1 setup, and pairing |
+| `rh setup` | Guided setup: asks Desktop HUD or Remote use. HUD: agent, permissions, browsers, tools, background service. Remote: Cloudflare Worker, D1 and pairing (`--hud` / `--remote` skip the question) |
 | `rh start` | Launch the daemon with clamshell sleep prevention |
 | `rh daemon` | Run the raw background daemon process |
 | `rh profiles` | List all discovered local Google Chrome profiles |

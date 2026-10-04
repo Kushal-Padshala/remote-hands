@@ -489,4 +489,130 @@ describe('Setup Command Flow', () => {
     expect(mockService.install).not.toHaveBeenCalled();
     expect(outputLines.join('\n')).toContain('Desktop Overlay installation skipped');
   });
+
+  describe('what to set up', () => {
+    const files: Record<string, string> = {};
+    const mockFs: FileSystemAdapter = {
+      readFile: async (p) => files[p] ?? '',
+      writeFile: async (p, content) => {
+        files[p] = content;
+      },
+      exists: async (p) => p in files,
+    };
+
+    function hudRunner(executed: string[]): CommandRunner {
+      return async (cmd, args) => {
+        executed.push(`${cmd} ${args.join(' ')}`);
+        if (cmd === 'which' && args[0] === 'agy') return { exitCode: 0, stdout: '/usr/local/bin/agy', stderr: '' };
+        return { exitCode: 0, stdout: '', stderr: '' };
+      };
+    }
+
+    const readyBrowserSetup = (inspected: string[]) => ({
+      transport: { environment: async () => ({ frontmost: 'Finder', running: ['Brave Browser'] }) },
+      setup: {
+        inspect: async (b: any) => {
+          inspected.push(b.name);
+          return { browser: b.name, status: 'ready', message: 'ok' };
+        },
+        menuState: async () => ({ ok: true, state: 'checked' }),
+        enableJs: async () => ({ ok: true, changed: false, state: 'checked' }),
+        disableJs: async () => ({ ok: true, changed: false, state: 'unchecked' }),
+        openAutomationPane: async () => {},
+        openAccessibilityPane: async () => {},
+      } as any,
+      fs: { readFile: async () => '', writeFile: async () => {}, rename: async () => {}, mkdir: async () => {} },
+      statePath: '/state/browser-setup.json',
+    });
+
+    it('--hud sets up the HUD end to end without touching Cloudflare', async () => {
+      const executed: string[] = [];
+      const out: string[] = [];
+      const inspected: string[] = [];
+      const mockService = { install: vi.fn().mockReturnValue({ success: true, plistPath: '/mock.plist' }), isInstalled: () => true, isRunning: () => true };
+      const code = await setupCommand(['--hud'], {
+        stdout: (l) => out.push(l),
+        runner: hudRunner(executed),
+        fs: mockFs,
+        projectRoot: '/project',
+        hudServiceManager: mockService,
+        browserSetup: readyBrowserSetup(inspected),
+        isTTY: false,
+      });
+      expect(code).toBe(0);
+      expect(executed.some((c) => c.includes('wrangler'))).toBe(false);
+      expect(out.join('\n')).toContain('Desktop HUD is ready');
+      expect(out.join('\n')).toContain('rh setup --remote');
+      if (process.platform === 'darwin') {
+        expect(inspected).toEqual(['Brave Browser']);
+        expect(mockService.install).toHaveBeenCalledTimes(1);
+      }
+    });
+
+    it('asks what to set up on a terminal and defaults to the HUD', async () => {
+      const out: string[] = [];
+      const asked: string[] = [];
+      const answers = ['maybe', ''];
+      const code = await setupCommand([], {
+        stdout: (l) => out.push(l),
+        runner: hudRunner([]),
+        fs: mockFs,
+        projectRoot: '/project',
+        hudServiceManager: { install: () => ({ success: true, plistPath: '/mock.plist' }) },
+        browserSetup: readyBrowserSetup([]),
+        isTTY: true,
+        ask: async (q) => {
+          asked.push(q);
+          return answers.shift() ?? '';
+        },
+      });
+      expect(code).toBe(0);
+      expect(asked).toHaveLength(2);
+      expect(asked[0]).toContain('Choose 1 or 2');
+      expect(out.join('\n')).toContain('Desktop HUD');
+      expect(out.join('\n')).toContain('Please type 1 or 2.');
+      expect(out.join('\n')).toContain('Desktop HUD is ready');
+    });
+
+    it('does not prompt without a terminal and keeps the existing flow', async () => {
+      const asked: string[] = [];
+      const out: string[] = [];
+      const runner: CommandRunner = async (cmd, args) => {
+        if (args.includes('whoami')) return { exitCode: 1, stdout: '', stderr: 'not logged in' };
+        return { exitCode: 0, stdout: '', stderr: '' };
+      };
+      await setupCommand([], {
+        stdout: (l) => out.push(l),
+        stderr: () => {},
+        runner,
+        fs: mockFs,
+        projectRoot: '/project',
+        isTTY: false,
+        ask: async (q) => {
+          asked.push(q);
+          return '1';
+        },
+      }).catch(() => {});
+      expect(asked).toEqual([]);
+      expect(out.join('\n')).not.toContain('Desktop HUD is ready');
+    });
+
+    it('--remote skips the HUD flow', async () => {
+      const out: string[] = [];
+      const runner: CommandRunner = async (cmd, args) => {
+        if (args.includes('whoami')) return { exitCode: 1, stdout: '', stderr: 'not logged in' };
+        return { exitCode: 0, stdout: '', stderr: '' };
+      };
+      await setupCommand(['--remote'], {
+        stdout: (l) => out.push(l),
+        stderr: () => {},
+        runner,
+        fs: mockFs,
+        projectRoot: '/project',
+        isTTY: true,
+        ask: async () => '1',
+      }).catch(() => {});
+      expect(out.join('\n')).not.toContain('Desktop HUD is ready');
+    });
+  });
 });

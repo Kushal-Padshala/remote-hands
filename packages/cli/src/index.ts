@@ -59,7 +59,7 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
     stdout('  profiles    List detected Chrome browser profiles and launch commands');
     stdout('  context     List running apps, browser tabs, profiles, and local files');
     stdout('  mcp         Run or register the warm computer-use MCP server for agy');
-    stdout('  setup       Set up Cloudflare resources and pair this computer');
+    stdout('  setup       Guided setup: Desktop HUD (this computer) or Remote use (phone)');
     stdout('  deploy      Deploy backend Worker and phone PWA to Cloudflare');
     stdout('  doctor      Check system prerequisites and connectivity');
     stdout('');
