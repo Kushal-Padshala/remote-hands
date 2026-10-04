@@ -6,6 +6,7 @@ import { MacOsDriver } from '../desktop/macos-driver.js';
 import { BrowserDriver } from '../browser-driver.js';
 import { FastBrowserEngine } from '../browser/engine.js';
 import { AppleScriptTransport } from '../browser/transport.js';
+import { createAutoEnable } from '../browser/auto-enable.js';
 import { LegacyBrowserPort } from '../browser/legacy-port.js';
 import type { BrowserPort, DoStep } from '../browser/port.js';
 import { compactDesktopElements } from './compact.js';
@@ -190,16 +191,18 @@ export class ComputerSession {
 
 export function createDefaultComputerSession(): ComputerSession {
   const desktop = new MacOsDriver();
+  const transport = new AppleScriptTransport();
   return new ComputerSession({
     desktop,
     walker: new AxWalker({ driver: desktop }),
     axAction: performAxActionDetailed,
     menuSearch: searchAndTriggerMenu,
     browser: new FastBrowserEngine({
-      transport: new AppleScriptTransport(),
+      transport,
       legacy: new LegacyBrowserPort({
         driver: new BrowserDriver({ cdpUrl: process.env.BU_CDP_URL || 'http://127.0.0.1:9222' }),
       }),
+      autoEnable: createAutoEnable({ transport }),
     }),
   });
 }

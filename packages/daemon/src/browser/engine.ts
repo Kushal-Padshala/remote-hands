@@ -25,6 +25,8 @@ export interface FastBrowserEngineDeps {
   env?: NodeJS.ProcessEnv;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
+  /** Self-heal when a browser the user approved reports the setting off (see createAutoEnable). */
+  autoEnable?: (browser: BrowserApp) => Promise<{ ok: boolean; message?: string }>;
 }
 
 interface Ctx {
@@ -38,6 +40,7 @@ type Shown = FastShown | { mode: 'legacy' };
 
 type Resolved = { kind: 'fast'; ctx: Ctx } | { kind: 'legacy'; reason: string | null };
 
+const AUTO_RETRY_MS = 10 * 60_000;
 const ENV_TTL_MS = 1000;
 const PIN_TTL_MS = 5 * 60_000;
 const DISABLE_MS = 60_000;
@@ -245,8 +248,11 @@ export class FastBrowserEngine implements BrowserPort {
   private shown: Shown | null = null;
   private readonly disabled = new Map<string, { until: number; reason: string }>();
   private noteShown = false;
+  private readonly autoEnable: FastBrowserEngineDeps['autoEnable'];
+  private readonly autoFailedAt = new Map<string, number>();
 
   constructor(deps: FastBrowserEngineDeps) {
+    this.autoEnable = deps.autoEnable;
     this.t = deps.transport;
     this.legacy = deps.legacy;
     this.env = deps.env ?? process.env;
@@ -335,7 +341,24 @@ export class FastBrowserEngine implements BrowserPort {
       return out;
     } catch (err) {
       if (!(err instanceof BrowserAutomationError)) throw err;
-      if (err.code === 'js_disabled' || err.code === 'automation_denied') {
+      if (err.code === 'js_disabled') {
+        const healed = await this.tryAutoEnable(r.ctx.browser);
+        if (healed.ok) {
+          try {
+            const out = await fast(r.ctx);
+            this.noteShown = false;
+            return `note: switched on fast browser control for this profile (one-time).\n${out}`;
+          } catch (retryErr) {
+            if (!(retryErr instanceof BrowserAutomationError)) throw retryErr;
+            this.disable(r.ctx.browser, retryErr.message);
+            return this.useLegacy(fallback, retryErr.message, markShown);
+          }
+        }
+        const reason = healed.message ? `${err.message} (automatic setup failed: ${healed.message})` : err.message;
+        this.disable(r.ctx.browser, reason);
+        return this.useLegacy(fallback, reason, markShown);
+      }
+      if (err.code === 'automation_denied') {
         this.disable(r.ctx.browser, err.message);
         return this.useLegacy(fallback, err.message, markShown);
       }
@@ -348,6 +371,22 @@ export class FastBrowserEngine implements BrowserPort {
       if (err.code === 'no_tab') this.dropTarget();
       throw err;
     }
+  }
+
+  /** One automatic attempt per browser per AUTO_RETRY_MS after a failure, so a broken setup never flashes the screen repeatedly. */
+  private async tryAutoEnable(browser: BrowserApp): Promise<{ ok: boolean; message?: string }> {
+    if (!this.autoEnable) return { ok: false };
+    const failedAt = this.autoFailedAt.get(browser.name);
+    if (failedAt !== undefined && this.now() - failedAt < AUTO_RETRY_MS) return { ok: false };
+    let res: { ok: boolean; message?: string };
+    try {
+      res = await this.autoEnable(browser);
+    } catch (err) {
+      res = { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
+    if (res.ok) this.autoFailedAt.delete(browser.name);
+    else if (res.message) this.autoFailedAt.set(browser.name, this.now());
+    return res;
   }
 
   private disable(browser: BrowserApp, reason: string): void {

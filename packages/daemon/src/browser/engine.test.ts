@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { FastBrowserEngine, normalizeOpenUrl } from './engine.js';
 import { BrowserAutomationError, type TabTarget } from './applescript.js';
 import type { TabInfo } from './transport.js';
@@ -1051,5 +1051,72 @@ describe('render hygiene (fix round 1)', () => {
   it('tabs output strips control characters from titles', async () => {
     t.tabList = [{ windowId: '1', windowIndex: 1, tabKey: '1', tabIndex: 1, title: 'Evil\nline\u0007', url: 'https://e.test/', active: true }];
     expect(await engine.tabs()).toBe('browser: Google Chrome\n[w1-t1] (active) Evil line - https://e.test/');
+  });
+});
+
+describe('self-healing at task time (autoEnable)', () => {
+  function withAutoEnable(autoEnable: (b: any) => Promise<{ ok: boolean; message?: string }>): FastBrowserEngine {
+    return new FastBrowserEngine({
+      transport: t,
+      legacy,
+      env: {},
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+      autoEnable,
+    });
+  }
+  const off = () => new BrowserAutomationError('js_disabled', 'Google Chrome', 'JS off in Chrome.');
+
+  it('switches the setting on, retries the fast path and says so once', async () => {
+    const auto = vi.fn(async () => {
+      t.fail = null;
+      return { ok: true };
+    });
+    engine = withAutoEnable(auto);
+    t.fail = off();
+    const first = await engine.snapshot();
+    expect(first.startsWith('note: switched on fast browser control for this profile (one-time).\n')).toBe(true);
+    expect(first).toContain('page: Sign up');
+    expect(legacy.calls).toEqual([]);
+    expect(auto).toHaveBeenCalledTimes(1);
+    expect((auto.mock.calls[0] as unknown[])[0]).toMatchObject({ name: 'Google Chrome' });
+    expect(await engine.snapshot()).not.toContain('switched on');
+  });
+
+  it('falls back with the reason when the automatic setup fails, and does not retry for 10 minutes', async () => {
+    const auto = vi.fn(async () => ({ ok: false, message: 'Accessibility denied' }));
+    engine = withAutoEnable(auto);
+    t.fail = off();
+    const out = await engine.snapshot();
+    expect(out).toContain('automatic setup failed: Accessibility denied');
+    expect(out).toContain('legacy:snapshot');
+    clock += 61_000; // the 60 s availability cache expires, the 10 minute auto-retry guard does not
+    await engine.snapshot();
+    expect(auto).toHaveBeenCalledTimes(1);
+    clock += 10 * 60_000;
+    await engine.snapshot();
+    expect(auto).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not loop when the setting is still off after a reported success', async () => {
+    const auto = vi.fn(async () => ({ ok: true }));
+    engine = withAutoEnable(auto);
+    t.fail = off();
+    const out = await engine.snapshot();
+    expect(auto).toHaveBeenCalledTimes(1);
+    expect(out).toContain('legacy:snapshot');
+  });
+
+  it('is only used for js_disabled (not for denied automation) and never when no hook is given', async () => {
+    const auto = vi.fn(async () => ({ ok: true }));
+    engine = withAutoEnable(auto);
+    t.fail = new BrowserAutomationError('automation_denied', 'Google Chrome', 'denied');
+    await engine.snapshot();
+    expect(auto).not.toHaveBeenCalled();
+    const plain = make();
+    t.fail = off();
+    expect(await plain.snapshot()).toContain('legacy:snapshot');
   });
 });

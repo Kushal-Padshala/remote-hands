@@ -1,10 +1,9 @@
-import * as os from 'node:os';
-import * as path from 'node:path';
 import { createInterface } from 'node:readline';
 import {
   AppleScriptTransport,
   BROWSERS,
   BrowserSetup,
+  defaultSetupStatePath,
   findBrowser,
   nodeSetupFs,
   readSetupState,
@@ -41,7 +40,7 @@ export interface BrowserSetupOptions {
   now?: (() => Date) | undefined;
 }
 
-export const DEFAULT_STATE_PATH = path.join(os.homedir(), '.remote-hands', 'browser-setup.json');
+export const DEFAULT_STATE_PATH = defaultSetupStatePath();
 
 const USAGE = [
   'Usage: rh browser setup [--yes] [--disable] [--debug] [--browser <name>]',

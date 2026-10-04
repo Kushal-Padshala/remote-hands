@@ -924,6 +924,11 @@ function errMessage(err: unknown): string {
 
 export type SetupDecision = 'enabled' | 'declined' | 'manual';
 
+/** Where `rh browser setup` remembers what the user decided per browser. */
+export function defaultSetupStatePath(home: string = os.homedir()): string {
+  return path.join(home, '.remote-hands', 'browser-setup.json');
+}
+
 export interface SetupState {
   browsers: Record<string, { decision: SetupDecision; at: string }>;
 }
