@@ -499,6 +499,90 @@ describe('Setup Command Flow', () => {
     expect(runner).not.toHaveBeenCalled();
   });
 
+  describe('agy sign-in detection', () => {
+    const files: Record<string, string> = {};
+    const mockFs: FileSystemAdapter = {
+      readFile: async (p) => files[p] ?? '',
+      writeFile: async (p, content) => {
+        files[p] = content;
+      },
+      exists: async (p) => p in files,
+    };
+
+    function run(agyBehaviour: (args: string[], interactive: boolean) => { exitCode: number; stdout: string; stderr: string }) {
+      const interactiveLaunches: string[][] = [];
+      const runner: CommandRunner = async (cmd, args, opts) => {
+        if (cmd === 'which' && args[0] === 'agy') return { exitCode: 0, stdout: '/usr/local/bin/agy', stderr: '' };
+        if (cmd === 'agy') {
+          const interactive = Boolean((opts as any)?.interactive);
+          if (interactive) interactiveLaunches.push(args);
+          return agyBehaviour(args, interactive);
+        }
+        return { exitCode: 0, stdout: '', stderr: '' };
+      };
+      return { runner, interactiveLaunches };
+    }
+
+    it('does not launch agy when `agy models` shows a signed-in session (even if a prompt would be slow)', async () => {
+      const { runner, interactiveLaunches } = run((args) =>
+        args[0] === 'models'
+          ? { exitCode: 0, stdout: 'gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n', stderr: '' }
+          : { exitCode: 1, stdout: '', stderr: 'timed out' },
+      );
+      const code = await setupCommand(['--hud'], {
+        stdout: () => {},
+        runner,
+        fs: mockFs,
+        projectRoot: '/project',
+        hudServiceManager: { install: () => ({ success: true, plistPath: '/m.plist' }) },
+        browserSetup: { transport: { environment: async () => ({ frontmost: null, running: [] }) } as any },
+        isTTY: false,
+      });
+      expect(code).toBe(0);
+      expect(interactiveLaunches).toEqual([]);
+    });
+
+    it('a slow or failing prompt without any sign-in wording is not treated as a missing sign-in', async () => {
+      const { runner, interactiveLaunches } = run((args) =>
+        args[0] === 'models' ? { exitCode: 1, stdout: '', stderr: '' } : { exitCode: 1, stdout: '', stderr: 'timed out after 60s' },
+      );
+      const code = await setupCommand(['--hud'], {
+        stdout: () => {},
+        runner,
+        fs: mockFs,
+        projectRoot: '/project',
+        hudServiceManager: { install: () => ({ success: true, plistPath: '/m.plist' }) },
+        browserSetup: { transport: { environment: async () => ({ frontmost: null, running: [] }) } as any },
+        isTTY: false,
+      });
+      expect(code).toBe(0);
+      expect(interactiveLaunches).toEqual([]);
+    });
+
+    it('still launches the interactive sign-in when agy asks for it', async () => {
+      let signedIn = false;
+      const { runner, interactiveLaunches } = run((args, interactive) => {
+        if (interactive) {
+          signedIn = true;
+          return { exitCode: 0, stdout: '', stderr: '' };
+        }
+        if (signedIn) return { exitCode: 0, stdout: 'ok', stderr: '' };
+        return { exitCode: 1, stdout: 'Please sign in', stderr: '' };
+      });
+      const code = await setupCommand(['--hud'], {
+        stdout: () => {},
+        runner,
+        fs: mockFs,
+        projectRoot: '/project',
+        hudServiceManager: { install: () => ({ success: true, plistPath: '/m.plist' }) },
+        browserSetup: { transport: { environment: async () => ({ frontmost: null, running: [] }) } as any },
+        isTTY: false,
+      });
+      expect(code).toBe(0);
+      expect(interactiveLaunches).toHaveLength(1);
+    });
+  });
+
   describe('what to set up', () => {
     const files: Record<string, string> = {};
     const mockFs: FileSystemAdapter = {

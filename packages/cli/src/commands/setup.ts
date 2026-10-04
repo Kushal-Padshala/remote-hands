@@ -142,14 +142,7 @@ async function setupAgentAndPermissions(
   }
 
   stdout(renderStepInfo('Verifying agy authentication...'));
-  const agyAuth = await runner('agy', ['-p', 'echo hello', '--print-timeout', '10s']);
-  const agyAuthOutput = (agyAuth.stdout + '\n' + agyAuth.stderr).toLowerCase();
-  const agyNeedsLogin = agyAuth.exitCode !== 0 ||
-    agyAuthOutput.includes('not authenticated') ||
-    agyAuthOutput.includes('sign in') ||
-    agyAuthOutput.includes('login') ||
-    agyAuthOutput.includes('oauth') ||
-    agyAuthOutput.includes('authorize');
+  const agyNeedsLogin = await agyNeedsSignIn(runner);
 
   if (agyNeedsLogin) {
     stdout(renderStepAction('agy requires sign-in — launching interactive session...'));
@@ -160,7 +153,7 @@ async function setupAgentAndPermissions(
     }
     await runner('agy', [], { interactive: true });
 
-    const agyRecheck = await runner('agy', ['-p', 'echo hello', '--print-timeout', '10s']);
+    const agyRecheck = await runner('agy', ['-p', 'reply with ok', '--print-timeout', '60s']);
     if (agyRecheck.exitCode !== 0) {
       stderr(renderStepError('agy sign-in was not completed.'));
       stderr('Please run "agy" in your terminal to sign in, then re-run "rh setup".');
@@ -526,6 +519,25 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   stdout(`    It is active in the background. You do not need to run "rh start" while at your computer.`);
   stdout(`  • ${c.bold('Remote Use:')} Run "${c.cyan('rh start')}" when stepping away to connect from your phone over any network.\n`);
   return 0;
+}
+
+const AUTH_HINTS = ['not authenticated', 'sign in', 'sign-in', 'log in', 'login', 'oauth', 'authorize'];
+
+/**
+ * Is sign-in needed? `agy models` answers quickly when signed in, so it is tried first.
+ * Only when it does not settle the question a real prompt is sent, with a generous
+ * timeout (a cold agy takes a while to load its MCP servers: a slow answer is not a
+ * missing sign-in). Sign-in is requested only when agy's own output asks for it.
+ */
+async function agyNeedsSignIn(runner: CommandRunner): Promise<boolean> {
+  const models = await runner('agy', ['models']);
+  const modelsText = `${models.stdout}\n${models.stderr}`.toLowerCase();
+  if (models.exitCode === 0 && /gemini|claude|gpt/.test(modelsText) && !AUTH_HINTS.some((h) => modelsText.includes(h))) {
+    return false;
+  }
+  const probe = await runner('agy', ['-p', 'reply with ok', '--print-timeout', '60s']);
+  const text = `${probe.stdout}\n${probe.stderr}`.toLowerCase();
+  return AUTH_HINTS.some((h) => text.includes(h));
 }
 
 async function offerBrowserSetup(context: CommandContext): Promise<void> {
