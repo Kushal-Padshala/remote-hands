@@ -28,6 +28,8 @@ interface Script {
   enable?: Record<string, any>;
   menu?: Record<string, any>;
   disable?: Record<string, any>;
+  request?: Record<string, string[]>;
+  resetOk?: boolean;
   diagnose?: string[];
   windows?: Array<{ windowIndex: number; status: string }[]> | Array<{ windowIndex: number; status: string }>;
   profiles?: Array<{ profile: { dir: string; name: string; email: string }; ok: boolean; changed: boolean; message?: string }>;
@@ -50,6 +52,15 @@ function fakeSetup(script: Script = {}) {
     disableJs: vi.fn(async (b: any) => {
       calls.push(`disable:${b.name}`);
       return script.disable?.[b.name] ?? { ok: true, changed: true, state: 'unchecked' };
+    }) as any,
+    requestAutomation: vi.fn(async (b: any) => {
+      calls.push(`request:${b.name}`);
+      const queue = script.request?.[b.name] ?? ['granted'];
+      return (queue.length > 1 ? queue.shift() : queue[0]) as any;
+    }) as any,
+    resetAutomationConsent: vi.fn(async () => {
+      calls.push('reset');
+      return script.resetOk ?? true;
     }) as any,
     openAutomationPane: vi.fn(async () => void calls.push('open:automation')) as any,
     openAccessibilityPane: vi.fn(async () => void calls.push('open:accessibility')) as any,
@@ -119,7 +130,7 @@ describe('rh browser setup', () => {
   it('skips browsers that are not running without probing them', async () => {
     const h = harness({ running: ['Google Chrome'], script: { inspect: { 'Google Chrome': ['ready'] } } });
     expect(await browserSetupCommand([], h.options)).toBe(0);
-    expect(h.calls).toEqual(['inspect:Google Chrome']);
+    expect(h.calls).toEqual(['request:Google Chrome', 'inspect:Google Chrome']);
   });
 
   it('says so when no supported browser is running', async () => {
@@ -143,7 +154,7 @@ describe('rh browser setup', () => {
     expect(h.asked).toHaveLength(1);
     expect(h.asked[0]).toContain('Enable it in Brave Browser now? [Y/n]');
     expect(h.out.join('\n')).toContain('any app that macOS lets control your browser');
-    expect(h.calls).toEqual(['inspect:Brave Browser', 'enable:Brave Browser', 'inspect:Brave Browser']);
+    expect(h.calls).toEqual(['request:Brave Browser', 'inspect:Brave Browser', 'request:System Events', 'enable:Brave Browser', 'inspect:Brave Browser']);
     expect(h.out.join('\n')).toContain('✔ Brave Browser  fast path is on');
     expect(h.state().browsers['Brave Browser'].decision).toBe('enabled');
   });
@@ -172,14 +183,44 @@ describe('rh browser setup', () => {
     expect(h.state()).toBeNull();
   });
 
-  it('opens the Automation pane when macOS denied access and re-checks once', async () => {
-    const h = harness({ script: { inspect: { 'Brave Browser': ['automation_denied', 'ready'] } }, answers: [''] });
+  it('asks macOS for permission up front, with no Enter prompt, and checks right after', async () => {
+    const h = harness({ script: { request: { 'Brave Browser': ['granted'] } }, answers: [] });
     await browserSetupCommand([], h.options);
-    expect(h.calls).toEqual(['inspect:Brave Browser', 'open:automation', 'inspect:Brave Browser']);
-    expect(h.asked[0]).toContain('press Enter');
+    expect(h.calls.slice(0, 2)).toEqual(['request:Brave Browser', 'inspect:Brave Browser']);
+    expect(h.out.join('\n')).toContain('click Allow');
+    expect(h.asked).toEqual([]);
+  });
+
+  it('when macOS remembers a "Don\'t Allow" it resets this terminal\'s answer and asks again, still with no Enter prompt', async () => {
+    const h = harness({ script: { request: { 'Brave Browser': ['denied', 'granted'] } }, answers: [] });
+    await browserSetupCommand([], h.options);
+    expect(h.calls.slice(0, 4)).toEqual(['request:Brave Browser', 'reset', 'request:Brave Browser', 'inspect:Brave Browser']);
+    expect(h.asked).toEqual([]);
     expect(h.out.join('\n')).toContain('✔ Brave Browser');
   });
 
+  it('never blocks: still denied after the reset means skip with a clear next step', async () => {
+    const h = harness({ script: { request: { 'Brave Browser': ['denied'] } }, answers: [] });
+    expect(await browserSetupCommand([], h.options)).toBe(0);
+    expect(h.calls).toContain('open:automation');
+    expect(h.calls).not.toContain('inspect:Brave Browser');
+    expect(h.asked).toEqual([]);
+    expect(h.out.join('\n')).toMatch(/Skipped|skipped/);
+  });
+
+  it('does not reset anything when not interactive', async () => {
+    const h = harness({ script: { request: { 'Brave Browser': ['denied'] } }, answers: [], isTTY: false });
+    await browserSetupCommand([], h.options);
+    expect(h.calls).not.toContain('reset');
+  });
+
+  it('opens the Automation pane when macOS denied access and re-checks once', async () => {
+    const h = harness({ script: { inspect: { 'Brave Browser': ['automation_denied', 'ready'] } }, answers: [''] });
+    await browserSetupCommand([], h.options);
+    expect(h.calls).toContain('open:automation');
+    expect(h.asked[0]).toContain('press Enter');
+    expect(h.out.join('\n')).toContain('✔ Brave Browser');
+  });
   it('handles accessibility and System Events denials with the matching pane', async () => {
     const a = harness({
       script: { inspect: { 'Brave Browser': ['js_disabled'] }, enable: { 'Brave Browser': { ok: false, reason: 'accessibility_denied', message: 'AX denied' } } },
@@ -317,7 +358,7 @@ describe('rh browser setup', () => {
       script: { inspect: { 'Google Chrome': ['error'] } },
     });
     expect(await browserSetupCommand(['--browser', 'chrome'], h.options)).toBe(1);
-    expect(h.calls).toEqual(['inspect:Google Chrome']);
+    expect(h.calls).toEqual(['request:Google Chrome', 'inspect:Google Chrome']);
   });
 });
 

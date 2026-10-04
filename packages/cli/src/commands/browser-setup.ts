@@ -23,6 +23,8 @@ export interface BrowserSetupLike {
   diagnose?: BrowserSetup['diagnose'];
   windowStatuses?: BrowserSetup['windowStatuses'];
   enableForActiveProfiles?: BrowserSetup['enableForActiveProfiles'];
+  requestAutomation?: BrowserSetup['requestAutomation'];
+  resetAutomationConsent?: BrowserSetup['resetAutomationConsent'];
   openAutomationPane: BrowserSetup['openAutomationPane'];
   openAccessibilityPane: BrowserSetup['openAccessibilityPane'];
 }
@@ -127,6 +129,12 @@ async function enableFlow(b: BrowserApp, ctx: Ctx): Promise<BrowserOutcome> {
     }
   }
 
+  // Clicking the browser's menu goes through System Events: let macOS show its Allow pop-up now (no reset: that would also forget the browsers).
+  if (ctx.setup.requestAutomation) {
+    if (ctx.interactive) ctx.out('  If macOS asks to let your terminal control System Events, click Allow.');
+    await ctx.setup.requestAutomation({ name: 'System Events' } as BrowserApp, ctx.interactive ? 120_000 : 8_000);
+  }
+
   let res = await ctx.setup.enableJs(b, { onGuide: (m) => ctx.out(`  ${m}`) });
   // Greyed-out menu item: no usable window on this desktop. Let the user fix it and retry.
   for (let retry = 0; !res.ok && res.reason === 'menu_disabled' && ctx.interactive && retry < 3; retry += 1) {
@@ -164,7 +172,29 @@ async function enableFlow(b: BrowserApp, ctx: Ctx): Promise<BrowserOutcome> {
   return 'failed';
 }
 
+/**
+ * Gets macOS to ask "let your terminal control <browser>?" with its own Allow button and waits for
+ * the answer, so there is no trip to System Settings. A remembered "Don't Allow" is cleared for this
+ * terminal only, then asked again. Returns false when the permission is still missing.
+ */
+async function ensureAutomationAccess(b: BrowserApp, ctx: Ctx): Promise<boolean> {
+  if (!ctx.setup.requestAutomation) return true;
+  const wait = ctx.interactive ? 120_000 : 8_000;
+  if (ctx.interactive) ctx.out(`  If macOS asks to let your terminal control ${b.name}, click Allow.`);
+  let access = await ctx.setup.requestAutomation(b, wait);
+  if (access === 'denied' && ctx.interactive && ctx.setup.resetAutomationConsent) {
+    ctx.out('  macOS remembers an earlier "Don\'t Allow". Clearing that for this terminal so the pop-up can show again - click Allow.');
+    if (await ctx.setup.resetAutomationConsent()) access = await ctx.setup.requestAutomation(b, wait);
+  }
+  if (access !== 'denied') return true;
+  ctx.out(`✖ ${b.name}  skipped: macOS did not allow this terminal to control it.`);
+  await ctx.setup.openAutomationPane().catch(() => {});
+  ctx.out('  I opened System Settings > Automation. Switch on your terminal there, then run "rh browser setup" again.');
+  return false;
+}
+
 async function ensureReady(b: BrowserApp, ctx: Ctx): Promise<BrowserOutcome> {
+  if (!(await ensureAutomationAccess(b, ctx))) return 'failed';
   let res = await ctx.setup.inspect(b);
 
   if (res.status === 'not_running') {

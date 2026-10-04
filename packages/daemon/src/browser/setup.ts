@@ -221,6 +221,20 @@ export function buildTempWindowCloseScript(b: BrowserApp): string[] {
   ];
 }
 
+/**
+ * The smallest Apple event to a browser. The first one a terminal sends makes macOS show
+ * "<terminal> wants to control <browser>" with an Allow button; this script blocks until
+ * that is answered. Never launches a closed browser. Prints the app name or `not_running`.
+ */
+export function buildAutomationPingScript(b: BrowserApp): string[] {
+  return [
+    'on run argv',
+    `if not (application "${b.name}" is running) then return "not_running"`,
+    `tell application "${b.name}" to return name`,
+    'end run',
+  ];
+}
+
 /** Prints the id of every window, one per line (Chromium family). */
 export function buildWindowIdsScript(b: BrowserApp): string[] {
   return [
@@ -498,7 +512,11 @@ export interface BrowserSetupDeps {
   readLocalState?: (b: BrowserApp) => Promise<string | null>;
   /** Opens an empty window of a profile in the running browser; injectable. */
   openProfileWindow?: (b: BrowserApp, profileDir: string) => Promise<void>;
+  /** Forgets the terminal app's remembered Automation answers so macOS asks again (injectable; default runs tccutil). */
+  resetConsent?: () => Promise<boolean>;
 }
+
+export type AutomationAccess = 'granted' | 'denied' | 'timeout' | 'not_running' | 'error';
 
 const MENU_TIMEOUT_MS = 10_000;
 const VERIFY_INTERVAL_MS = 300;
@@ -527,6 +545,14 @@ const defaultOpenProfileWindow = (b: BrowserApp, profileDir: string): Promise<vo
     );
   });
 
+/** `tccutil reset AppleEvents <bundle id of the app that runs this CLI>`: only that app's Automation answers. */
+const defaultResetConsent = (): Promise<boolean> =>
+  new Promise((resolve) => {
+    const bundle = process.env.__CFBundleIdentifier;
+    if (process.env.VITEST === 'true' || !bundle || !/^[A-Za-z0-9.-]+$/.test(bundle)) return resolve(false);
+    execFile('tccutil', ['reset', 'AppleEvents', bundle], (err) => resolve(!err));
+  });
+
 const defaultOpen = (url: string): Promise<void> =>
   new Promise((resolve, reject) => {
     execFile('open', [url], (err) => (err ? reject(new Error('could not open System Settings')) : resolve()));
@@ -540,11 +566,13 @@ export class BrowserSetup {
   private readonly clickAt: (x: number, y: number) => Promise<boolean>;
   private readonly readLocalState: (b: BrowserApp) => Promise<string | null>;
   private readonly openProfileWindow: (b: BrowserApp, profileDir: string) => Promise<void>;
+  private readonly resetConsent: () => Promise<boolean>;
 
   constructor(deps: BrowserSetupDeps) {
     this.transport = deps.transport;
     this.run = deps.run ?? defaultRunOsascript;
     this.open = deps.open ?? defaultOpen;
+    this.resetConsent = deps.resetConsent ?? defaultResetConsent;
     this.sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     // Never let a test (or any process that has not injected a clicker) post a real mouse click by accident.
     this.clickAt = deps.clickAt ?? (process.env.VITEST === 'true' ? async () => false : defaultClickAt);
@@ -747,6 +775,32 @@ export class BrowserSetup {
       await info('after');
     }
     return lines;
+  }
+
+  /**
+   * Sends the smallest Apple event to the browser and waits (up to `timeoutMs`) for the
+   * person to answer macOS's own Allow pop-up. That pop-up is the whole permission step:
+   * no trip to System Settings.
+   */
+  async requestAutomation(b: BrowserApp, timeoutMs = 120_000): Promise<AutomationAccess> {
+    let res;
+    try {
+      res = await this.run(buildAutomationPingScript(b), [], timeoutMs);
+    } catch {
+      return 'error';
+    }
+    if (res.status === null) return 'timeout';
+    if (res.status === 0) return res.stdout.trim() === 'not_running' ? 'not_running' : 'granted';
+    return /-1743|not authorized|not allowed/i.test(res.stderr) ? 'denied' : 'error';
+  }
+
+  /** Makes macOS forget this terminal's Automation answers so the Allow pop-up can appear again. */
+  async resetAutomationConsent(): Promise<boolean> {
+    try {
+      return await this.resetConsent();
+    } catch {
+      return false;
+    }
   }
 
   async openAutomationPane(): Promise<void> {

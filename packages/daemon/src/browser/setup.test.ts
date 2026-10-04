@@ -22,6 +22,7 @@ import {
   buildTempWindowCloseScript,
   buildTempWindowOpenScript,
   buildWindowIdsScript,
+  buildAutomationPingScript,
   classifyToggleError,
   JS_MENU_ITEM,
   localStatePath,
@@ -658,5 +659,47 @@ describe('profiles', () => {
   it('returns nothing for browsers without a readable Local State', async () => {
     const setup = new BrowserSetup({ transport: probeTransport(['on']), readLocalState: async () => null });
     expect(await setup.enableForActiveProfiles(safari)).toEqual([]);
+  });
+});
+
+
+describe('requestAutomation (shows the macOS permission pop-up and waits for the answer)', () => {
+  const mk = (res: any, extra: any = {}) => {
+    const { run, calls } = scriptedRun([res]);
+    const setup = new BrowserSetup({ transport: probeTransport(['on']), run, sleep: async () => {}, ...extra });
+    return { setup, calls };
+  };
+
+  it('compiles and never launches a closed browser', () => {
+    const text = buildAutomationPingScript(brave).join('\n');
+    expect(text).toContain('is running');
+    expect(text).toContain('return name');
+  });
+
+  it('waits long enough for a person to click Allow', async () => {
+    const seen: number[] = [];
+    const setup = new BrowserSetup({
+      transport: probeTransport(['on']),
+      run: async (_l, _a, ms) => (seen.push(ms), { status: 0, stdout: 'Brave Browser', stderr: '' }),
+      sleep: async () => {},
+    });
+    expect(await setup.requestAutomation(brave, 120_000)).toBe('granted');
+    expect(seen).toEqual([120_000]);
+  });
+
+  it.each([
+    [{ status: 0, stdout: 'not_running', stderr: '' }, 'not_running'],
+    [{ status: 1, stdout: '', stderr: 'execution error: Not authorized to send Apple events to Brave Browser. (-1743)' }, 'denied'],
+    [{ status: null, stdout: '', stderr: '' }, 'timeout'],
+    [{ status: 1, stdout: '', stderr: 'something else (-600)' }, 'error'],
+  ])('maps %j to %s', async (res, expected) => {
+    expect(await mk(res).setup.requestAutomation(brave)).toBe(expected);
+  });
+
+  it('resetAutomationConsent resets only the terminal app that runs this CLI', async () => {
+    const reset = vi.fn(async () => true);
+    const { setup } = mk({ status: 0, stdout: '', stderr: '' }, { resetConsent: reset });
+    expect(await setup.resetAutomationConsent()).toBe(true);
+    expect(reset).toHaveBeenCalledTimes(1);
   });
 });
