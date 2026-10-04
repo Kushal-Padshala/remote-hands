@@ -3,6 +3,7 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { BrowserAutomationError } from './applescript.js';
 import type { BrowserApp } from './browsers.js';
+import { fastExec } from '../desktop/fast-exec.js';
 import { defaultRunOsascript, type AppleScriptTransport, type RunOsascript } from './transport.js';
 
 /**
@@ -264,6 +265,67 @@ export function buildOpenMenuForUserScript(): string[] {
   ];
 }
 
+/**
+ * Opens the menu path (browser forward, View > Developer open) and prints the screen
+ * centre of the menu item as `x,y` (global points), leaving the menu open for a real mouse
+ * click. argv: browser process name.
+ */
+export function buildLocateMenuItemScript(): string[] {
+  return [
+    'on run argv',
+    ...findMenuItemLines(),
+    'if foundItem is missing value then error "rh:menu_missing"',
+    'end tell',
+    'end tell',
+    'tell application procName to activate',
+    'delay 0.9',
+    'tell application "System Events"',
+    'tell process procName',
+    'click foundBar',
+    'delay 0.3',
+    'if foundMid is not missing value then',
+    'click foundMid',
+    'delay 0.3',
+    'end if',
+    'set itemPos to position of foundItem',
+    'set itemSize to size of foundItem',
+    'end tell',
+    'end tell',
+    'set cx to (item 1 of itemPos) + ((item 1 of itemSize) / 2)',
+    'set cy to (item 2 of itemPos) + ((item 2 of itemSize) / 2)',
+    'return ((round cx) as text) & "," & ((round cy) as text)',
+    'end run',
+  ];
+}
+
+/**
+ * Swift source for one real left click at integer screen coordinates (the pointer is moved
+ * back afterwards). The coordinates are top-level `let` literals so the cached-binary
+ * runner can hoist them into environment variables and reuse one compiled binary.
+ */
+export function buildMouseClickSwift(x: number, y: number): string {
+  return [
+    'import CoreGraphics',
+    'import Foundation',
+    `let px = ${Math.round(x)}`,
+    `let py = ${Math.round(y)}`,
+    'let saved = CGEvent(source: nil)?.location ?? CGPoint(x: 0, y: 0)',
+    'let target = CGPoint(x: px, y: py)',
+    'func post(_ type: CGEventType, _ at: CGPoint) {',
+    '    CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: at, mouseButton: .left)?.post(tap: .cghidEventTap)',
+    '}',
+    'post(.mouseMoved, target)',
+    'usleep(150000)',
+    'post(.leftMouseDown, target)',
+    'usleep(70000)',
+    'post(.leftMouseUp, target)',
+    'usleep(200000)',
+    'post(.mouseMoved, saved)',
+    'print("clicked")',
+    '',
+  ].join('\n');
+}
+
 /** Escapes any open menus. */
 export function buildEscapeScript(): string[] {
   return ['on run argv', 'tell application "System Events"', 'key code 53', 'delay 0.1', 'key code 53', 'end tell', 'return "escaped"', 'end run'];
@@ -349,11 +411,18 @@ export interface BrowserSetupDeps {
   run?: RunOsascript;
   open?: (url: string) => Promise<void>;
   sleep?: (ms: number) => Promise<void>;
+  /** One real mouse click at screen coordinates (injectable; default runs a cached Swift helper). */
+  clickAt?: (x: number, y: number) => Promise<boolean>;
 }
 
 const MENU_TIMEOUT_MS = 10_000;
 const VERIFY_INTERVAL_MS = 300;
 const GUIDE_SECONDS = 45;
+
+const defaultClickAt = async (x: number, y: number): Promise<boolean> => {
+  const res = fastExec('swift', ['-e', buildMouseClickSwift(x, y)]);
+  return res.status === 0 && res.stdout.trim() === 'clicked';
+};
 
 const defaultOpen = (url: string): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -365,12 +434,15 @@ export class BrowserSetup {
   private readonly run: RunOsascript;
   private readonly open: (url: string) => Promise<void>;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly clickAt: (x: number, y: number) => Promise<boolean>;
 
   constructor(deps: BrowserSetupDeps) {
     this.transport = deps.transport;
     this.run = deps.run ?? defaultRunOsascript;
     this.open = deps.open ?? defaultOpen;
     this.sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    // Never let a test (or any process that has not injected a clicker) post a real mouse click by accident.
+    this.clickAt = deps.clickAt ?? (process.env.VITEST === 'true' ? async () => false : defaultClickAt);
   }
 
   /** Probes a RUNNING browser with a harmless evaluate. Never touches a closed browser. */
@@ -562,9 +634,9 @@ export class BrowserSetup {
   }
 
   /**
-   * Three ways to flip the setting, each verified by probing the browser, tried in order:
-   * an accessibility click on the menu item, the Help-menu search (a normal AppKit menu
-   * path), and finally opening the menu for the user to click it themselves.
+   * Four ways to flip the setting, each verified by probing the browser, tried in order:
+   * an accessibility press on the menu item, a real mouse click on the opened menu item,
+   * the Help-menu search, and finally opening the menu for the user to click it themselves.
    */
   private async flip(
     b: BrowserApp,
@@ -580,6 +652,26 @@ export class BrowserSetup {
       if (hard(clicked) || clicked.reason === 'menu_missing') return clicked;
     } else if (await this.waitFor(b, wantState, want, 4)) {
       return { ok: true, changed: true, state: want };
+    }
+
+    // A real mouse click on the opened menu item: the way the user's own click got through.
+    const located = await this.runScript(b, buildLocateMenuItemScript());
+    if (!located.ok) {
+      if (hard(located)) return located;
+    } else {
+      const m = /^(-?\d+),(-?\d+)$/.exec(located.stdout.trim());
+      let clickedOk = false;
+      if (m) {
+        try {
+          clickedOk = await this.clickAt(Number(m[1]), Number(m[2]));
+        } catch {
+          clickedOk = false;
+        }
+      }
+      if (clickedOk && (await this.waitFor(b, wantState, want, 5))) {
+        return { ok: true, changed: true, state: want };
+      }
+      await this.run(buildEscapeScript(), [], MENU_TIMEOUT_MS).catch(() => undefined);
     }
 
     const searched = await this.runScript(b, buildHelpSearchScript());

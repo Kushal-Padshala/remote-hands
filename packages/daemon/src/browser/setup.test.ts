@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
 import { BrowserAutomationError } from './applescript.js';
 import { findBrowser } from './browsers.js';
 import {
@@ -8,6 +11,8 @@ import {
   BrowserSetup,
   buildEscapeScript,
   buildHelpSearchScript,
+  buildLocateMenuItemScript,
+  buildMouseClickSwift,
   buildMenuInfoOpenScript,
   buildMenuInfoScript,
   buildOpenMenuForUserScript,
@@ -65,7 +70,7 @@ describe('menu scripts', () => {
 
   const hasOsacompile = spawnSync('osacompile', ['-h']).error === undefined && process.platform === 'darwin';
   it.skipIf(!hasOsacompile)('both scripts compile (syntax only, nothing is executed)', () => {
-    for (const lines of [buildMenuStateScript(), buildMenuToggleScript(), buildMenuInfoScript(), buildMenuInfoOpenScript(), buildTempWindowOpenScript(brave), buildTempWindowCloseScript(brave), buildHelpSearchScript(), buildOpenMenuForUserScript(), buildEscapeScript()]) {
+    for (const lines of [buildMenuStateScript(), buildMenuToggleScript(), buildMenuInfoScript(), buildMenuInfoOpenScript(), buildTempWindowOpenScript(brave), buildTempWindowCloseScript(brave), buildHelpSearchScript(), buildOpenMenuForUserScript(), buildEscapeScript(), buildLocateMenuItemScript()]) {
       const args = ['-o', `/tmp/rh-setup-compile-${process.pid}.scpt`];
       for (const l of lines) args.push('-e', l);
       expect(() => execFileSync('osacompile', args, { stdio: 'pipe' })).not.toThrow();
@@ -216,25 +221,54 @@ describe('BrowserSetup menu toggling', () => {
     expect((resBrave as { message: string }).message).toContain('non-English');
   });
 
-  it('strategy 2: when the accessibility click changes nothing, the Help search is tried and verified', async () => {
-    const { run, calls } = scriptedRun([TEMP, { stdout: 'clicked' }, { stdout: 'searched' }]);
-    // state check (off), 4 probes after the click (off), then the Help search works.
-    const res = await new BrowserSetup({ transport: probeTransport(['off', 'off', 'off', 'off', 'off', 'on']), run, sleep }).enableJs(brave);
+  it('strategy 2: a real mouse click on the opened menu item is tried and verified', async () => {
+    const { run, calls } = scriptedRun([TEMP, { stdout: 'clicked' }, { stdout: '640,200' }]);
+    const clickAt = vi.fn(async () => true);
+    // state check (off), 4 probes after the accessibility press (off), then the real click works.
+    const res = await new BrowserSetup({ transport: probeTransport(['off', 'off', 'off', 'off', 'off', 'on']), run, sleep, clickAt }).enableJs(brave);
+    expect(res).toEqual({ ok: true, changed: true, state: 'checked' });
+    expect(clickAt).toHaveBeenCalledWith(640, 200);
+    expect(calls.map((c) => joined(c.lines))).toEqual([
+      joined(buildTempWindowOpenScript(brave)),
+      joined(buildMenuToggleScript()),
+      joined(buildLocateMenuItemScript()),
+      joined(buildTempWindowCloseScript(brave)),
+    ]);
+  });
+
+  it('strategy 3: the Help search is tried when the real click changed nothing', async () => {
+    const { run, calls } = scriptedRun([TEMP, { stdout: 'clicked' }, { stdout: '640,200' }, { stdout: 'escaped' }, { stdout: 'searched' }]);
+    const clickAt = vi.fn(async () => true);
+    const answers: Array<'on' | 'off' | 'nowin'> = [...Array(10).fill('off'), 'on'];
+    const res = await new BrowserSetup({ transport: probeTransport(answers), run, sleep, clickAt }).enableJs(brave);
     expect(res).toEqual({ ok: true, changed: true, state: 'checked' });
     expect(calls.map((c) => joined(c.lines))).toEqual([
       joined(buildTempWindowOpenScript(brave)),
       joined(buildMenuToggleScript()),
+      joined(buildLocateMenuItemScript()),
+      joined(buildEscapeScript()),
       joined(buildHelpSearchScript()),
       joined(buildTempWindowCloseScript(brave)),
     ]);
   });
 
-  it('strategy 3: opens the menu for the user, tells them, and waits for the probe', async () => {
-    const { run, calls } = scriptedRun([TEMP, { stdout: 'clicked' }, { stdout: 'searched' }, { stdout: 'opened' }]);
-    // state check + 4 + 6 probes off, one more off in the guide window, then the user clicks.
-    const answers: Array<'on' | 'off' | 'nowin'> = ['off', 'off', 'off', 'off', 'off', 'off', 'off', 'off', 'off', 'off', 'off', 'off', 'on'];
+  it('a click helper that fails or coordinates that do not parse never block the later strategies', async () => {
+    const { run } = scriptedRun([TEMP, { stdout: 'clicked' }, { stdout: 'not coordinates' }, { stdout: 'escaped' }, { stdout: 'searched' }]);
+    const clickAt = vi.fn(async () => {
+      throw new Error('swift missing');
+    });
+    const answers: Array<'on' | 'off' | 'nowin'> = [...Array(10).fill('off'), 'on'];
+    const res = await new BrowserSetup({ transport: probeTransport(answers), run, sleep, clickAt }).enableJs(brave);
+    expect(res).toMatchObject({ ok: true });
+    expect(clickAt).not.toHaveBeenCalled();
+  });
+
+  it('strategy 4: opens the menu for the user, tells them, and waits for the probe', async () => {
+    const { run, calls } = scriptedRun([TEMP, { stdout: 'clicked' }, { stdout: '640,200' }, { stdout: 'escaped' }, { stdout: 'searched' }, { stdout: 'opened' }]);
+    // state check + 4 + 5 + 6 probes off, one more off in the guide window, then the user clicks.
+    const answers: Array<'on' | 'off' | 'nowin'> = [...Array(17).fill('off'), 'on'];
     const guide = vi.fn();
-    const res = await new BrowserSetup({ transport: probeTransport(answers), run, sleep }).enableJs(brave, { onGuide: guide });
+    const res = await new BrowserSetup({ transport: probeTransport(answers), run, sleep, clickAt: async () => true }).enableJs(brave, { onGuide: guide });
     expect(res).toEqual({ ok: true, changed: true, state: 'checked' });
     expect(guide).toHaveBeenCalledTimes(1);
     expect(guide.mock.calls[0]![0]).toContain('Click "Allow JavaScript from Apple Events"');
@@ -242,8 +276,15 @@ describe('BrowserSetup menu toggling', () => {
   });
 
   it('gives manual steps when nothing worked, and closes the open menu and the temp window', async () => {
-    const { run, calls } = scriptedRun([TEMP, { stdout: 'clicked' }, { stdout: 'searched' }, { stdout: 'opened' }]);
-    const res = await new BrowserSetup({ transport: probeTransport(['off']), run, sleep }).enableJs(brave, { onGuide: () => {} });
+    const { run, calls } = scriptedRun([
+      TEMP,
+      { stdout: 'clicked' },
+      { stdout: '640,200' },
+      { stdout: 'escaped' },
+      { stdout: 'searched' },
+      { stdout: 'opened' },
+    ]);
+    const res = await new BrowserSetup({ transport: probeTransport(['off']), run, sleep, clickAt: async () => true }).enableJs(brave, { onGuide: () => {} });
     expect(res).toMatchObject({ ok: false, reason: 'script_error' });
     expect((res as { message: string }).message).toContain('View > Developer > Allow JavaScript from Apple Events');
     const last = calls.slice(-2).map((c) => joined(c.lines));
@@ -251,8 +292,8 @@ describe('BrowserSetup menu toggling', () => {
   });
 
   it('without a guide callback it does not open the menu for the user', async () => {
-    const { run, calls } = scriptedRun([TEMP, { stdout: 'clicked' }, { stdout: 'searched' }]);
-    const res = await new BrowserSetup({ transport: probeTransport(['off']), run, sleep }).enableJs(brave);
+    const { run, calls } = scriptedRun([TEMP, { stdout: 'clicked' }, { stdout: '640,200' }, { stdout: 'escaped' }, { stdout: 'searched' }]);
+    const res = await new BrowserSetup({ transport: probeTransport(['off']), run, sleep, clickAt: async () => false }).enableJs(brave);
     expect(res).toMatchObject({ ok: false });
     expect(calls.some((c) => joined(c.lines) === joined(buildOpenMenuForUserScript()))).toBe(false);
   });
@@ -452,5 +493,33 @@ describe('temporary window', () => {
     const res = await new BrowserSetup({ transport: probeTransport(['off', 'on']), run: failOpen.run, sleep: async () => {} }).enableJs(brave);
     expect(res).toMatchObject({ ok: true, changed: true });
     expect(failOpen.calls.some((c) => c.lines.join('\n') === buildTempWindowCloseScript(brave).join('\n'))).toBe(false);
+  });
+});
+
+describe('real mouse click helper', () => {
+  it('builds Swift with the coordinates as top-level literals and restores the pointer', () => {
+    const src = buildMouseClickSwift(640.4, 200.6);
+    expect(src).toContain('let px = 640\n');
+    expect(src).toContain('let py = 201\n');
+    expect(src).toContain('.leftMouseDown');
+    expect(src).toContain('.leftMouseUp');
+    expect(src).toContain('post(.mouseMoved, saved)');
+  });
+
+  const hasSwiftc = process.platform === 'darwin' && spawnSync('swiftc', ['--version']).error === undefined;
+  it.skipIf(!hasSwiftc)('type-checks with swiftc (nothing is executed)', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'rh-click-'));
+    const file = path.join(dir, 'main.swift');
+    writeFileSync(file, buildMouseClickSwift(10, 20));
+    const res = spawnSync('swiftc', ['-typecheck', file], { encoding: 'utf-8' });
+    expect(res.status, res.stderr).toBe(0);
+  }, 60_000);
+
+  it('the locate script opens the menu path and returns centre coordinates', () => {
+    const text = buildLocateMenuItemScript().join('\n');
+    expect(text).toContain('click foundBar');
+    expect(text).toContain('position of foundItem');
+    expect(text).toContain('size of foundItem');
+    expect(text).not.toContain('click foundItem');
   });
 });
