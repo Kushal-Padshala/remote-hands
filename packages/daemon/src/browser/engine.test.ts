@@ -442,7 +442,7 @@ describe('fast-path availability cache', () => {
     it(`falls back on ${code} with a one-time note and a 60 s cache`, async () => {
       t.fail = new BrowserAutomationError(code, 'Google Chrome', `msg-${code}`);
       expect(await engine.snapshot()).toBe(
-        `note: fast browser path unavailable (msg-${code}); using the slower fallback.\nlegacy:snapshot`,
+        `note: fast browser path unavailable (msg-${code}); using the slower fallback. Run "rh browser setup" to fix it.\nlegacy:snapshot`,
       );
       const n = t.evals.length;
       clock += 30_000;

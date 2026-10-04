@@ -52,7 +52,7 @@ describe('SLIM_COMPUTER_PROMPT', () => {
     expect(rule).toContain('browser_find');
     expect(rule).toContain('browser_extract');
     expect(rule).toContain('note: fast browser path unavailable');
-    expect(rule).toContain('rh browser doctor');
+    expect(rule).toContain('rh browser setup');
     expect(rule.length).toBeLessThan(900);
   });
 

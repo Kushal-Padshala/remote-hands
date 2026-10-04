@@ -185,6 +185,10 @@ rh start --browser-profile="Work"
 
 Scan the generated terminal QR code with your phone camera to pair your mobile browser with your computer.
 
+### 4. First run: fast browser control (macOS)
+
+Run `rh browser setup` once (it is also offered automatically by `rh hud install` and `rh setup`). It checks the browsers you have open (Chrome, Brave, Arc, Edge, Safari) and, with your permission, turns on each browser's "Allow JavaScript from Apple Events" setting so the HUD can drive your own signed-in tabs quickly. macOS asks you to allow the control once per browser; click Allow. Undo any time with `rh browser setup --disable`. Without it, browser tasks still work through a slower Chrome-only fallback. `rh browser doctor` shows what is ready.
+
 ---
 
 ## CLI Command Reference

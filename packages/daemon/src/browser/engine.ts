@@ -315,7 +315,7 @@ export class FastBrowserEngine implements BrowserPort {
     if (markShown) this.shown = { mode: 'legacy' };
     if (note && reason && !this.noteShown) {
       this.noteShown = true;
-      return `note: fast browser path unavailable (${reason}); using the slower fallback.\n${out}`;
+      return `note: fast browser path unavailable (${reason}); using the slower fallback. Run "rh browser setup" to fix it.\n${out}`;
     }
     return out;
   }

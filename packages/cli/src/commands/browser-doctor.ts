@@ -113,7 +113,7 @@ export async function browserDoctor(args: string[], opts: BrowserDoctorOptions):
       `Fast path not confirmed for ${target.name}: the check failed on the front tab, not necessarily the setting. Open a normal web page and run rh browser doctor again.`,
     );
   } else {
-    lines.push(`Fast path not available for ${target.name}; the slower CDP/accessibility fallback (Chrome only) applies until it is fixed.`);
+    lines.push(`Fast path not available for ${target.name}; the slower CDP/accessibility fallback (Chrome only) applies until it is fixed. Run "rh browser setup" to turn it on.`);
   }
   lines.push(SECURITY_NOTE);
   opts.stdout(lines.join('\n'));

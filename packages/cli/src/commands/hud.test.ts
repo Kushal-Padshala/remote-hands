@@ -41,6 +41,36 @@ describe('CLI hud command', () => {
     expect(logs.some((l) => l.includes('Desktop Overlay Assistant installed'))).toBe(true);
   });
 
+  it('offers the browser setup once before installing the service', async () => {
+    const order: string[] = [];
+    mockServiceManager.install.mockImplementation(() => {
+      order.push('install');
+      return { success: true, plistPath: '/mock/path.plist' };
+    });
+    const code = await hudCommand(['install'], {
+      serviceManager: mockServiceManager,
+      browserSetupOffer: async () => void order.push('offer'),
+      stdout: (msg) => logs.push(msg),
+      stderr: (msg) => errors.push(msg),
+    });
+    expect(code).toBe(0);
+    expect(order).toEqual(['offer', 'install']);
+  });
+
+  it('still installs when the browser setup offer fails', async () => {
+    const code = await hudCommand(['install'], {
+      serviceManager: mockServiceManager,
+      browserSetupOffer: async () => {
+        throw new Error('boom');
+      },
+      stdout: (msg) => logs.push(msg),
+      stderr: (msg) => errors.push(msg),
+    });
+    expect(code).toBe(0);
+    expect(mockServiceManager.install).toHaveBeenCalled();
+    expect(errors.some((e) => e.includes('Browser setup skipped'))).toBe(true);
+  });
+
   it('uninstalls launchagent background service on rh hud uninstall', async () => {
     const code = await hudCommand(['uninstall'], {
       serviceManager: mockServiceManager,

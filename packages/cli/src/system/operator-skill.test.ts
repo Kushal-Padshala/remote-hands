@@ -41,7 +41,7 @@ describe('ensureRemoteHandsOperatorSkill', () => {
     expect(md).toContain('stable');
     expect(md).toContain('never call `browser_snapshot` again after an action');
     expect(md).toContain('note: fast browser path unavailable');
-    expect(md).toContain('rh browser doctor');
+    expect(md).toContain('rh browser setup');
     expect(md).toContain('## Speed Mandate: Zero Discovery');
     expect(md).toContain('ZERO SCREENSHOTS');
     expect(md).toContain('Never take screenshots');

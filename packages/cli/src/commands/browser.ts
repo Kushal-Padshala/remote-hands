@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { BrowserDriver, ChromeManager, MacOsDriver } from '@remote-hands/daemon';
 import { browserDoctor } from './browser-doctor.js';
+import { browserSetupCommand } from './browser-setup.js';
 import type { CommandContext } from './setup.js';
 
 export function findChromeBinary(): string {
@@ -65,6 +66,15 @@ export async function browserCommand(args: string[], context: CommandContext = {
     return browserDoctor(cleanArgs.slice(1), {
       transport: context.browserTransport,
       env: context.env,
+      stdout,
+      stderr,
+    });
+  }
+
+  // Same for setup: it only talks to browsers that are already running.
+  if (cleanArgs[0] === 'setup') {
+    return browserSetupCommand(cleanArgs.slice(1), {
+      ...context.browserSetup,
       stdout,
       stderr,
     });

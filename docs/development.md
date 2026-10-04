@@ -131,12 +131,15 @@ The `browser_*` computer tools drive the browser you already use through AppleSc
 
 **Verification status (update after live run).** The AppleScript for Arc, Edge and Safari is written from the browsers' documented AppleScript dictionaries; Arc, Edge and Safari have not been run on this machine. Only browsers verified live are claimed supported. At the time of writing, tab listing was verified live on Chrome and Brave; JavaScript execution through the fast path has not been verified live yet (it needs the setting below enabled in a browser).
 
-**One-time setting (per browser).** JavaScript from Apple Events is off by default. Turn it on once:
+**One-time setup (per browser): `rh browser setup`.** JavaScript from Apple Events is off by default and macOS asks before any app may control a browser. `rh browser setup` walks you through both:
 
-- Chrome, Brave, Edge and Arc: `<browser> menu bar > View > Developer > Allow JavaScript from Apple Events`.
-- Safari: `Safari > Settings > Advanced > Show features for web developers`, then `Develop > Allow JavaScript from Apple Events`.
+1. For every running supported browser it sends a harmless probe. macOS shows its own "wants to control <Browser>" prompt the first time: click Allow. If you had denied it, the command opens `System Settings > Privacy & Security > Automation` and re-checks after you press Enter.
+2. If the setting is off it explains what it enables, asks `Enable it in <Browser> now? [Y/n]` (`--yes` skips the question) and turns it on by clicking the browser's `Allow JavaScript from Apple Events` menu item through System Events UI scripting. It reads the menu item's check mark first and clicks only when it is unchecked, then verifies with a probe. This needs the Accessibility permission Remote Hands already requests; if it is missing the command opens the Accessibility pane and says which switch to flip. Safari needs its Develop menu first (`Safari > Settings > Advanced > Show features for web developers`); if the menu item cannot be found the command prints the manual steps instead of changing anything.
+3. Nothing is changed without a yes (or `--yes`), a browser that is not running is skipped (never launched), and a run without a terminal never prompts or changes anything. `rh browser setup --disable` turns the setting off again where it is on; `--browser <name>` limits the run.
 
-macOS also asks once to let the app that runs Remote Hands control the browser. If you declined, allow it in `System Settings > Privacy & Security > Automation`. Remote Hands never changes either setting for you.
+`rh hud install`, `rh hud listen` and `rh setup` offer the same flow once, on a terminal, for browsers you have not decided on yet. Decisions are remembered in `~/.remote-hands/browser-setup.json` (`enabled`, `declined`, `manual`); a declined browser is not asked again automatically, only by running `rh browser setup`. The macOS Automation prompt belongs to the app that sends the Apple events (your Terminal when you run the command there); a HUD started from a LaunchAgent may show its own prompt the first time it controls a browser.
+
+Manual equivalent: Chrome, Brave, Edge and Arc `<browser> menu bar > View > Developer > Allow JavaScript from Apple Events`; Safari `Develop > Allow JavaScript from Apple Events`.
 
 **Check it.**
 

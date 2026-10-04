@@ -82,6 +82,10 @@ export interface CommandContext {
   hudServiceManager?: any | undefined;
   /** Injected AppleScript transport for `rh browser doctor` (tests). */
   browserTransport?: import('./browser-doctor.js').BrowserDoctorTransport | undefined;
+  /** Injected pieces of `rh browser setup` (tests): setup service, prompt, TTY flag, state file. */
+  browserSetup?: Partial<import('./browser-setup.js').BrowserSetupOptions> | undefined;
+  /** Replaces the once-only browser setup offer made by `rh hud` and `rh setup` (tests). */
+  browserSetupOffer?: (() => Promise<void>) | undefined;
 }
 
 async function setupAgentAndPermissions(
@@ -476,6 +480,8 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     stdout(renderStepInfo('Desktop Overlay hotkey service is supported on macOS'));
   }
 
+  await offerBrowserSetup(context);
+
   const pairingUrl = generatePairingUrl(webUrl, activePairingCode, effectiveOwnerToken, apiUrl);
   const summary = await formatPairingSummary({
     webUrl,
@@ -490,4 +496,9 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   stdout(`    It is active in the background. You do not need to run "rh start" while at your computer.`);
   stdout(`  • ${c.bold('Remote Use:')} Run "${c.cyan('rh start')}" when stepping away to connect from your phone over any network.\n`);
   return 0;
+}
+
+async function offerBrowserSetup(context: CommandContext): Promise<void> {
+  const { offerForContext } = await import('./browser-setup.js');
+  await offerForContext(context);
 }

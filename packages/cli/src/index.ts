@@ -53,7 +53,7 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
     stdout('  hud         Manage desktop overlay assistant and hotkey background service');
     stdout('  permissions Inspect and pre-authorize macOS and AI agent permissions');
     stdout('  browser     Run headless browser automation bridge with live screen streaming');
-    stdout('              (rh browser doctor: check the fast browser path per running browser)');
+    stdout('              (rh browser setup: turn on the fast browser path; rh browser doctor: check it per running browser)');
     stdout('  guide       Interactive visual guidance and annotation overlays');
     stdout('  approve     Request human-in-the-loop approval on the mobile app');
     stdout('  profiles    List detected Chrome browser profiles and launch commands');
