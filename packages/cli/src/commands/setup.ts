@@ -62,7 +62,7 @@ import {
   c,
 } from '../output/ui.js';
 
-import { HudServiceManager, type ChromeManager, type DynamicPowerManager } from '@remote-hands/daemon';
+import { HudServiceManager, SpotlightHudRunner, type ChromeManager, type DynamicPowerManager } from '@remote-hands/daemon';
 import { browserSetupCommand, defaultAsk } from './browser-setup.js';
 import { mcpCommand } from './mcp.js';
 
@@ -82,6 +82,8 @@ export interface CommandContext {
   frameSource?: any;
   localStore?: any;
   hudServiceManager?: any | undefined;
+  /** Builds the Shift+Cmd+Space helper during HUD setup (tests replace it; mocked runs skip the real build). */
+  prepareHotkeyHelper?: (() => { ok: true; path: string } | { ok: false; error: string }) | undefined;
   /** Injected AppleScript transport for `rh browser doctor` (tests). */
   browserTransport?: import('./browser-doctor.js').BrowserDoctorTransport | undefined;
   /** Injected pieces of `rh browser setup` (tests): setup service, prompt, TTY flag, state file. */
@@ -628,9 +630,21 @@ async function hudSetupFlow(
           isRunning: () => true,
         }
       : new HudServiceManager());
+  let helperError: string | null = null;
   if (process.platform !== 'darwin') {
     stdout(renderStepInfo('The desktop HUD hotkey service is supported on macOS.'));
   } else {
+    // Build the hotkey helper now so a missing toolchain is reported here, not as a silent hotkey later.
+    const prepare =
+      context.prepareHotkeyHelper ??
+      (context.runner ? () => ({ ok: true as const, path: '/mock/rh-spotlight' }) : () => new SpotlightHudRunner().prepare());
+    const helper = prepare();
+    if (helper.ok) {
+      stdout(renderStepSuccess('Shift + Cmd + Space helper is built'));
+    } else {
+      helperError = helper.error;
+      stdout(renderStepInfo(`Shift + Cmd + Space helper: ${helper.error}`));
+    }
     const res = hudService.install();
     if (res.success) {
       stdout(renderStepSuccess('Desktop HUD installed and running in the background'));
@@ -640,6 +654,10 @@ async function hudSetupFlow(
   }
 
   stdout(renderStepStart(5, TOTAL, 'Done'));
+  if (helperError) {
+    stdout(renderStepInfo('Desktop HUD is installed but the hotkey will not work until the helper builds (see above).'));
+    return 1;
+  }
   stdout(renderStepSuccess('Desktop HUD is ready'));
   stdout(`\n  Press ${c.bold('Shift + Cmd + Space')} anywhere and type what you want done.`);
   stdout('  The first request after logging in takes a few seconds longer while the agent starts.');

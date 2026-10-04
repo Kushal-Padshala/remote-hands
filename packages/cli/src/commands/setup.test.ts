@@ -642,6 +642,25 @@ describe('Setup Command Flow', () => {
       }
     });
 
+    it('--hud fails loudly (exit 1) when the hotkey helper cannot be built', async () => {
+      if (process.platform !== 'darwin') return;
+      const out: string[] = [];
+      const code = await setupCommand(['--hud'], {
+        stdout: (l) => out.push(l),
+        runner: hudRunner([]),
+        fs: mockFs,
+        projectRoot: '/project',
+        hudServiceManager: { install: () => ({ success: true, plistPath: '/mock.plist' }) },
+        browserSetup: readyBrowserSetup([]),
+        isTTY: false,
+        prepareHotkeyHelper: () => ({ ok: false, error: 'needs the Xcode Command Line Tools' }),
+      });
+      const text = out.join('\n');
+      expect(code).toBe(1);
+      expect(text).toContain('needs the Xcode Command Line Tools');
+      expect(text).not.toContain('Desktop HUD is ready');
+    });
+
     it('asks what to set up on a terminal and defaults to the HUD', async () => {
       const out: string[] = [];
       const asked: string[] = [];

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { ExecFunction } from './macos-driver.js';
 import type { ContextAttachment } from '@remote-hands/shared';
 import { ContextService } from '../context/context-service.js';
+import { SPOTLIGHT_SWIFT_SOURCE } from './spotlight-source.generated.js';
 
 export interface SpotlightPromptResult {
   query: string;
@@ -19,6 +20,26 @@ export type SpotlightListenerEvent =
   | { event: string; app: string; windowTitle?: string | undefined; query?: string | undefined };
 
 export type HudUpdateSender = (status: string, text: string, role?: string) => void;
+
+/**
+ * Writes the embedded hotkey-helper source to `<home>/.remote-hands/spotlight-hud.swift` when it
+ * is missing or differs (so the installed CLI can build the helper without the repo checkout).
+ * Returns the path. An unchanged file is left alone, so its mtime keeps the compiled binary fresh.
+ */
+export function materializeSwiftSource(home: string, source: string = SPOTLIGHT_SWIFT_SOURCE): string {
+  const target = path.join(home, '.remote-hands', 'spotlight-hud.swift');
+  let current: string | null = null;
+  try {
+    current = fs.readFileSync(target, 'utf-8');
+  } catch {}
+  if (current !== source) {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, source, 'utf-8');
+  }
+  return target;
+}
+
+export type HotkeyHelperStatus = { ok: true; path: string } | { ok: false; error: string };
 
 export class SpotlightHudRunner {
   private exec: ExecFunction;
@@ -36,7 +57,27 @@ export class SpotlightHudRunner {
     this.binaryPath = path.join(currentDir, '..', '..', 'bin', 'rh-spotlight');
   }
 
+  /**
+   * Builds (or finds) the hotkey helper now and says whether it can run, so setup can fail
+   * loudly instead of leaving a hotkey that silently does nothing.
+   */
+  prepare(): HotkeyHelperStatus {
+    const target = this.ensureBinary();
+    if (target && !target.endsWith('.swift')) return { ok: true, path: target };
+    return {
+      ok: false,
+      error:
+        'could not build the hotkey helper. It needs the Xcode Command Line Tools: run "xcode-select --install", wait for it to finish, then run "rh setup --hud" again.',
+    };
+  }
+
   private ensureBinary(): string | null {
+    // The CLI ships as one file: make sure the helper's source is on disk for the build below (tests never write to the real home).
+    if (process.env.VITEST !== 'true') {
+      try {
+        materializeSwiftSource(os.homedir());
+      } catch {}
+    }
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
     const userBinPath = path.join(os.homedir(), '.remote-hands', 'bin', 'rh-spotlight');
 
@@ -278,6 +319,7 @@ export class SpotlightHudRunner {
   startListener(onTrigger: (result: SpotlightListenerEvent) => void): { stop: () => void } {
     const target = this.ensureBinary();
     if (!target) {
+      console.error('Remote Hands: the Shift+Cmd+Space helper is missing, so the hotkey cannot work. Run "rh setup --hud".');
       return { stop: () => {} };
     }
     let cmd = target;

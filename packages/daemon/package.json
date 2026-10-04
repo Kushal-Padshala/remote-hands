@@ -15,7 +15,7 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "build": "tsc --build",
+    "build": "node scripts/embed-swift.mjs && tsc --build",
     "typecheck:tests": "tsc -p tsconfig.test.json"
   },
   "dependencies": {

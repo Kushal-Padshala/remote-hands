@@ -105,3 +105,35 @@ describe('SpotlightHudRunner', () => {
     });
   });
 });
+
+
+describe('embedded hotkey helper source', () => {
+  it('matches spotlight-hud.swift (run `npm run build -w @remote-hands/daemon` after editing the Swift file)', async () => {
+    const fsm = await import('node:fs');
+    const pathm = await import('node:path');
+    const { SPOTLIGHT_SWIFT_SOURCE } = await import('./spotlight-source.generated.js');
+    const file = pathm.join(__dirname, 'spotlight-hud.swift');
+    expect(SPOTLIGHT_SWIFT_SOURCE).toBe(fsm.readFileSync(file, 'utf-8'));
+  });
+
+  it('materializeSwiftSource writes it when missing, repairs a stale copy, and leaves a fresh copy untouched', async () => {
+    const fsm = await import('node:fs');
+    const osm = await import('node:os');
+    const pathm = await import('node:path');
+    const { materializeSwiftSource } = await import('./spotlight-hud.js');
+    const home = fsm.mkdtempSync(pathm.join(osm.tmpdir(), 'rh-swift-'));
+    try {
+      const target = materializeSwiftSource(home, 'v1');
+      expect(target).toBe(pathm.join(home, '.remote-hands', 'spotlight-hud.swift'));
+      expect(fsm.readFileSync(target, 'utf-8')).toBe('v1');
+      const old = new Date(Date.now() - 60_000);
+      fsm.utimesSync(target, old, old);
+      materializeSwiftSource(home, 'v1');
+      expect(fsm.statSync(target).mtimeMs).toBeLessThan(Date.now() - 30_000);
+      materializeSwiftSource(home, 'v2');
+      expect(fsm.readFileSync(target, 'utf-8')).toBe('v2');
+    } finally {
+      fsm.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
