@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Approval, hasExpired, isPending, resolveDecision } from './approval.js';
+import { type Approval, classifyRiskyAction, hasExpired, isPending, resolveDecision } from './approval.js';
 
 const at = (iso: string) => new Date(iso);
 
@@ -102,5 +102,31 @@ describe('expiry boundary', () => {
       expect(pending).toBe(!expired);
       expect(resolveDecision(a, now)).toBe(pending ? 'pending' : 'expired');
     }
+  });
+});
+
+describe('classifyRiskyAction', () => {
+  it('flags controls that take irreversible actions', () => {
+    expect(classifyRiskyAction('Post')).toBe('publish');
+    expect(classifyRiskyAction('Publish now')).toBe('publish');
+    expect(classifyRiskyAction('Submit')).toBe('publish');
+    expect(classifyRiskyAction('Send')).toBe('send');
+    expect(classifyRiskyAction('Place your order')).toBe('pay');
+    expect(classifyRiskyAction('Buy now')).toBe('pay');
+    expect(classifyRiskyAction('Delete repository')).toBe('delete');
+    expect(classifyRiskyAction('Merge pull request')).toBe('push');
+  });
+
+  it('leaves ordinary controls alone', () => {
+    expect(classifyRiskyAction('Next')).toBeNull();
+    expect(classifyRiskyAction('Posts')).toBeNull();
+    expect(classifyRiskyAction('Search')).toBeNull();
+    expect(classifyRiskyAction('')).toBeNull();
+  });
+
+  it('ignores long text unless it is a goal', () => {
+    const prose = 'Read our guide on how to delete your account and what happens to your data afterwards';
+    expect(classifyRiskyAction(prose)).toBeNull();
+    expect(classifyRiskyAction(prose, { goal: true })).toBe('delete');
   });
 });

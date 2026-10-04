@@ -237,6 +237,29 @@ describe('desktopCommand', () => {
     expect(stdout).toHaveBeenCalledWith('Clicked at 100,200');
   });
 
+  it('asks the phone before clicking a risky element during a task and stops on rejection', async () => {
+    const mockElements = [{ index: 3, role: 'AXButton', label: 'Send', bounds: [10, 10, 50, 20] }];
+    const walkerMock = { walkActiveApp: vi.fn().mockResolvedValue(mockElements) };
+    const engineMock = { executeDecision: vi.fn().mockResolvedValue(undefined) };
+    const stderr = vi.fn();
+    const approve = vi.fn(async (_args: string[], ctx: any) => {
+      ctx.stderr('Approval rejected by user.');
+      return 1;
+    });
+    const code = await desktopCommand(['click', '3'], {
+      stderr,
+      walker: walkerMock as any,
+      actEngine: engineMock as any,
+      env: {},
+      taskId: 'task-1',
+      approve,
+    });
+    expect(code).toBe(1);
+    expect(approve.mock.calls[0]![0]).toEqual(['Press "Send"', '--action=send', '--risk=high', '--task=task-1']);
+    expect(engineMock.executeDecision).not.toHaveBeenCalled();
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('"Send" was not pressed'));
+  });
+
   it('handles click by element index', async () => {
     const mockElements = [
       { index: 1, role: 'AXButton', label: 'Cancel', bounds: [10, 10, 50, 20] },

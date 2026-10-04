@@ -56,6 +56,18 @@ function makeDeps(overrides: Partial<ComputerSessionDeps> = {}) {
 }
 
 describe('ComputerSession desktop', () => {
+  it('asks the gate before a desktop click or menu item, and a rejection stops it', async () => {
+    const gate = vi.fn().mockRejectedValue(new Error('Approval rejected by user.'));
+    const deps = makeDeps({ gate });
+    const s = new ComputerSession(deps);
+    await s.desktopSnapshot('Finder');
+    await expect(s.desktopClick(1)).rejects.toThrow('Approval rejected by user.');
+    await expect(s.desktopMenu('Finder', 'Delete')).rejects.toThrow('Approval rejected by user.');
+    expect(gate.mock.calls.map((c) => c[0])).toEqual(['Next', 'Delete']);
+    expect(deps.axAction).not.toHaveBeenCalled();
+    expect(deps.menuSearch).not.toHaveBeenCalled();
+  });
+
   it('snapshot walks once, caches, and returns a header plus compact lines', async () => {
     const deps = makeDeps();
     const s = new ComputerSession(deps);

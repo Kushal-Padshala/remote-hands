@@ -18,6 +18,14 @@ describe('Security Utilities', () => {
     expect(isSafeWorkspacePath('/home/user/projects/my-app').allowed).toBe(true);
   });
 
+  it('resolves dot segments before checking', () => {
+    expect(isSafeWorkspacePath('/home/user/../../etc').allowed).toBe(false);
+    expect(isSafeWorkspacePath('/home/user/projects/../.ssh').allowed).toBe(false);
+    expect(isSafeWorkspacePath('/home/user/./.kube/config').allowed).toBe(false);
+    expect(isSafeWorkspacePath('/home//user/projects/./app').allowed).toBe(true);
+    expect(isSafeWorkspacePath('/tmp/work/../../Users/kushal/secrets', ['/tmp/work']).allowed).toBe(false);
+  });
+
   it('enforces workspace allowlist if configured', () => {
     const allowlist = ['/Users/kushal/projects/app', '/tmp/work'];
     expect(isSafeWorkspacePath('/Users/kushal/projects/app/src', allowlist).allowed).toBe(true);
@@ -32,5 +40,6 @@ describe('Security Utilities', () => {
     expect(isSafeBrowserUrl('--disable-web-security')).toBe(false);
     expect(isSafeBrowserUrl('--load-extension=/evil')).toBe(false);
     expect(isSafeBrowserUrl('-p')).toBe(false);
+    expect(isSafeBrowserUrl('file:///Users/me/.ssh/id_rsa')).toBe(false);
   });
 });

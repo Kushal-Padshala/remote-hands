@@ -2,6 +2,7 @@ export * from './agy-runner.js';
 export * from './warm-agy-session.js';
 export * from './computer/prompt.js';
 export * from './approval-gate.js';
+export * from './action-gate.js';
 export * from './browser-snapshot.js';
 export * from './browser-driver.js';
 export * from './chrome-manager.js';

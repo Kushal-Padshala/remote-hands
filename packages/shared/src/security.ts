@@ -11,6 +11,25 @@ export function timingSafeEqualStr(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/**
+ * Collapses `.`, `..` and repeated slashes so `/home/me/../../etc` is checked as `/etc`.
+ * Pure string work: shared code also runs in Workers and the browser, where node:path is absent.
+ */
+function normalizePath(p: string): string {
+  const absolute = p.startsWith('/');
+  const out: string[] = [];
+  for (const part of p.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      if (out.length > 0 && out[out.length - 1] !== '..') out.pop();
+      else if (!absolute) out.push('..');
+      continue;
+    }
+    out.push(part);
+  }
+  return (absolute ? '/' : '') + out.join('/');
+}
+
 export function isSafeWorkspacePath(
   targetPath: string,
   allowlist?: readonly string[] | undefined,
@@ -19,10 +38,10 @@ export function isSafeWorkspacePath(
     return { allowed: false, reason: 'Invalid workspace path' };
   }
 
-  const normalized = targetPath.trim();
-  if (normalized.length === 0) {
+  if (targetPath.trim().length === 0) {
     return { allowed: false, reason: 'Empty workspace path' };
   }
+  const normalized = normalizePath(targetPath.trim());
 
   const forbiddenSystemPaths = ['/etc', '/root', '/bin', '/sbin', '/usr', '/dev', '/proc', '/sys'];
   for (const forbidden of forbiddenSystemPaths) {
@@ -31,7 +50,7 @@ export function isSafeWorkspacePath(
     }
   }
 
-  const forbiddenSubdirs = ['.ssh', '.aws', '.gnupg', '.config/gcloud'];
+  const forbiddenSubdirs = ['.ssh', '.aws', '.gnupg', '.config/gcloud', '.config/gh', '.kube', '.docker', 'Library/Keychains'];
   for (const sub of forbiddenSubdirs) {
     if (
       normalized.endsWith('/' + sub) ||
@@ -45,7 +64,7 @@ export function isSafeWorkspacePath(
 
   if (allowlist && allowlist.length > 0) {
     const isAllowed = allowlist.some((allowed) => {
-      const trimmedAllowed = allowed.trim();
+      const trimmedAllowed = normalizePath(allowed.trim());
       return (
         normalized === trimmedAllowed ||
         normalized.startsWith(trimmedAllowed.endsWith('/') ? trimmedAllowed : trimmedAllowed + '/')
@@ -69,7 +88,6 @@ export function isSafeBrowserUrl(url: string): boolean {
   return (
     trimmed.startsWith('http://') ||
     trimmed.startsWith('https://') ||
-    trimmed.startsWith('about:') ||
-    trimmed.startsWith('file://')
+    trimmed.startsWith('about:')
   );
 }

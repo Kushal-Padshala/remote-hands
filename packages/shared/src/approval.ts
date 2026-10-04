@@ -49,3 +49,29 @@ export function resolveDecision(approval: Approval, now: Date = new Date()): App
   if (approval.decision !== 'pending') return approval.decision;
   return past(approval.expires_at, now) ? 'expired' : 'pending';
 }
+
+/** Labels longer than this are page text or link prose, not a button naming an action. */
+const MAX_CONTROL_LABEL = 60;
+
+const RISKY_CONTROLS: ReadonlyArray<readonly [ActionKind, RegExp]> = [
+  ['pay', /\b(pay|buy|purchase|checkout|check out|place (?:your )?order|subscribe|donate|transfer|withdraw|book now)\b/i],
+  ['delete', /\b(delete|destroy|erase|uninstall|terminate|revoke|deactivate|close account)\b/i],
+  ['push', /\b(deploy|merge|promote to production)\b/i],
+  ['send', /\b(send|reply)\b/i],
+  ['publish', /\b(post|publish|tweet|submit|go live)\b/i],
+];
+
+/**
+ * Which irreversible action pressing a control named `label` would take, or null.
+ * Used by the action gate so these clicks wait for the phone instead of relying on
+ * the agent to call `rh approve` first. `goal` mode classifies a free-text goal
+ * (`rh desktop act`) and skips the label length cap.
+ */
+export function classifyRiskyAction(label: string, opts: { goal?: boolean } = {}): ActionKind | null {
+  const text = (label ?? '').trim();
+  if (!text || (!opts.goal && text.length > MAX_CONTROL_LABEL)) return null;
+  for (const [kind, pattern] of RISKY_CONTROLS) {
+    if (pattern.test(text)) return kind;
+  }
+  return null;
+}

@@ -10,12 +10,16 @@ const mockOpenUrl = vi.fn();
 const mockListTabs = vi.fn();
 const mockFocusTab = vi.fn();
 const mockFindTab = vi.fn();
+const driverOptions: any[] = [];
 
 vi.mock('@remote-hands/daemon', async () => ({
   // Real registry, error class and picker (pure modules): the doctor uses them; the rest stays faked.
   ...(await import('../../../daemon/src/browser/browsers.js')),
   ...(await import('../../../daemon/src/browser/applescript.js')),
   BrowserDriver: class {
+    constructor(options?: unknown) {
+      driverOptions.push(options);
+    }
     snapshot = mockSnapshot;
     clickIndex = mockClickIndex;
     typeIndex = mockTypeIndex;
@@ -306,6 +310,17 @@ describe('browserCommand', () => {
       expect(code).toBe(0);
       expect(mockClickIndex).toHaveBeenCalledWith(1);
       expect(stdoutMessages.join('\n')).toContain('Clicked [1] Submit Button');
+    });
+
+    it('gives the driver an approval gate for the clicked control', async () => {
+      mockClickIndex.mockResolvedValueOnce({ success: true, label: 'Next' });
+      const approve = vi.fn().mockResolvedValue(1);
+      driverOptions.length = 0;
+      await browserCommand(['click', '4'], { ...getCtx(), env: {}, taskId: 'task-1', approve });
+      const gate = driverOptions.at(-1)?.gate;
+      expect(typeof gate).toBe('function');
+      await expect(gate('Publish')).rejects.toThrow('"Publish" was not pressed');
+      expect(approve.mock.calls[0]![0]).toContain('--task=task-1');
     });
 
     it('handles click error gracefully', async () => {
