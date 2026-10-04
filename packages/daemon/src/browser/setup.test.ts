@@ -250,7 +250,7 @@ describe('BrowserSetup menu toggling', () => {
 
   it('the toggle script brings the browser forward, opens the menu path and restores focus', () => {
     const text = buildMenuToggleScript().join('\n');
-    expect(text).toContain('set frontmost to true');
+    expect(text).toContain('tell application procName to activate');
     expect(text).toContain('click foundBar');
     expect(text).toContain('click foundMid');
     expect(text).toContain('click foundItem');
