@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { HudCoordinator, isAutonomousGoal, formatContextualTaskPrompt, formatHudStatus } from './hud-coordinator.js';
+import {
+  HudCoordinator,
+  isAutonomousGoal,
+  formatContextualTaskPrompt,
+  formatHudStatus,
+  formatPreviousTaskSection,
+} from './hud-coordinator.js';
 
 describe('HudCoordinator', () => {
   let mockHudRunner: any;
@@ -254,6 +260,39 @@ describe('HudCoordinator', () => {
     expect(formatted).toContain('https://example.com/prop/101');
     expect(formatted).toContain('ad-banner.png');
     expect(formatted).toContain('Target Mandate:');
+  });
+
+  describe('previous task digest', () => {
+    const NOW = 1_000_000_000;
+    const fresh = { goal: 'complete the survey', summary: 'Q1 Somewhat confident\nQ2 Somewhat concerned', finishedAt: NOW - 60_000 };
+
+    it('returns no lines without a digest, with a blank summary, or when older than 10 minutes', () => {
+      expect(formatPreviousTaskSection(undefined, NOW)).toEqual([]);
+      expect(formatPreviousTaskSection({ ...fresh, summary: '   \n' }, NOW)).toEqual([]);
+      expect(formatPreviousTaskSection({ ...fresh, finishedAt: NOW - 10 * 60_000 - 1 }, NOW)).toEqual([]);
+    });
+
+    it('includes goal and summary for a fresh digest', () => {
+      const text = formatPreviousTaskSection(fresh, NOW).join('\n');
+      expect(text).toContain('Previous task (just finished)');
+      expect(text).toContain('Goal: complete the survey');
+      expect(text).toContain('Q2 Somewhat concerned');
+      expect(text).toContain('do not re-derive it from transcripts or files');
+    });
+
+    it('truncates a long summary to 2000 chars with a marker', () => {
+      const text = formatPreviousTaskSection({ ...fresh, summary: 'x'.repeat(5000) }, NOW).join('\n');
+      expect(text).toContain('x'.repeat(2000));
+      expect(text).not.toContain('x'.repeat(2001));
+      expect(text).toContain('[summary truncated]');
+    });
+
+    it('formatContextualTaskPrompt appends the section only when a digest is passed', () => {
+      const ctx = { app: 'Arc', isBrowser: true };
+      expect(formatContextualTaskPrompt('do it', ctx)).not.toContain('Previous task');
+      const recent = { ...fresh, finishedAt: Date.now() - 1000 };
+      expect(formatContextualTaskPrompt('do it', ctx, undefined, recent)).toContain('Previous task (just finished)');
+    });
   });
 
   it('formats hud status from various agent stream events', () => {
@@ -564,6 +603,58 @@ describe('HudCoordinator', () => {
     await new Promise((r) => setTimeout(r, 20));
 
     expect(createdTasks[1].conversation_id).toBe('conv-hud-99');
+  });
+
+  it('injects the previous task summary into a new hotkey session but not into a same-session follow-up', async () => {
+    let submitCallback: any;
+    mockHudRunner.openInteractivePrompt = vi.fn().mockImplementation((_app: any, onSubmit: any) => {
+      submitCallback = onSubmit;
+      return { close: vi.fn() };
+    });
+    const createdTasks: any[] = [];
+    const mockStore = {
+      createTask: vi.fn().mockImplementation(async (input: any) => {
+        const t = { id: `task-${createdTasks.length + 1}`, ...input };
+        createdTasks.push(t);
+        return t;
+      }),
+      markTaskRunning: vi.fn().mockImplementation(async (id: string) => ({ id, status: 'running' })),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockRunner = {
+      run: vi.fn().mockResolvedValue({ status: 'done', summary: 'Answered 7 survey questions', conversationId: 'conv-1' }),
+    };
+    const coordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: mockStore as any,
+      runner: mockRunner as any,
+      autoExecute: true,
+    });
+
+    coordinator.startListening();
+    const hotkeyCb = mockHudRunner.startListener.mock.calls[0]![0];
+    await hotkeyCb({ event: 'hotkey', app: 'Google Chrome' });
+    await submitCallback({ query: 'complete this survey for me', app: 'Google Chrome' }, () => {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(createdTasks[0].prompt).not.toContain('Previous task');
+
+    // same session follow-up: conversation already carries history
+    await submitCallback({ query: 'click the first result and add to cart', app: 'Google Chrome' }, () => {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(createdTasks[1].conversation_id).toBe('conv-1');
+    expect(createdTasks[1].prompt).not.toContain('Previous task');
+
+    // new hotkey session: conversation reset, digest injected
+    await hotkeyCb({ event: 'hotkey', app: 'Google Chrome' });
+    await submitCallback({ query: 'add all the questions and answers in a new note', app: 'Google Chrome' }, () => {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(createdTasks[2].conversation_id).toBeNull();
+    expect(createdTasks[2].prompt).toContain('Previous task (just finished)');
+    expect(createdTasks[2].prompt).toContain('Answered 7 survey questions');
   });
 
   it('allows stopping active process and executing follow-up instructions in the same chat session', async () => {
