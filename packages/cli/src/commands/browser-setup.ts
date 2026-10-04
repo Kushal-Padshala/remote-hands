@@ -153,17 +153,12 @@ async function ensureReady(b: BrowserApp, ctx: Ctx): Promise<BrowserOutcome> {
 }
 
 async function disableFlow(b: BrowserApp, ctx: Ctx): Promise<void> {
-  const state = await ctx.setup.menuState(b);
-  if (!state.ok) {
-    ctx.out(`– ${b.name}  ${state.reason === 'not_running' ? 'not running' : state.message}`);
-    return;
-  }
-  if (state.state !== 'checked') {
-    ctx.out(`– ${b.name}  already off`);
-    return;
-  }
   const res = await ctx.setup.disableJs(b);
-  ctx.out(res.ok ? `✔ ${b.name}  turned off` : `✖ ${b.name}  ${res.message}`);
+  if (!res.ok) {
+    ctx.out(res.reason === 'not_running' ? `– ${b.name}  not running` : `✖ ${b.name}  ${res.message}`);
+    return;
+  }
+  ctx.out(res.changed ? `✔ ${b.name}  turned off` : `– ${b.name}  already off`);
 }
 
 function buildCtx(opts: BrowserSetupOptions, flags: { yes: boolean }): { ctx: Ctx; transport: NonNullable<BrowserSetupOptions['transport']> } {

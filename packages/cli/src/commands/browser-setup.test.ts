@@ -188,14 +188,21 @@ describe('rh browser setup', () => {
     expect(h.state().browsers['Brave Browser'].decision).toBe('manual');
   });
 
-  it('--disable turns the setting off only where it is on', async () => {
+  it('--disable reports what changed per browser', async () => {
     const h = harness({
       running: ['Brave Browser', 'Google Chrome'],
-      script: { menu: { 'Brave Browser': { ok: true, state: 'checked' }, 'Google Chrome': { ok: true, state: 'unchecked' } } },
+      script: {
+        disable: {
+          'Brave Browser': { ok: true, changed: true, state: 'unchecked' },
+          'Google Chrome': { ok: true, changed: false, state: 'unchecked' },
+        },
+      },
     });
     expect(await browserSetupCommand(['--disable'], h.options)).toBe(0);
-    expect(h.calls).toEqual(['disable:Brave Browser']);
-    expect(h.out.join('\n')).toContain('already off');
+    expect(h.calls).toEqual(['disable:Google Chrome', 'disable:Brave Browser']);
+    const text = h.out.join('\n');
+    expect(text).toContain('✔ Brave Browser  turned off');
+    expect(text).toContain('– Google Chrome  already off');
   });
 
   it('--browser limits the run and returns 1 when that browser cannot be made ready', async () => {

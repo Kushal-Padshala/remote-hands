@@ -43,6 +43,8 @@ function findMenuItemLines(): string[] {
   return [
     'set procName to item 1 of argv',
     'set foundItem to missing value',
+    'set foundBar to missing value',
+    'set foundMid to missing value',
     'tell application "System Events"',
     'if not (exists process procName) then error "rh:not_running"',
     'tell process procName',
@@ -52,6 +54,7 @@ function findMenuItemLines(): string[] {
     'try',
     `if (name of mi) is "${JS_MENU_ITEM}" then`,
     'set foundItem to mi',
+    'set foundBar to mbi',
     'exit repeat',
     'end if',
     'end try',
@@ -60,6 +63,8 @@ function findMenuItemLines(): string[] {
     'try',
     `if (name of si) is "${JS_MENU_ITEM}" then`,
     'set foundItem to si',
+    'set foundMid to mi',
+    'set foundBar to mbi',
     'exit repeat',
     'end if',
     'end try',
@@ -94,10 +99,28 @@ export function buildMenuToggleScript(): string[] {
     'on run argv',
     ...findMenuItemLines(),
     'if foundItem is missing value then error "rh:menu_missing"',
+    // Chromium only runs menu commands reliably when the browser is the front app: bring
+    // it forward, open the menu path the way a person would, click, then give focus back.
+    'set prevFront to ""',
+    'try',
+    'set prevFront to name of first application process whose frontmost is true',
+    'end try',
+    'set frontmost to true',
+    'delay 0.4',
+    'click foundBar',
+    'delay 0.2',
+    'if foundMid is not missing value then',
+    'click foundMid',
+    'delay 0.2',
+    'end if',
     'click foundItem',
+    'delay 0.3',
+    'end tell',
+    'try',
+    'if prevFront is not "" and prevFront is not procName then set frontmost of process prevFront to true',
+    'end try',
+    'end tell',
     'return "clicked"',
-    'end tell',
-    'end tell',
     'end run',
   ];
 }
@@ -147,9 +170,12 @@ export interface BrowserSetupDeps {
   transport: Pick<AppleScriptTransport, 'evaluate' | 'environment'>;
   run?: RunOsascript;
   open?: (url: string) => Promise<void>;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 const MENU_TIMEOUT_MS = 10_000;
+const VERIFY_ATTEMPTS = 8;
+const VERIFY_INTERVAL_MS = 300;
 
 const defaultOpen = (url: string): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -160,11 +186,13 @@ export class BrowserSetup {
   private readonly transport: BrowserSetupDeps['transport'];
   private readonly run: RunOsascript;
   private readonly open: (url: string) => Promise<void>;
+  private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(deps: BrowserSetupDeps) {
     this.transport = deps.transport;
     this.run = deps.run ?? defaultRunOsascript;
     this.open = deps.open ?? defaultOpen;
+    this.sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   /** Probes a RUNNING browser with a harmless evaluate. Never touches a closed browser. */
@@ -220,27 +248,49 @@ export class BrowserSetup {
     await this.open(ACCESSIBILITY_PANE_URL);
   }
 
+  /**
+   * What the browser actually does is the truth, not the menu's check mark (Chromium only
+   * refreshes the mark when the menu is opened, so reads right after a click can be
+   * stale): probe first, and fall back to the menu only when the probe cannot tell
+   * (no window, restricted front page).
+   */
+  private async currentState(b: BrowserApp): Promise<'on' | 'off' | 'missing' | Extract<ToggleOutcome, { ok: false }>> {
+    const probe = await this.inspect(b);
+    if (probe.status === 'ready') return 'on';
+    if (probe.status === 'js_disabled') return 'off';
+    if (probe.status === 'not_running') return { ok: false, reason: 'not_running', message: probe.message };
+    if (probe.status === 'automation_denied') return { ok: false, reason: 'script_error', message: probe.message };
+    const menu = await this.menuState(b);
+    if (!menu.ok) return menu;
+    if (menu.state === 'missing') return 'missing';
+    return menu.state === 'checked' ? 'on' : 'off';
+  }
+
   private async toggleTo(b: BrowserApp, want: 'checked' | 'unchecked'): Promise<ToggleOutcome> {
-    const before = await this.menuState(b);
-    if (!before.ok) return before;
-    if (before.state === 'missing') {
-      return { ok: false, reason: 'menu_missing', message: menuMissingMessage(b) };
-    }
-    if (before.state === want) return { ok: true, changed: false, state: before.state };
+    const wantState = want === 'checked' ? 'on' : 'off';
+    const before = await this.currentState(b);
+    if (typeof before === 'object') return before;
+    if (before === 'missing') return { ok: false, reason: 'menu_missing', message: menuMissingMessage(b) };
+    if (before === wantState) return { ok: true, changed: false, state: want };
 
     const clicked = await this.runScript(b, buildMenuToggleScript());
     if (!clicked.ok) return clicked;
 
-    const after = await this.menuState(b);
-    if (!after.ok) return after;
-    if (after.state !== want) {
-      return {
-        ok: false,
-        reason: 'script_error',
-        message: `Clicked the menu item in ${b.name}, but the setting did not change.`,
-      };
+    for (let attempt = 0; attempt < VERIFY_ATTEMPTS; attempt += 1) {
+      const probe = await this.inspect(b);
+      const now = probe.status === 'ready' ? 'on' : probe.status === 'js_disabled' ? 'off' : null;
+      if (now === wantState) return { ok: true, changed: true, state: want };
+      if (now === null) {
+        const menu = await this.menuState(b);
+        if (menu.ok && menu.state === want) return { ok: true, changed: true, state: want };
+      }
+      await this.sleep(VERIFY_INTERVAL_MS);
     }
-    return { ok: true, changed: true, state: after.state };
+    return {
+      ok: false,
+      reason: 'script_error',
+      message: `I clicked the menu item in ${b.name}, but the setting did not change. Turn it ${want === 'checked' ? 'on' : 'off'} yourself: ${b.name} menu bar > View > Developer > ${JS_MENU_ITEM}.`,
+    };
   }
 
   private async runScript(

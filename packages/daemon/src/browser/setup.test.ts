@@ -124,91 +124,136 @@ describe('BrowserSetup.inspect', () => {
   });
 });
 
+/** A transport whose probe answers come from a queue ('on' | 'off' | 'nowin'); the last answer repeats. */
+function probeTransport(answers: Array<'on' | 'off' | 'nowin'>) {
+  const t = {
+    environment: vi.fn(async () => ({ frontmost: 'Finder', running: ['Brave Browser', 'Safari'] })),
+    evaluate: vi.fn(async () => {
+      const a = answers.length > 1 ? answers.shift()! : answers[0]!;
+      if (a === 'on') return '1';
+      if (a === 'off') throw new BrowserAutomationError('js_disabled', 'Brave Browser', 'off');
+      throw new BrowserAutomationError('no_window', 'Brave Browser', 'no window');
+    }),
+  };
+  return t;
+}
+
 describe('BrowserSetup menu toggling', () => {
-  it('reads the state with the browser name as the only argument', async () => {
+  const sleep = async () => {};
+
+  it('reads the menu state with the browser name as the only argument', async () => {
     const { run, calls } = scriptedRun([{ stdout: 'unchecked\n' }]);
-    const res = await new BrowserSetup({ transport: fakeTransport(), run }).menuState(brave);
+    const res = await new BrowserSetup({ transport: fakeTransport(), run, sleep }).menuState(brave);
     expect(res).toEqual({ ok: true, state: 'unchecked' });
     expect(calls[0]!.argv).toEqual(['Brave Browser']);
     expect(calls[0]!.lines).toEqual(buildMenuStateScript());
   });
 
-  it('enableJs reads first, clicks once when unchecked, then verifies', async () => {
-    const { run, calls } = scriptedRun([{ stdout: 'unchecked' }, { stdout: 'clicked' }, { stdout: 'checked' }]);
-    const res = await new BrowserSetup({ transport: fakeTransport(), run }).enableJs(brave);
+  it('enableJs trusts the probe: off, click once, verify by probe', async () => {
+    const { run, calls } = scriptedRun([{ stdout: 'clicked' }]);
+    const transport = probeTransport(['off', 'off', 'on']);
+    const res = await new BrowserSetup({ transport, run, sleep }).enableJs(brave);
     expect(res).toEqual({ ok: true, changed: true, state: 'checked' });
-    expect(calls.map((c) => c.lines)).toEqual([buildMenuStateScript(), buildMenuToggleScript(), buildMenuStateScript()]);
+    expect(calls.map((c) => c.lines)).toEqual([buildMenuToggleScript()]);
+    expect(calls[0]!.argv).toEqual(['Brave Browser']);
   });
 
-  it('enableJs never clicks when already checked', async () => {
-    const { run, calls } = scriptedRun([{ stdout: 'checked' }]);
-    const res = await new BrowserSetup({ transport: fakeTransport(), run }).enableJs(brave);
+  it('enableJs never clicks when the probe already works', async () => {
+    const { run, calls } = scriptedRun([]);
+    const res = await new BrowserSetup({ transport: probeTransport(['on']), run, sleep }).enableJs(brave);
     expect(res).toEqual({ ok: true, changed: false, state: 'checked' });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(0);
   });
 
-  it('disableJs clicks only when checked', async () => {
-    const off = scriptedRun([{ stdout: 'unchecked' }]);
-    expect(await new BrowserSetup({ transport: fakeTransport(), run: off.run }).disableJs(brave)).toEqual({
+  it('disableJs clicks only when the probe says it is on, and verifies by probe', async () => {
+    const off = scriptedRun([]);
+    expect(await new BrowserSetup({ transport: probeTransport(['off']), run: off.run, sleep }).disableJs(brave)).toEqual({
       ok: true,
       changed: false,
       state: 'unchecked',
     });
-    expect(off.calls).toHaveLength(1);
-    const on = scriptedRun([{ stdout: 'checked' }, { stdout: 'clicked' }, { stdout: 'unchecked' }]);
-    expect(await new BrowserSetup({ transport: fakeTransport(), run: on.run }).disableJs(brave)).toEqual({
+    expect(off.calls).toHaveLength(0);
+    const on = scriptedRun([{ stdout: 'clicked' }]);
+    expect(await new BrowserSetup({ transport: probeTransport(['on', 'on', 'off']), run: on.run, sleep }).disableJs(brave)).toEqual({
       ok: true,
       changed: true,
       state: 'unchecked',
     });
   });
 
+  it('falls back to the menu check mark only when the probe cannot tell', async () => {
+    const checked = scriptedRun([{ stdout: 'checked' }]);
+    expect(await new BrowserSetup({ transport: probeTransport(['nowin']), run: checked.run, sleep }).enableJs(brave)).toEqual({
+      ok: true,
+      changed: false,
+      state: 'checked',
+    });
+    expect(checked.calls).toHaveLength(1);
+    const unchecked = scriptedRun([{ stdout: 'unchecked' }, { stdout: 'clicked' }, { stdout: 'checked' }]);
+    expect(await new BrowserSetup({ transport: probeTransport(['nowin']), run: unchecked.run, sleep }).enableJs(brave)).toEqual({
+      ok: true,
+      changed: true,
+      state: 'checked',
+    });
+  });
+
   it('reports a missing menu item with browser-specific help and never clicks', async () => {
     const a = scriptedRun([{ stdout: 'missing' }]);
-    const resSafari = await new BrowserSetup({ transport: fakeTransport(), run: a.run }).enableJs(safari);
+    const resSafari = await new BrowserSetup({ transport: probeTransport(['nowin']), run: a.run, sleep }).enableJs(safari);
     expect(resSafari).toMatchObject({ ok: false, reason: 'menu_missing' });
     expect((resSafari as { message: string }).message).toContain('Show features for web developers');
     expect(a.calls).toHaveLength(1);
 
     const b = scriptedRun([{ stdout: 'missing' }]);
-    const resBrave = await new BrowserSetup({ transport: fakeTransport(), run: b.run }).enableJs(brave);
+    const resBrave = await new BrowserSetup({ transport: probeTransport(['nowin']), run: b.run, sleep }).enableJs(brave);
     expect((resBrave as { message: string }).message).toContain('non-English');
   });
 
-  it('fails when the click did not change the setting', async () => {
-    const { run } = scriptedRun([{ stdout: 'unchecked' }, { stdout: 'clicked' }, { stdout: 'unchecked' }]);
-    const res = await new BrowserSetup({ transport: fakeTransport(), run }).enableJs(brave);
+  it('fails with manual steps when the click never changes the probe', async () => {
+    const { run } = scriptedRun([{ stdout: 'clicked' }]);
+    const transport = probeTransport(['off']);
+    const res = await new BrowserSetup({ transport, run, sleep }).enableJs(brave);
     expect(res).toMatchObject({ ok: false, reason: 'script_error' });
+    expect((res as { message: string }).message).toContain('Turn it on yourself');
+    // currentState probe + 8 verification probes
+    expect(transport.evaluate.mock.calls.length).toBe(9);
   });
 
-  it('classifies osascript failures from either step', async () => {
+  it('classifies osascript failures from the click step', async () => {
     const first = scriptedRun([{ stderr: 'Not authorized to send Apple events to System Events. (-1743)', status: 1 }]);
-    expect(await new BrowserSetup({ transport: fakeTransport(), run: first.run }).enableJs(brave)).toMatchObject({
+    expect(await new BrowserSetup({ transport: probeTransport(['off']), run: first.run, sleep }).enableJs(brave)).toMatchObject({
       ok: false,
       reason: 'system_events_denied',
     });
-    const second = scriptedRun([
-      { stdout: 'unchecked' },
-      { stderr: 'osascript is not allowed assistive access. (-25211)', status: 1 },
-    ]);
-    expect(await new BrowserSetup({ transport: fakeTransport(), run: second.run }).enableJs(brave)).toMatchObject({
+    const second = scriptedRun([{ stderr: 'osascript is not allowed assistive access. (-25211)', status: 1 }]);
+    expect(await new BrowserSetup({ transport: probeTransport(['off']), run: second.run, sleep }).enableJs(brave)).toMatchObject({
       ok: false,
       reason: 'accessibility_denied',
     });
   });
 
-  it('handles an unexpected answer and a throwing runner', async () => {
+  it('handles an unexpected menu answer and a throwing runner', async () => {
     const odd = scriptedRun([{ stdout: 'banana' }]);
-    expect(await new BrowserSetup({ transport: fakeTransport(), run: odd.run }).menuState(brave)).toMatchObject({
+    expect(await new BrowserSetup({ transport: fakeTransport(), run: odd.run, sleep }).menuState(brave)).toMatchObject({
       ok: false,
       reason: 'script_error',
     });
     const throwing: Run = async () => {
       throw new Error('secret command line');
     };
-    const res = await new BrowserSetup({ transport: fakeTransport(), run: throwing }).menuState(brave);
+    const res = await new BrowserSetup({ transport: fakeTransport(), run: throwing, sleep }).menuState(brave);
     expect(res).toMatchObject({ ok: false, reason: 'script_error' });
     expect(JSON.stringify(res)).not.toContain('secret');
+  });
+
+  it('the toggle script brings the browser forward, opens the menu path and restores focus', () => {
+    const text = buildMenuToggleScript().join('\n');
+    expect(text).toContain('set frontmost to true');
+    expect(text).toContain('click foundBar');
+    expect(text).toContain('click foundMid');
+    expect(text).toContain('click foundItem');
+    expect(text.indexOf('click foundBar')).toBeLessThan(text.indexOf('click foundItem'));
+    expect(text).toContain('set frontmost of process prevFront to true');
   });
 });
 
