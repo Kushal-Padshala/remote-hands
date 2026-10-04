@@ -124,9 +124,9 @@ describe('classifyRiskyAction', () => {
     expect(classifyRiskyAction('')).toBeNull();
   });
 
-  it('ignores long text unless it is a goal', () => {
-    const prose = 'Read our guide on how to delete your account and what happens to your data afterwards';
-    expect(classifyRiskyAction(prose)).toBeNull();
-    expect(classifyRiskyAction(prose, { goal: true })).toBe('delete');
+  it('classifies destructive controls regardless of label length', () => {
+    const label = 'Delete the entire repository including all of its pull requests and issues';
+    expect(classifyRiskyAction(label)).toBe('delete');
+    expect(classifyRiskyAction(label, { goal: true })).toBe('delete');
   });
 });

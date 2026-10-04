@@ -146,8 +146,7 @@ export class ComputerSession {
   }
 
   async desktopMenu(app: string, query: string): Promise<string> {
-    await this.deps.gate?.(query);
-    const res = await this.deps.menuSearch(app, query);
+    const res = await this.deps.menuSearch(app, query, undefined, this.deps.gate);
     if (!res.success) throw new Error(res.error ?? `No menu item matching "${query}" in ${app}`);
     return `menu ${(res.triggeredPath ?? []).join(' > ')}\n${await this.safeState(app)}`;
   }

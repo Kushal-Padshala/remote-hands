@@ -9,6 +9,26 @@ function tmpFile(): string {
 }
 
 describe('active task marker', () => {
+  it('reports marker initialization errors instead of running without a task', () => {
+    const parent = tmpFile();
+    fs.writeFileSync(parent, 'not a directory');
+    expect(() => writeActiveTask('task-1', path.join(parent, 'marker.json'))).toThrow();
+  });
+
+  it.each(['{', '{}', '{"taskId":"task-1"}', '{"taskId":"task-1","pid":0}'])(
+    'blocks a malformed marker: %s', (contents) => {
+      const file = tmpFile();
+      fs.writeFileSync(file, contents);
+      expect(() => readActiveTask(file)).toThrow();
+    },
+  );
+
+  it('reports unreadable markers instead of treating them as idle', () => {
+    const file = tmpFile();
+    fs.mkdirSync(file);
+    expect(() => readActiveTask(file)).toThrow();
+  });
+
   it('records, reads and clears the running task', () => {
     const file = tmpFile();
     expect(readActiveTask(file)).toBeNull();

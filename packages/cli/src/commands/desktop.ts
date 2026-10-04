@@ -281,8 +281,7 @@ export async function desktopCommand(
         stderr('Usage: rh desktop menu-search <app> <query>');
         return 1;
       }
-      await gate(query);
-      const res = await searchMenuFn(app, query, driver.exec);
+      const res = await searchMenuFn(app, query, driver.exec, gate);
       if (res.success) {
         stdout(`Triggered menu: ${(res.triggeredPath || [query]).join(' > ')}`);
         return 0;
@@ -342,7 +341,6 @@ export async function desktopCommand(
         stderr('Missing goal. Usage: rh desktop act <goal>');
         return 1;
       }
-      await gate(goal, { goal: true });
       const appMatch =
         goal.match(/(?:in|on)\s+["']?([A-Za-z0-9\s]+?)["']?(?:\s*,\s*|\s+(?:select|click|right|type|press)\b)/i) ||
         goal.match(/\b(?:in|on)\s+["']?([A-Za-z0-9\s]+?)["']?$/i);
@@ -353,17 +351,19 @@ export async function desktopCommand(
         } catch {}
       }
       const elements = await walker.walkActiveApp(targetApp, { allowOcr: false });
-      const decision = typeof engine.act === 'function'
-        ? await (targetApp ? engine.act(goal, elements, targetApp) : engine.act(goal, elements))
-        : await (async () => {
-            const d = engine.matchHeuristic(goal, elements);
-            await (targetApp ? engine.executeDecision(d, elements, targetApp) : engine.executeDecision(d, elements));
-            return d;
-          })();
+      const decision = engine.matchHeuristic(goal, elements);
       if ((decision.action === 'CLICK' || decision.action === 'RIGHT_CLICK') && decision.targetIndex === undefined) {
         stderr(`No matching element found for goal: "${goal}"`);
         return 1;
       }
+      // TYPE_TEXT also presses its target to focus it before typing.
+      if (decision.targetIndex !== undefined) {
+        const target = elements.find((e) => e.index === decision.targetIndex);
+        await gate(target?.label ?? '');
+      } else {
+        await gate(goal, { goal: true });
+      }
+      await (targetApp ? engine.executeDecision(decision, elements, targetApp) : engine.executeDecision(decision, elements));
       stdout(`Executed: ${decision.action}`);
       return 0;
     }

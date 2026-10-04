@@ -1,7 +1,46 @@
 import { describe, it, expect, vi } from 'vitest';
 import { desktopCommand } from './desktop.js';
+import { DesktopActEngine, searchAndTriggerMenu } from '@remote-hands/daemon';
 
 describe('desktopCommand', () => {
+  it.each(['click 3', 'type "hello" into Sen'])('requires approval before an act goal presses Send: %s', async (goal) => {
+    const elements = [{ index: 3, role: 'AXButton', label: 'Send', bounds: [0, 0, 10, 10] as [number, number, number, number] }];
+    const engine = new DesktopActEngine();
+    const execute = vi.spyOn(engine, 'executeDecision').mockResolvedValue(undefined);
+    const approve = vi.fn().mockResolvedValue(1);
+    const code = await desktopCommand(['act', goal], {
+      env: {}, taskId: 'task-1', approve, stdout: () => {}, stderr: () => {},
+      desktopDriver: {}, walker: { walkActiveApp: async () => elements }, actEngine: engine,
+    });
+    expect(code).toBe(1);
+    expect(approve.mock.calls[0]?.[0]).toContain('--action=send');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it.each(['missing', 'unreadable'])('blocks an agent AX action when its target is %s', async (mode) => {
+    const press = vi.fn().mockResolvedValue(true);
+    const code = await desktopCommand(['ax-action', 'Mail', '3'], {
+      env: {}, taskId: 'task-1', stdout: () => {}, stderr: () => {}, desktopDriver: {},
+      walker: { walkActiveApp: async () => { if (mode === 'unreadable') throw new Error('AX failed'); return []; } },
+      performAxAction: press,
+    });
+    expect(code).toBe(1);
+    expect(press).not.toHaveBeenCalled();
+  });
+
+  it('blocks the resolved Delete item for an abbreviated menu-search query', async () => {
+    const exec = vi.fn().mockReturnValue({ status: 0, stderr: '', stdout: JSON.stringify({ success: true, triggeredPath: ['Edit', 'Delete'], appPid: 123 }) });
+    const approve = vi.fn().mockResolvedValue(1);
+    const code = await desktopCommand(['menu-search', 'Mail', 'Del'], {
+      env: {}, taskId: 'task-1', approve, stdout: () => {}, stderr: () => {},
+      desktopDriver: { exec }, searchAndTriggerMenu,
+    });
+    expect(code).toBe(1);
+    expect(approve.mock.calls[0]?.[0]).toContain('--action=delete');
+    // The only native call resolves the menu without pressing it.
+    expect(exec).toHaveBeenCalledTimes(1);
+  });
+
   it('prints usage when no subcommand provided', async () => {
     const stdout = vi.fn();
     const code = await desktopCommand([], { stdout });
@@ -430,13 +469,14 @@ describe('desktopCommand', () => {
     expect(code3).toBe(1);
   });
 
-  it('handles act command via engine.act', async () => {
+  it('handles act command via engine.executeDecision', async () => {
     const mockElements = [
       { index: 1, role: 'AXButton', label: 'Save Changes', bounds: [0, 0, 10, 10] },
     ];
     const walkerMock = { walkActiveApp: vi.fn().mockResolvedValue(mockElements) };
     const engineMock = {
-      act: vi.fn().mockResolvedValue({ action: 'CLICK', targetIndex: 1 }),
+      matchHeuristic: vi.fn().mockReturnValue({ action: 'CLICK', targetIndex: 1 }),
+      executeDecision: vi.fn().mockResolvedValue(undefined),
     };
     const stdout = vi.fn();
     const code = await desktopCommand(['act', 'Click', 'Save', 'Changes'], {
@@ -446,11 +486,11 @@ describe('desktopCommand', () => {
     });
     expect(code).toBe(0);
     expect(walkerMock.walkActiveApp).toHaveBeenCalled();
-    expect(engineMock.act).toHaveBeenCalledWith('Click Save Changes', mockElements);
+    expect(engineMock.executeDecision).toHaveBeenCalledWith({ action: 'CLICK', targetIndex: 1 }, mockElements);
     expect(stdout).toHaveBeenCalledWith('Executed: CLICK');
   });
 
-  it('handles act command via matchHeuristic and executeDecision fallback', async () => {
+  it('handles act command via matchHeuristic and executeDecision', async () => {
     const mockElements = [
       { index: 1, role: 'AXButton', label: 'Submit', bounds: [0, 0, 10, 10] },
     ];
@@ -563,7 +603,7 @@ describe('desktopCommand', () => {
       searchAndTriggerMenu: searchMock as any,
     });
     expect(code).toBe(0);
-    expect(searchMock).toHaveBeenCalledWith('Bambu Studio', 'Export STL', driverMock.exec);
+    expect(searchMock).toHaveBeenCalledWith('Bambu Studio', 'Export STL', driverMock.exec, expect.any(Function));
     expect(stdout).toHaveBeenCalledWith('Triggered menu: File > Export > STL');
   });
 
@@ -693,13 +733,14 @@ describe('desktopCommand', () => {
     expect(stderr).toHaveBeenCalledWith('Failed to execute AXPress on element [3] in Slack');
   });
 
-  it('passes targetApp to engine.act when specified in goal', async () => {
+  it('passes targetApp to engine.executeDecision when specified in goal', async () => {
     const mockElements = [
       { index: 1, role: 'AXButton', label: 'Submit', bounds: [0, 0, 10, 10] },
     ];
     const walkerMock = { walkActiveApp: vi.fn().mockResolvedValue(mockElements) };
     const engineMock = {
-      act: vi.fn().mockResolvedValue({ action: 'CLICK', targetIndex: 1 }),
+      matchHeuristic: vi.fn().mockReturnValue({ action: 'CLICK', targetIndex: 1 }),
+      executeDecision: vi.fn().mockResolvedValue(undefined),
     };
     const stdout = vi.fn();
     const code = await desktopCommand(['act', 'in', 'Slack,', 'click', 'Submit'], {
@@ -709,7 +750,7 @@ describe('desktopCommand', () => {
     });
     expect(code).toBe(0);
     expect(walkerMock.walkActiveApp).toHaveBeenCalledWith('Slack', { allowOcr: false });
-    expect(engineMock.act).toHaveBeenCalledWith('in Slack, click Submit', mockElements, 'Slack');
+    expect(engineMock.executeDecision).toHaveBeenCalledWith({ action: 'CLICK', targetIndex: 1 }, mockElements, 'Slack');
     expect(stdout).toHaveBeenCalledWith('Executed: CLICK');
   });
 
@@ -737,13 +778,14 @@ describe('desktopCommand', () => {
     expect(stdout).toHaveBeenCalledWith('Executed AXPress on element [5] in Bambu Studio');
   });
 
-  it('passes targetApp to engine.act when specified at the end of goal', async () => {
+  it('passes targetApp to engine.executeDecision when specified at the end of goal', async () => {
     const mockElements = [
       { index: 1, role: 'AXButton', label: 'Submit', bounds: [0, 0, 10, 10] },
     ];
     const walkerMock = { walkActiveApp: vi.fn().mockResolvedValue(mockElements) };
     const engineMock = {
-      act: vi.fn().mockResolvedValue({ action: 'CLICK', targetIndex: 1 }),
+      matchHeuristic: vi.fn().mockReturnValue({ action: 'CLICK', targetIndex: 1 }),
+      executeDecision: vi.fn().mockResolvedValue(undefined),
     };
     const stdout = vi.fn();
     const code = await desktopCommand(['act', 'click', 'Submit', 'in', 'Google Chrome'], {
@@ -753,7 +795,7 @@ describe('desktopCommand', () => {
     });
     expect(code).toBe(0);
     expect(walkerMock.walkActiveApp).toHaveBeenCalledWith('Google Chrome', { allowOcr: false });
-    expect(engineMock.act).toHaveBeenCalledWith('click Submit in Google Chrome', mockElements, 'Google Chrome');
+    expect(engineMock.executeDecision).toHaveBeenCalledWith({ action: 'CLICK', targetIndex: 1 }, mockElements, 'Google Chrome');
     expect(stdout).toHaveBeenCalledWith('Executed: CLICK');
   });
 
@@ -778,4 +820,3 @@ describe('desktopCommand', () => {
     expect(stdout).toHaveBeenCalledWith('Clicked element [2]');
   });
 });
-

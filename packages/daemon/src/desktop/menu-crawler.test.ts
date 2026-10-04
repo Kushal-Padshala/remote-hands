@@ -2,6 +2,43 @@ import { describe, it, expect, vi } from 'vitest';
 import { crawlAppMenu, searchAndTriggerMenu } from './menu-crawler.js';
 
 describe('menu-crawler', () => {
+  it('resolves the full menu label before approval and never presses on rejection', async () => {
+    const exec = vi.fn().mockReturnValue({ status: 0, stderr: '', stdout: JSON.stringify({ success: true, triggeredPath: ['Edit', 'Delete'], appPid: 123 }) });
+    const labels: string[] = [];
+    await expect(searchAndTriggerMenu('Mail', 'Del', exec, async (label) => {
+      labels.push(label);
+      throw new Error('Approval rejected');
+    })).rejects.toThrow('Approval rejected');
+    expect(labels).toEqual(['Delete']);
+    expect(exec).toHaveBeenCalledTimes(1);
+  });
+
+  it('presses only after the resolved item is approved', async () => {
+    const order: string[] = [];
+    const exec = vi.fn(() => {
+      order.push(order.length === 0 ? 'resolve' : 'press');
+      return { status: 0, stderr: '', stdout: JSON.stringify({ success: true, triggeredPath: ['Edit', 'Delete'], appPid: 123 }) };
+    });
+    const result = await searchAndTriggerMenu('Mail', 'Del', exec, async (label) => { order.push(`approve ${label}`); });
+    expect(order).toEqual(['resolve', 'approve Delete', 'press']);
+    expect(result).toEqual({ success: true, triggeredPath: ['Edit', 'Delete'], appPid: 123 });
+  });
+
+  it('does not request approval or press when menu resolution fails', async () => {
+    const exec = vi.fn().mockReturnValue({ status: 0, stderr: '', stdout: JSON.stringify({ success: false, error: 'No menu match found' }) });
+    const gate = vi.fn();
+    expect((await searchAndTriggerMenu('Mail', 'Del', exec, gate)).success).toBe(false);
+    expect(gate).not.toHaveBeenCalled();
+    expect(exec).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops if the approved menu path disappears before pressing', async () => {
+    const exec = vi.fn()
+      .mockReturnValueOnce({ status: 0, stderr: '', stdout: JSON.stringify({ success: true, triggeredPath: ['Edit', 'Delete'], appPid: 123 }) })
+      .mockReturnValueOnce({ status: 0, stderr: '', stdout: JSON.stringify({ success: false, error: 'No menu match found' }) });
+    expect(await searchAndTriggerMenu('Mail', 'Del', exec, async () => {})).toEqual({ success: false, error: 'No menu match found' });
+  });
+
   it('crawls hierarchical menu items for target app', async () => {
     const mockTree = [
       {

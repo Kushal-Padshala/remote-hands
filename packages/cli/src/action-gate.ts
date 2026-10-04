@@ -18,11 +18,12 @@ export interface ActionGateContext extends CommandContext {
  */
 export function createActionGate(context: ActionGateContext = {}): ActionGate {
   return async (label, opts) => {
-    const action = classifyRiskyAction(label, opts);
-    if (!action) return;
     const env = context.env ?? process.env;
     const taskId = context.taskId ?? env.REMOTE_HANDS_TASK_ID ?? readActiveTask();
     if (!taskId) return;
+    if (!label.trim()) throw new Error('Cannot verify the control label; action was not pressed. Take a fresh snapshot and retry.');
+    const action = classifyRiskyAction(label, opts);
+    if (!action) return;
 
     const reasons: string[] = [];
     const approve = context.approve ?? approveCommand;

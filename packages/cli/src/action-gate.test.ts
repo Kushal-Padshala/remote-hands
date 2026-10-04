@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { createActionGate } from './action-gate.js';
 
 describe('createActionGate', () => {
+  it('stops an unidentifiable control during an agent task', async () => {
+    const gate = createActionGate({ env: {}, taskId: 'task-1' });
+    await expect(gate('')).rejects.toThrow(/Cannot verify/);
+  });
+
   it('asks for approval before a risky control and lets it run when approved', async () => {
     const approve = vi.fn().mockResolvedValue(0);
     const gate = createActionGate({ env: {}, taskId: 'task-1', approve });

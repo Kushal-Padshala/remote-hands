@@ -4,6 +4,8 @@ import { ComputerSession, createDefaultComputerSession, type ComputerSessionDeps
 import { FastBrowserEngine } from '../browser/engine.js';
 import { AppleScriptTransport } from '../browser/transport.js';
 import { LegacyBrowserPort } from '../browser/legacy-port.js';
+import { searchAndTriggerMenu } from '../desktop/menu-crawler.js';
+import { classifyRiskyAction } from '@remote-hands/shared';
 
 // Inert stubs: nothing real is ever spawned, and every call is recorded.
 vi.mock('node:child_process', async (orig) => {
@@ -36,7 +38,10 @@ function makeDeps(overrides: Partial<ComputerSessionDeps> = {}) {
     },
     walker: { walkActiveApp: vi.fn().mockResolvedValue(elements) },
     axAction: vi.fn().mockResolvedValue({ success: true, method: 'ax' }),
-    menuSearch: vi.fn().mockResolvedValue({ success: true, triggeredPath: ['File', 'Save'] }),
+    menuSearch: vi.fn(async (_app, _query, _exec, gate) => {
+      await gate?.('Save');
+      return { success: true, triggeredPath: ['File', 'Save'] };
+    }),
     browser: {
       tabs: vi.fn().mockResolvedValue('tabs text'),
       focus: vi.fn().mockResolvedValue('focused text'),
@@ -56,6 +61,18 @@ function makeDeps(overrides: Partial<ComputerSessionDeps> = {}) {
 }
 
 describe('ComputerSession desktop', () => {
+  it('requires approval for a menu item resolved from an abbreviated query', async () => {
+    const exec = vi.fn().mockReturnValue({ status: 0, stderr: '', stdout: JSON.stringify({ success: true, triggeredPath: ['Edit', 'Delete'], appPid: 123 }) });
+    const asked: string[] = [];
+    const deps = makeDeps({
+      menuSearch: (app, query, _exec, gate) => searchAndTriggerMenu(app, query, exec, gate),
+      gate: async (label) => { asked.push(label); if (classifyRiskyAction(label)) throw new Error('Approval rejected'); },
+    });
+    await expect(new ComputerSession(deps).desktopMenu('Mail', 'Del')).rejects.toThrow('Approval rejected');
+    expect(asked).toEqual(['Delete']);
+    expect(exec).toHaveBeenCalledTimes(1);
+  });
+
   it('asks the gate before a desktop click or menu item, and a rejection stops it', async () => {
     const gate = vi.fn().mockRejectedValue(new Error('Approval rejected by user.'));
     const deps = makeDeps({ gate });
@@ -63,9 +80,9 @@ describe('ComputerSession desktop', () => {
     await s.desktopSnapshot('Finder');
     await expect(s.desktopClick(1)).rejects.toThrow('Approval rejected by user.');
     await expect(s.desktopMenu('Finder', 'Delete')).rejects.toThrow('Approval rejected by user.');
-    expect(gate.mock.calls.map((c) => c[0])).toEqual(['Next', 'Delete']);
+    expect(gate.mock.calls.map((c) => c[0])).toEqual(['Next', 'Save']);
     expect(deps.axAction).not.toHaveBeenCalled();
-    expect(deps.menuSearch).not.toHaveBeenCalled();
+    expect(deps.menuSearch).toHaveBeenCalledWith('Finder', 'Delete', undefined, gate);
   });
 
   it('snapshot walks once, caches, and returns a header plus compact lines', async () => {

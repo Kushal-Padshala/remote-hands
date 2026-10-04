@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Called with a control's label right before it is pressed. Resolves to let the action
@@ -30,10 +31,17 @@ export function writeActiveTask(taskId: string, file?: string): void {
   // Tests that did not inject a file must never touch the real marker.
   if (file === undefined && process.env.VITEST === 'true') return;
   const target = file ?? defaultActiveTaskFile();
+  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
   try {
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, JSON.stringify({ taskId, pid: process.pid }), { mode: 0o600 });
-  } catch {}
+    // Readers must never see a partially written task or permissive permissions on an old file.
+    fs.writeFileSync(temporary, JSON.stringify({ taskId, pid: process.pid }), { mode: 0o600, flag: 'wx' });
+    fs.renameSync(temporary, target);
+  } catch (cause) {
+    throw new Error('Cannot record the active task; approval enforcement is unavailable.', { cause });
+  } finally {
+    try { fs.unlinkSync(temporary); } catch {}
+  }
 }
 
 export function clearActiveTask(taskId: string, file?: string): void {
@@ -50,10 +58,13 @@ export function readActiveTask(file?: string): string | null {
   if (file === undefined && process.env.VITEST === 'true') return null;
   try {
     const current = JSON.parse(fs.readFileSync(file ?? defaultActiveTaskFile(), 'utf-8'));
-    if (typeof current?.taskId !== 'string' || !current.taskId) return null;
-    if (typeof current.pid === 'number' && !pidAlive(current.pid)) return null;
+    if (typeof current?.taskId !== 'string' || !current.taskId.trim() || !Number.isSafeInteger(current.pid) || current.pid <= 0) {
+      throw new Error('Invalid active task marker');
+    }
+    if (!pidAlive(current.pid)) return null;
     return current.taskId;
-  } catch {
-    return null;
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
+    throw new Error('Cannot read the active task; approval enforcement is unavailable.', { cause });
   }
 }
