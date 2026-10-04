@@ -93,6 +93,28 @@ export function buildMenuStateScript(): string[] {
   ];
 }
 
+/**
+ * Diagnostics: prints `bar|submenu|item|enabled=<bool>|mark=<char or none>` for the menu
+ * item (or `missing`). Read-only. argv: browser process name.
+ */
+export function buildMenuInfoScript(): string[] {
+  return [
+    'on run argv',
+    ...findMenuItemLines(),
+    'if foundItem is missing value then return "missing"',
+    'set barName to name of foundBar',
+    'set midName to "-"',
+    'if foundMid is not missing value then set midName to name of foundMid',
+    'set en to enabled of foundItem',
+    'set mark to value of attribute "AXMenuItemMarkChar" of foundItem',
+    'if mark is missing value then set mark to "none"',
+    'return barName & "|" & midName & "|" & (name of foundItem) & "|enabled=" & (en as text) & "|mark=" & (mark as text)',
+    'end tell',
+    'end tell',
+    'end run',
+  ];
+}
+
 /** Clicks the menu item and prints `clicked`; `rh:menu_missing` when absent. argv: browser process name. */
 export function buildMenuToggleScript(): string[] {
   return [
@@ -238,6 +260,28 @@ export class BrowserSetup {
   /** Turns the setting off; reads first and clicks only when it is checked. */
   async disableJs(b: BrowserApp): Promise<ToggleOutcome> {
     return this.toggleTo(b, 'unchecked');
+  }
+
+  /**
+   * `rh browser setup --debug`: what the menu looks like and what the probe says, before
+   * and (only when `click` is true) after one toggle attempt. For bug reports.
+   */
+  async diagnose(b: BrowserApp, opts: { click: boolean }): Promise<string[]> {
+    const lines: string[] = [];
+    const info = async (label: string): Promise<void> => {
+      const res = await this.runScript(b, buildMenuInfoScript());
+      lines.push(`${label} menu: ${res.ok ? res.stdout.trim() : `${res.reason}: ${res.message}`}`);
+    };
+    lines.push(`probe before: ${(await this.inspect(b)).status}`);
+    await info('before');
+    if (opts.click) {
+      const clicked = await this.runScript(b, buildMenuToggleScript());
+      lines.push(`click: ${clicked.ok ? clicked.stdout.trim() : `${clicked.reason}: ${clicked.message}`}`);
+      await this.sleep(1500);
+      lines.push(`probe after: ${(await this.inspect(b)).status}`);
+      await info('after');
+    }
+    return lines;
   }
 
   async openAutomationPane(): Promise<void> {

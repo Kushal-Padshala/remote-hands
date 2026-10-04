@@ -21,6 +21,7 @@ export interface BrowserSetupLike {
   menuState: BrowserSetup['menuState'];
   enableJs: BrowserSetup['enableJs'];
   disableJs: BrowserSetup['disableJs'];
+  diagnose?: BrowserSetup['diagnose'];
   openAutomationPane: BrowserSetup['openAutomationPane'];
   openAccessibilityPane: BrowserSetup['openAccessibilityPane'];
 }
@@ -41,13 +42,14 @@ export interface BrowserSetupOptions {
 export const DEFAULT_STATE_PATH = path.join(os.homedir(), '.remote-hands', 'browser-setup.json');
 
 const USAGE = [
-  'Usage: rh browser setup [--yes] [--disable] [--browser <name>]',
+  'Usage: rh browser setup [--yes] [--disable] [--debug] [--browser <name>]',
   '',
   'Gets the fast browser path ready: checks every running browser (Chrome, Brave, Arc, Edge, Safari)',
   'and, with your permission, turns on its "Allow JavaScript from Apple Events" setting.',
   '  --yes             do not ask before turning the setting on',
   '  --disable         turn the setting back off where it is on',
   '  --browser <name>  only this browser (chrome, brave, arc, edge, safari)',
+  '  --debug           print what the browser menu and probe look like (add --yes to also try one click)',
 ].join('\n');
 
 const WHY =
@@ -192,11 +194,13 @@ export async function browserSetupCommand(args: string[], opts: BrowserSetupOpti
   }
   let yes = false;
   let disable = false;
+  let debug = false;
   let only: BrowserApp | undefined;
   for (let i = 0; i < args.length; i += 1) {
     const a = args[i]!;
     if (a === '--yes' || a === '-y') yes = true;
     else if (a === '--disable') disable = true;
+    else if (a === '--debug') debug = true;
     else if (a === '--browser') {
       const name = args[i + 1];
       only = name ? findBrowser(name) : undefined;
@@ -228,6 +232,16 @@ export async function browserSetupCommand(args: string[], opts: BrowserSetupOpti
 
   let anyFailed = false;
   for (const b of targets) {
+    if (debug) {
+      ctx.out(`--- ${b.name}`);
+      if (!running.includes(b.name)) {
+        ctx.out('not running');
+        continue;
+      }
+      const lines = ctx.setup.diagnose ? await ctx.setup.diagnose(b, { click: yes }) : ['diagnostics unavailable'];
+      for (const l of lines) ctx.out(l);
+      continue;
+    }
     if (disable) {
       await disableFlow(b, ctx);
       continue;

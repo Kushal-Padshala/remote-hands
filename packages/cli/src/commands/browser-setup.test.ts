@@ -28,6 +28,7 @@ interface Script {
   enable?: Record<string, any>;
   menu?: Record<string, any>;
   disable?: Record<string, any>;
+  diagnose?: string[];
 }
 
 function fakeSetup(script: Script = {}) {
@@ -50,6 +51,10 @@ function fakeSetup(script: Script = {}) {
     }) as any,
     openAutomationPane: vi.fn(async () => void calls.push('open:automation')) as any,
     openAccessibilityPane: vi.fn(async () => void calls.push('open:accessibility')) as any,
+    diagnose: vi.fn(async (b: any, o: any) => {
+      calls.push(`diagnose:${b.name}:${o.click}`);
+      return script.diagnose ?? ['probe before: js_disabled'];
+    }) as any,
   };
   return { setup, calls };
 }
@@ -203,6 +208,18 @@ describe('rh browser setup', () => {
     const text = h.out.join('\n');
     expect(text).toContain('✔ Brave Browser  turned off');
     expect(text).toContain('– Google Chrome  already off');
+  });
+
+  it('--debug prints diagnostics and never changes anything; --yes adds one click attempt', async () => {
+    const a = harness({ script: { diagnose: ['probe before: js_disabled', 'before menu: View|Developer|X|enabled=true|mark=none'] } });
+    expect(await browserSetupCommand(['--debug'], a.options)).toBe(0);
+    expect(a.calls).toEqual(['diagnose:Brave Browser:false']);
+    expect(a.out.join('\n')).toContain('--- Brave Browser');
+    expect(a.out.join('\n')).toContain('before menu: View|Developer');
+    expect(a.asked).toEqual([]);
+    const b = harness();
+    await browserSetupCommand(['--debug', '--yes'], b.options);
+    expect(b.calls).toEqual(['diagnose:Brave Browser:true']);
   });
 
   it('--browser limits the run and returns 1 when that browser cannot be made ready', async () => {

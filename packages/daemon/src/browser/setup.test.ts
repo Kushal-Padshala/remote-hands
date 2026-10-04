@@ -6,6 +6,7 @@ import {
   ACCESSIBILITY_PANE_URL,
   AUTOMATION_PANE_URL,
   BrowserSetup,
+  buildMenuInfoScript,
   buildMenuStateScript,
   buildMenuToggleScript,
   classifyToggleError,
@@ -58,7 +59,7 @@ describe('menu scripts', () => {
 
   const hasOsacompile = spawnSync('osacompile', ['-h']).error === undefined && process.platform === 'darwin';
   it.skipIf(!hasOsacompile)('both scripts compile (syntax only, nothing is executed)', () => {
-    for (const lines of [buildMenuStateScript(), buildMenuToggleScript()]) {
+    for (const lines of [buildMenuStateScript(), buildMenuToggleScript(), buildMenuInfoScript()]) {
       const args = ['-o', `/tmp/rh-setup-compile-${process.pid}.scpt`];
       for (const l of lines) args.push('-e', l);
       expect(() => execFileSync('osacompile', args, { stdio: 'pipe' })).not.toThrow();
@@ -317,5 +318,34 @@ describe('setup state', () => {
     const state = { browsers: { Arc: { decision: 'declined' as const, at: 'x' } } };
     expect(shouldOffer(state, 'Arc')).toBe(false);
     expect(shouldOffer(state, 'Safari')).toBe(true);
+  });
+});
+
+describe('BrowserSetup.diagnose', () => {
+  const sleep = async () => {};
+  it('is read-only unless click is requested', async () => {
+    const { run, calls } = scriptedRun([{ stdout: 'View|Developer|Allow JavaScript from Apple Events|enabled=true|mark=none\n' }]);
+    const lines = await new BrowserSetup({ transport: probeTransport(['off']), run, sleep }).diagnose(brave, { click: false });
+    expect(lines[0]).toBe('probe before: js_disabled');
+    expect(lines[1]).toContain('before menu: View|Developer|Allow JavaScript from Apple Events|enabled=true|mark=none');
+    expect(calls.map((c) => c.lines)).toEqual([buildMenuInfoScript()]);
+  });
+
+  it('with click: info, toggle, probe, info', async () => {
+    const { run, calls } = scriptedRun([
+      { stdout: 'View|Developer|X|enabled=true|mark=none' },
+      { stdout: 'clicked' },
+      { stdout: 'View|Developer|X|enabled=true|mark=\u2713' },
+    ]);
+    const lines = await new BrowserSetup({ transport: probeTransport(['off', 'on']), run, sleep }).diagnose(brave, { click: true });
+    expect(calls.map((c) => c.lines)).toEqual([buildMenuInfoScript(), buildMenuToggleScript(), buildMenuInfoScript()]);
+    expect(lines.join('\n')).toContain('click: clicked');
+    expect(lines.join('\n')).toContain('probe after: ready');
+  });
+
+  it('reports script failures instead of throwing', async () => {
+    const { run } = scriptedRun([{ stderr: 'Not authorized to send Apple events to System Events. (-1743)', status: 1 }]);
+    const lines = await new BrowserSetup({ transport: probeTransport(['off']), run, sleep }).diagnose(brave, { click: false });
+    expect(lines.join('\n')).toContain('system_events_denied');
   });
 });
