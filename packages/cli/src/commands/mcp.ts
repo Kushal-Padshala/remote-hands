@@ -1,5 +1,8 @@
 import { spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
 import { realpathSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { createDefaultComputerSession, serveComputerMcp } from '@remote-hands/daemon';
 import type { CommandContext } from './setup.js';
 import { agyMcpRule, ensureAgyMcpPermission, removeAgyMcpPermission } from '../system/agy-permissions.js';
@@ -13,6 +16,8 @@ export interface McpCommandContext extends CommandContext {
   serve?: () => Promise<void>;
   nodePath?: string;
   cliPath?: string;
+  /** Puts the CLI where background processes can run it and returns that path (tests replace it). */
+  installStableCli?: (source: string) => string;
 }
 
 const realExec = (command: string, args: string[]): ExecResult => {
@@ -26,6 +31,26 @@ function failureDetail(res: ExecResult): string {
   const err = res.error as (Error & { code?: string }) | undefined;
   if (err?.code === 'ENOENT') return `agy not found on PATH (${err.message})`;
   return err?.message ?? `exit status ${res.status}`;
+}
+
+/**
+ * agy starts the MCP server in the background, where macOS blocks access to protected folders such as
+ * ~/Desktop, so a checkout or an npm link living there cannot be launched. Register a copy under
+ * ~/.remote-hands/cli instead (the HUD service runs the same copy).
+ */
+export function installStableCli(source: string, home?: string): string {
+  // Tests that did not inject a home must never overwrite the real installed copy.
+  if (home === undefined && process.env.VITEST === 'true') return source;
+  const dest = path.join(home ?? os.homedir(), '.remote-hands', 'cli', 'index.js');
+  try {
+    if (path.resolve(source) !== dest) {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(source, dest);
+    }
+    return dest;
+  } catch {
+    return source;
+  }
 }
 
 function currentCliPath(): string {
@@ -50,7 +75,7 @@ export async function mcpCommand(args: string[], context: McpCommandContext = {}
     const res = exec('agy', [
       'mcp', 'add', AGY_MCP_NAME, '--',
       context.nodePath ?? process.execPath,
-      context.cliPath ?? currentCliPath(),
+      context.cliPath ?? (context.installStableCli ?? installStableCli)(currentCliPath()),
       'mcp', 'serve',
     ]);
     if (res.status !== 0) {

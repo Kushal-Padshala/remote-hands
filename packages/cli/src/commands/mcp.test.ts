@@ -122,3 +122,38 @@ describe('mcpCommand', () => {
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining('spawn agy ENOENT'));
   });
 });
+
+
+describe('mcp install registers a copy background processes can run', () => {
+  it('registers the stable copy, not the checkout path', async () => {
+    const calls: string[][] = [];
+    const exec = (_c: string, a: string[]) => (calls.push(a), { status: 0, stdout: '', stderr: '' });
+    await mcpCommand(['install'], {
+      exec,
+      stdout: vi.fn(),
+      stderr: vi.fn(),
+      fs: memoryFs(),
+      nodePath: 'n',
+      installStableCli: (src: string) => `/home/u/.remote-hands/cli/index.js#from:${src.length > 0}`,
+    } as any);
+    expect(calls[0]).toEqual(['mcp', 'add', 'rh-computer', '--', 'n', '/home/u/.remote-hands/cli/index.js#from:true', 'mcp', 'serve']);
+  });
+
+  it('installStableCli copies into <home>/.remote-hands/cli/index.js and falls back to the source when it cannot', async () => {
+    const fsm = await import('node:fs');
+    const osm = await import('node:os');
+    const pathm = await import('node:path');
+    const { installStableCli } = await import('./mcp.js');
+    const dir = fsm.mkdtempSync(pathm.join(osm.tmpdir(), 'rh-stable-'));
+    try {
+      const src = pathm.join(dir, 'src.js');
+      fsm.writeFileSync(src, 'console.log(1)');
+      const dest = installStableCli(src, dir);
+      expect(dest).toBe(pathm.join(dir, '.remote-hands', 'cli', 'index.js'));
+      expect(fsm.readFileSync(dest, 'utf-8')).toBe('console.log(1)');
+      expect(installStableCli(pathm.join(dir, 'missing.js'), dir)).toBe(pathm.join(dir, 'missing.js'));
+    } finally {
+      fsm.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

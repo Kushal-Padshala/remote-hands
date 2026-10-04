@@ -603,12 +603,10 @@ async function hudSetupFlow(
   }
 
   stdout(renderStepStart(3, TOTAL, 'Computer-use tools for the agent'));
-  const stableCli = path.join(os.homedir(), '.remote-hands', 'cli', 'index.js');
   const mcpOpts: Parameters<typeof mcpCommand>[1] = {
     stdout: (msg) => stdout(renderStepInfo(msg)),
     stderr,
   };
-  if (await fs.exists(stableCli).catch(() => false)) mcpOpts.cliPath = stableCli;
   if (context.runner) {
     stdout(renderStepInfo('Skipped in test mode'));
   } else {
