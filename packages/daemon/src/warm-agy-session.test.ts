@@ -125,6 +125,13 @@ describe('WarmAgySession', () => {
     expect(procs[0]!.written).toEqual([]);
   });
 
+  it('spawns agy with NODE_NO_WARNINGS=1 so rh subprocesses skip the SQLite warning', () => {
+    const { session, spawnFn } = makeSession();
+    session.prewarm(config);
+    const opts = spawnFn.mock.calls[0]![2];
+    expect(opts.env.NODE_NO_WARNINGS).toBe('1');
+  });
+
   it('restarts with --conversation when the process died between turns', async () => {
     const { session, procs, spawnFn } = makeSession();
     const t1 = session.runTurn('a', config);

@@ -224,6 +224,7 @@ export class WarmAgySession {
           ...(this.opts.env ?? process.env),
           BU_CDP_URL: process.env.BU_CDP_URL || 'http://127.0.0.1:9222',
           CHROME_REMOTE_DEBUGGING_PORT: process.env.CHROME_REMOTE_DEBUGGING_PORT || '9222',
+          NODE_NO_WARNINGS: '1',
         },
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: process.platform !== 'win32',
