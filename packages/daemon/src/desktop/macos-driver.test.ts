@@ -204,7 +204,7 @@ describe('MacOsDriver', () => {
   it('captures desktop screenshot buffer using exec', async () => {
     const tmpDest = `/tmp/test_screen_mock_${Date.now()}.jpg`;
     const execMock = vi.fn().mockImplementation((cmd, args) => {
-      const filePath = args.find((a: string) => typeof a === 'string' && a.includes('.jpg')) ?? args[0];
+      const filePath = args.find((a: string) => typeof a === 'string' && a.endsWith('.jpg')) ?? tmpDest;
       fs.writeFileSync(filePath, Buffer.from('mock-jpeg-bytes'));
       return { stdout: '', stderr: '', status: 0 };
     });
