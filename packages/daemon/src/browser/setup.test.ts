@@ -673,7 +673,8 @@ describe('requestAutomation (shows the macOS permission pop-up and waits for the
   it('compiles and never launches a closed browser', () => {
     const text = buildAutomationPingScript(brave).join('\n');
     expect(text).toContain('is running');
-    expect(text).toContain('return name');
+    expect(text).toContain('count of windows');
+    expect(text).not.toContain('return name');
   });
 
   it('waits long enough for a person to click Allow', async () => {

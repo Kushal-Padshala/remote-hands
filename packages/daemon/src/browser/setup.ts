@@ -224,13 +224,14 @@ export function buildTempWindowCloseScript(b: BrowserApp): string[] {
 /**
  * The smallest Apple event to a browser. The first one a terminal sends makes macOS show
  * "<terminal> wants to control <browser>" with an Allow button; this script blocks until
- * that is answered. Never launches a closed browser. Prints the app name or `not_running`.
+ * that is answered. Never launches a closed browser. Prints the window count or `not_running`.
  */
 export function buildAutomationPingScript(b: BrowserApp): string[] {
   return [
     'on run argv',
     `if not (application "${b.name}" is running) then return "not_running"`,
-    `tell application "${b.name}" to return name`,
+    // A real scripting read, not `get name`: the answer must come from the app so macOS gates it like the real calls.
+    `tell application "${b.name}" to return (count of windows) as text`,
     'end run',
   ];
 }

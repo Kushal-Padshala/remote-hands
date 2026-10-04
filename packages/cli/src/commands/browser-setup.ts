@@ -205,9 +205,23 @@ async function ensureReady(b: BrowserApp, ctx: Ctx): Promise<BrowserOutcome> {
   if (res.status === 'automation_denied') {
     ctx.out(`✖ ${b.name}  ${res.message}`);
     if (!ctx.interactive) return 'failed';
-    await ctx.setup.openAutomationPane().catch(() => {});
-    await ctx.ask('  I opened System Settings > Automation. Allow it, then press Enter to check again. ');
-    res = await ctx.setup.inspect(b);
+    if (ctx.setup.resetAutomationConsent && ctx.setup.requestAutomation) {
+      // The permission is denied but the up-front request did not catch it: clear this terminal's remembered answer and ask again.
+      ctx.out('  Clearing the remembered "Don\'t Allow" for this terminal so macOS can ask again - click Allow on the pop-up.');
+      if (await ctx.setup.resetAutomationConsent()) {
+        await ctx.setup.requestAutomation(b, 120_000);
+        res = await ctx.setup.inspect(b);
+      }
+      if (res.status === 'automation_denied') {
+        await ctx.setup.openAutomationPane().catch(() => {});
+        ctx.out(`  Skipped ${b.name}. In System Settings > Automation (just opened) switch on your terminal, then run "rh browser setup" again.`);
+        return 'failed';
+      }
+    } else {
+      await ctx.setup.openAutomationPane().catch(() => {});
+      await ctx.ask('  I opened System Settings > Automation. Allow it, then press Enter to check again. ');
+      res = await ctx.setup.inspect(b);
+    }
   }
 
   if (res.status === 'ready') {

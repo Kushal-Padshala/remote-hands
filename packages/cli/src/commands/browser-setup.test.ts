@@ -214,13 +214,22 @@ describe('rh browser setup', () => {
     expect(h.calls).not.toContain('reset');
   });
 
-  it('opens the Automation pane when macOS denied access and re-checks once', async () => {
-    const h = harness({ script: { inspect: { 'Brave Browser': ['automation_denied', 'ready'] } }, answers: [''] });
+  it('when the check itself is denied after an up-front grant it clears the remembered answer, asks again, and never waits for Enter', async () => {
+    const h = harness({ script: { inspect: { 'Brave Browser': ['automation_denied', 'ready'] } }, answers: [] });
     await browserSetupCommand([], h.options);
-    expect(h.calls).toContain('open:automation');
-    expect(h.asked[0]).toContain('press Enter');
+    expect(h.calls.slice(0, 5)).toEqual(['request:Brave Browser', 'inspect:Brave Browser', 'reset', 'request:Brave Browser', 'inspect:Brave Browser']);
+    expect(h.asked).toEqual([]);
     expect(h.out.join('\n')).toContain('✔ Brave Browser');
   });
+
+  it('skips with the Automation pane open when the check is still denied after the reset', async () => {
+    const h = harness({ script: { inspect: { 'Brave Browser': ['automation_denied'] } }, answers: [] });
+    expect(await browserSetupCommand([], h.options)).toBe(0);
+    expect(h.calls).toContain('open:automation');
+    expect(h.asked).toEqual([]);
+    expect(h.out.join('\n')).toContain('Skipped Brave Browser');
+  });
+
   it('handles accessibility and System Events denials with the matching pane', async () => {
     const a = harness({
       script: { inspect: { 'Brave Browser': ['js_disabled'] }, enable: { 'Brave Browser': { ok: false, reason: 'accessibility_denied', message: 'AX denied' } } },
