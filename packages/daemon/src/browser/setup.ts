@@ -190,7 +190,11 @@ export function buildTempWindowOpenScript(b: BrowserApp): string[] {
   ];
 }
 
-/** Closes the temporary window. argv: window id. A window that is already gone is fine. */
+/**
+ * Closes the temporary window. argv: window id. SAFETY: only ever closes a window that holds
+ * a single empty tab (about:blank or the new-tab page), never a window with the user's tabs.
+ * Prints `closed`, `kept` (the window has real content) or `gone`.
+ */
 export function buildTempWindowCloseScript(b: BrowserApp): string[] {
   return [
     'on run argv',
@@ -200,8 +204,14 @@ export function buildTempWindowCloseScript(b: BrowserApp): string[] {
     'repeat with w in windows',
     'try',
     'if ((id of w) as text) is wid then',
+    'if (count of tabs of w) is 1 then',
+    'set u to URL of tab 1 of w',
+    'if u is "about:blank" or u starts with "chrome://newtab" or u starts with "brave://newtab" or u starts with "edge://newtab" or u is "" then',
     'close w',
     'return "closed"',
+    'end if',
+    'end if',
+    'return "kept"',
     'end if',
     'end try',
     'end repeat',
@@ -211,11 +221,26 @@ export function buildTempWindowCloseScript(b: BrowserApp): string[] {
   ];
 }
 
+/** Prints the id of every window, one per line (Chromium family). */
+export function buildWindowIdsScript(b: BrowserApp): string[] {
+  return [
+    'on run argv',
+    `if not (application "${b.name}" is running) then return ""`,
+    'set out to ""',
+    `tell application "${b.name}"`,
+    'repeat with w in windows',
+    'set out to out & ((id of w) as text) & linefeed',
+    'end repeat',
+    'end tell',
+    'return out',
+    'end run',
+  ];
+}
+
 /**
  * Second way to trigger the same menu command, the way a person would: bring the browser
  * forward and use the Help menu's search (Cmd+Shift+/), type the item's name and press
- * Return. This goes through the normal AppKit menu path instead of an accessibility press.
- * argv: browser process name. Prints `searched`.
+ * Return. argv: browser process name. Prints `searched`.
  */
 export function buildHelpSearchScript(): string[] {
   return [
@@ -463,7 +488,7 @@ export function menuMissingMessage(b: BrowserApp): string {
 }
 
 export interface BrowserSetupDeps {
-  transport: Pick<AppleScriptTransport, 'evaluate' | 'environment'> & Partial<Pick<AppleScriptTransport, 'listTabs'>>;
+  transport: Pick<AppleScriptTransport, 'evaluate' | 'environment'> & Partial<Pick<AppleScriptTransport, 'listTabs' | 'closeTab'>>;
   run?: RunOsascript;
   open?: (url: string) => Promise<void>;
   sleep?: (ms: number) => Promise<void>;
@@ -572,6 +597,36 @@ export class BrowserSetup {
     return this.toggleTo(b, 'unchecked', opts.onGuide);
   }
 
+  private async windowIds(b: BrowserApp): Promise<string[]> {
+    try {
+      const res = await this.run(buildWindowIdsScript(b), [], MENU_TIMEOUT_MS);
+      return res.status === 0 ? res.stdout.split('\n').map((l) => l.trim()).filter(Boolean) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async tabKeys(b: BrowserApp): Promise<Set<string>> {
+    try {
+      return new Set((await this.transport.listTabs?.(b) ?? []).map((t) => `${t.windowId}:${t.tabKey}`));
+    } catch {
+      return new Set();
+    }
+  }
+
+  /** The about:blank tab that appeared since `before` (the one this setup asked the browser to open). */
+  private async newBlankTab(b: BrowserApp, before: Set<string>): Promise<{ windowId: string; tabKey: string } | null> {
+    try {
+      const fresh = (await this.transport.listTabs?.(b) ?? []).filter(
+        (t) => !before.has(`${t.windowId}:${t.tabKey}`) && t.url.startsWith('about:blank'),
+      );
+      const t = fresh[0];
+      return t ? { windowId: t.windowId, tabKey: t.tabKey } : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Profiles in use (see parseActiveProfiles); empty for browsers without a readable Local State. */
   async activeProfiles(b: BrowserApp): Promise<BrowserProfile[]> {
     const raw = await this.readLocalState(b);
@@ -590,13 +645,21 @@ export class BrowserSetup {
     for (const profile of await this.activeProfiles(b)) {
       const label = profile.email ? `${profile.name} (${profile.email})` : profile.name;
       opts.onProgress?.(`Checking ${b.name} profile ${label}...`);
-      let windowId: string | null = null;
+      // What exists before we open anything: only what we created may be closed afterwards.
+      const windowsBefore = await this.windowIds(b);
+      const tabsBefore = await this.tabKeys(b);
+      let createdWindow: string | null = null;
+      let createdTab: { windowId: string; tabKey: string } | null = null;
       try {
         await this.openProfileWindow(b, profile.dir);
         await this.sleep(1500);
-        const res = await this.run(buildFrontWindowIdScript(b), [], MENU_TIMEOUT_MS);
-        windowId = res.status === 0 && res.stdout.trim() ? res.stdout.trim() : null;
-        if (!windowId) {
+        const windowsAfter = await this.windowIds(b);
+        createdWindow = windowsAfter.find((id) => !windowsBefore.includes(id)) ?? null;
+        if (!createdWindow) {
+          // The profile already had a window: the browser opened the about:blank page as a new tab in it.
+          createdTab = await this.newBlankTab(b, tabsBefore);
+        }
+        if (!createdWindow && !createdTab) {
           results.push({ profile, ok: false, changed: false, message: 'could not open a window for this profile' });
           continue;
         }
@@ -614,7 +677,10 @@ export class BrowserSetup {
       } catch (err) {
         results.push({ profile, ok: false, changed: false, message: err instanceof Error ? condense(err.message) : 'error' });
       } finally {
-        if (windowId) await this.closeTempWindow(b, windowId);
+        if (createdWindow) await this.closeTempWindow(b, createdWindow);
+        else if (createdTab && this.transport.closeTab) {
+          await this.transport.closeTab(b, createdTab).catch(() => undefined);
+        }
       }
     }
     return results;

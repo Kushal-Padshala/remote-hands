@@ -21,6 +21,7 @@ import {
   buildMenuToggleScript,
   buildTempWindowCloseScript,
   buildTempWindowOpenScript,
+  buildWindowIdsScript,
   classifyToggleError,
   JS_MENU_ITEM,
   localStatePath,
@@ -73,7 +74,7 @@ describe('menu scripts', () => {
 
   const hasOsacompile = spawnSync('osacompile', ['-h']).error === undefined && process.platform === 'darwin';
   it.skipIf(!hasOsacompile)('both scripts compile (syntax only, nothing is executed)', () => {
-    for (const lines of [buildMenuStateScript(), buildMenuToggleScript(), buildMenuInfoScript(), buildMenuInfoOpenScript(), buildTempWindowOpenScript(brave), buildTempWindowCloseScript(brave), buildHelpSearchScript(), buildOpenMenuForUserScript(), buildEscapeScript(), buildLocateMenuItemScript(), buildFrontWindowIdScript(brave)]) {
+    for (const lines of [buildMenuStateScript(), buildMenuToggleScript(), buildMenuInfoScript(), buildMenuInfoOpenScript(), buildTempWindowOpenScript(brave), buildTempWindowCloseScript(brave), buildHelpSearchScript(), buildOpenMenuForUserScript(), buildEscapeScript(), buildLocateMenuItemScript(), buildFrontWindowIdScript(brave), buildWindowIdsScript(brave)]) {
       const args = ['-o', `/tmp/rh-setup-compile-${process.pid}.scpt`];
       for (const l of lines) args.push('-e', l);
       expect(() => execFileSync('osacompile', args, { stdio: 'pipe' })).not.toThrow();
@@ -561,11 +562,18 @@ describe('profiles', () => {
     expect(text).toContain('id of front window');
   });
 
-  it('enableForActiveProfiles opens each profile window, flips only where the setting is off, and always closes the window', async () => {
+  it('enableForActiveProfiles opens each profile window, flips only where the setting is off, and closes only what it created', async () => {
     const opened: string[] = [];
     // P4 already works; P5 is off, then the accessibility press works.
     const transport = probeTransport(['on', 'off', 'off', 'on']);
-    const { run, calls } = scriptedRun([{ stdout: '101' }, { stdout: 'closed' }, { stdout: '102' }, { stdout: 'clicked' }]);
+    const { run, calls } = scriptedRun([
+      { stdout: '1\n' }, // P4 windows before
+      { stdout: '1\n101\n' }, // P4 windows after: 101 is new
+      { stdout: 'closed' },
+      { stdout: '1\n101\n' }, // P5 windows before (user's 1 + a stray)
+      { stdout: '1\n101\n102\n' }, // P5 after: 102 is new
+      { stdout: 'clicked' },
+    ]);
     const progress: string[] = [];
     const setup = new BrowserSetup({
       transport,
@@ -583,6 +591,53 @@ describe('profiles', () => {
     expect(progress[0]).toContain('kushal (k@example.com)');
     const closes = calls.filter((c) => c.lines.join('\n') === buildTempWindowCloseScript(brave).join('\n'));
     expect(closes.map((c) => c.argv)).toEqual([['101'], ['102']]);
+  });
+
+  it('never closes a window it did not create: when the browser reused an existing window only the new about:blank tab is closed', async () => {
+    const closeTab = vi.fn(async () => {});
+    let listCall = 0;
+    const tab = (windowId: string, tabKey: string, url: string) => ({ windowId, windowIndex: 1, tabKey, tabIndex: 1, title: '', url, active: false });
+    const transport = {
+      ...probeTransport(['on']),
+      listTabs: async () => (listCall++ === 0 ? [tab('w1', 't1', 'https://example.com')] : [tab('w1', 't1', 'https://example.com'), tab('w1', 't9', 'about:blank')]),
+      closeTab,
+    };
+    const { run, calls } = scriptedRun([{ stdout: '1\n' }, { stdout: '1\n' }]); // same window ids before and after
+    const setup = new BrowserSetup({
+      transport: transport as any,
+      run,
+      sleep: async () => {},
+      readLocalState: async () => JSON.stringify({ profile: { last_used: 'Profile 4', info_cache: { 'Profile 4': { name: 'kushal' } } } }),
+      openProfileWindow: async () => {},
+    });
+    const res = await setup.enableForActiveProfiles(brave);
+    expect(res[0]).toMatchObject({ ok: true, changed: false });
+    expect(closeTab).toHaveBeenCalledWith(expect.anything(), { windowId: 'w1', tabKey: 't9' });
+    expect(calls.some((c) => c.lines.join('\n') === buildTempWindowCloseScript(brave).join('\n'))).toBe(false);
+  });
+
+  it('closes nothing when it cannot tell what it created', async () => {
+    const closeTab = vi.fn(async () => {});
+    const transport = { ...probeTransport(['on']), listTabs: async () => [], closeTab };
+    const { run, calls } = scriptedRun([{ stdout: '1\n' }, { stdout: '1\n' }]);
+    const setup = new BrowserSetup({
+      transport: transport as any,
+      run,
+      sleep: async () => {},
+      readLocalState: async () => JSON.stringify({ profile: { last_used: 'Profile 4', info_cache: {} } }),
+      openProfileWindow: async () => {},
+    });
+    const res = await setup.enableForActiveProfiles(brave);
+    expect(res[0]).toMatchObject({ ok: false, message: 'could not open a window for this profile' });
+    expect(closeTab).not.toHaveBeenCalled();
+    expect(calls.some((c) => c.lines.join('\n') === buildTempWindowCloseScript(brave).join('\n'))).toBe(false);
+  });
+
+  it('the temporary-window close script refuses to close a window that holds real tabs', () => {
+    const text = buildTempWindowCloseScript(brave).join('\n');
+    expect(text).toContain('if (count of tabs of w) is 1 then');
+    expect(text).toContain('about:blank');
+    expect(text).toContain('return "kept"');
   });
 
   it('reports a profile whose window cannot be opened and carries on', async () => {
