@@ -26,7 +26,13 @@ export interface InspectResult {
   message: string;
 }
 
-export type ToggleFailure = 'system_events_denied' | 'accessibility_denied' | 'menu_missing' | 'not_running' | 'script_error';
+export type ToggleFailure =
+  | 'system_events_denied'
+  | 'accessibility_denied'
+  | 'menu_missing'
+  | 'menu_disabled'
+  | 'not_running'
+  | 'script_error';
 
 export type ToggleOutcome =
   | { ok: true; changed: boolean; state: MenuState }
@@ -307,6 +313,26 @@ export class BrowserSetup {
     return this.toggleTo(b, 'unchecked');
   }
 
+  /** Probes the active tab of every window; used to spot profiles where the setting is still off. */
+  async windowStatuses(b: BrowserApp): Promise<Array<{ windowIndex: number; status: string }>> {
+    if (!this.transport.listTabs) return [];
+    const out: Array<{ windowIndex: number; status: string }> = [];
+    try {
+      for (const t of (await this.transport.listTabs(b)).filter((x) => x.active)) {
+        let status = 'ready';
+        try {
+          await this.transport.evaluate(b, { windowId: t.windowId, tabKey: t.tabKey }, '1');
+        } catch (err) {
+          status = err instanceof BrowserAutomationError ? err.code : 'error';
+        }
+        out.push({ windowIndex: t.windowIndex, status });
+      }
+    } catch {
+      return [];
+    }
+    return out;
+  }
+
   /**
    * `rh browser setup --debug`: what the menu looks like and what the probe says, before
    * and (only when `click` is true) after one toggle attempt. For bug reports.
@@ -382,6 +408,19 @@ export class BrowserSetup {
     if (typeof before === 'object') return before;
     if (before === 'missing') return { ok: false, reason: 'menu_missing', message: menuMissingMessage(b) };
     if (before === wantState) return { ok: true, changed: false, state: want };
+
+    // Chromium greys the item out while the browser has no usable window on this desktop
+    // (windows on another Space, minimized, none open). Check with the menu open, so the
+    // user gets a clear instruction instead of a click that silently does nothing.
+    const pre = await this.runScript(b, buildMenuInfoOpenScript());
+    if (!pre.ok) return pre;
+    if (/enabled\(menu open\)=false/.test(pre.stdout)) {
+      return {
+        ok: false,
+        reason: 'menu_disabled',
+        message: `${b.name} has the "${JS_MENU_ITEM}" menu item greyed out. That usually means it has no normal window on this desktop (windows on another Space, minimized, or only a private window).`,
+      };
+    }
 
     const clicked = await this.runScript(b, buildMenuToggleScript());
     if (!clicked.ok) return clicked;

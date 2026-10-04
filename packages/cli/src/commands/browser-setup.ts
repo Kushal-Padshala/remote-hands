@@ -22,6 +22,7 @@ export interface BrowserSetupLike {
   enableJs: BrowserSetup['enableJs'];
   disableJs: BrowserSetup['disableJs'];
   diagnose?: BrowserSetup['diagnose'];
+  windowStatuses?: BrowserSetup['windowStatuses'];
   openAutomationPane: BrowserSetup['openAutomationPane'];
   openAccessibilityPane: BrowserSetup['openAccessibilityPane'];
 }
@@ -98,7 +99,18 @@ async function enableFlow(b: BrowserApp, ctx: Ctx): Promise<BrowserOutcome> {
     }
   }
 
-  const res = await ctx.setup.enableJs(b);
+  let res = await ctx.setup.enableJs(b);
+  // Greyed-out menu item: no usable window on this desktop. Let the user fix it and retry.
+  for (let retry = 0; !res.ok && res.reason === 'menu_disabled' && ctx.interactive && retry < 3; retry += 1) {
+    ctx.out(`✖ ${b.name}  ${res.message}`);
+    const answer = (
+      await ctx.ask(`  Bring a normal ${b.name} window to the front on this desktop, then press Enter to try again (or type n to skip). `)
+    )
+      .trim()
+      .toLowerCase();
+    if (answer === 'n' || answer === 'no') break;
+    res = await ctx.setup.enableJs(b);
+  }
   if (!res.ok) {
     ctx.out(`✖ ${b.name}  ${res.message}`);
     if (res.reason === 'accessibility_denied') {
@@ -117,6 +129,13 @@ async function enableFlow(b: BrowserApp, ctx: Ctx): Promise<BrowserOutcome> {
   if (after.status === 'ready') {
     await ctx.record(b, 'enabled');
     ctx.out(`✔ ${b.name}  fast path is on${res.changed ? '' : ' (it already was)'}. Undo: rh browser setup --disable`);
+    const windows = ctx.setup.windowStatuses ? await ctx.setup.windowStatuses(b) : [];
+    const off = windows.filter((w) => w.status === 'js_disabled');
+    if (off.length > 0) {
+      ctx.out(
+        `  Note: ${b.name} keeps this setting per profile. ${off.length} window${off.length === 1 ? '' : 's'} (${off.map((w) => w.windowIndex).join(', ')}) still ${off.length === 1 ? 'has' : 'have'} it off. Bring one of them to the front and run "rh browser setup" again.`,
+      );
+    }
     return 'ready';
   }
   ctx.out(`✖ ${b.name}  turned the setting on but the probe still fails: ${after.message}`);

@@ -152,11 +152,11 @@ describe('BrowserSetup menu toggling', () => {
   });
 
   it('enableJs trusts the probe: off, click once, verify by probe', async () => {
-    const { run, calls } = scriptedRun([{ stdout: 'clicked' }]);
+    const { run, calls } = scriptedRun([{ stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stdout: 'clicked' }]);
     const transport = probeTransport(['off', 'off', 'on']);
     const res = await new BrowserSetup({ transport, run, sleep }).enableJs(brave);
     expect(res).toEqual({ ok: true, changed: true, state: 'checked' });
-    expect(calls.map((c) => c.lines)).toEqual([buildMenuToggleScript()]);
+    expect(calls.map((c) => c.lines)).toEqual([buildMenuInfoOpenScript(), buildMenuToggleScript()]);
     expect(calls[0]!.argv).toEqual(['Brave Browser']);
   });
 
@@ -175,7 +175,7 @@ describe('BrowserSetup menu toggling', () => {
       state: 'unchecked',
     });
     expect(off.calls).toHaveLength(0);
-    const on = scriptedRun([{ stdout: 'clicked' }]);
+    const on = scriptedRun([{ stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stdout: 'clicked' }]);
     expect(await new BrowserSetup({ transport: probeTransport(['on', 'on', 'off']), run: on.run, sleep }).disableJs(brave)).toEqual({
       ok: true,
       changed: true,
@@ -191,7 +191,7 @@ describe('BrowserSetup menu toggling', () => {
       state: 'checked',
     });
     expect(checked.calls).toHaveLength(1);
-    const unchecked = scriptedRun([{ stdout: 'unchecked' }, { stdout: 'clicked' }, { stdout: 'checked' }]);
+    const unchecked = scriptedRun([{ stdout: 'unchecked' }, { stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stdout: 'clicked' }, { stdout: 'checked' }]);
     expect(await new BrowserSetup({ transport: probeTransport(['nowin']), run: unchecked.run, sleep }).enableJs(brave)).toEqual({
       ok: true,
       changed: true,
@@ -212,7 +212,7 @@ describe('BrowserSetup menu toggling', () => {
   });
 
   it('fails with manual steps when the click never changes the probe', async () => {
-    const { run } = scriptedRun([{ stdout: 'clicked' }]);
+    const { run } = scriptedRun([{ stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stdout: 'clicked' }]);
     const transport = probeTransport(['off']);
     const res = await new BrowserSetup({ transport, run, sleep }).enableJs(brave);
     expect(res).toMatchObject({ ok: false, reason: 'script_error' });
@@ -222,12 +222,12 @@ describe('BrowserSetup menu toggling', () => {
   });
 
   it('classifies osascript failures from the click step', async () => {
-    const first = scriptedRun([{ stderr: 'Not authorized to send Apple events to System Events. (-1743)', status: 1 }]);
+    const first = scriptedRun([{ stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stderr: 'Not authorized to send Apple events to System Events. (-1743)', status: 1 }]);
     expect(await new BrowserSetup({ transport: probeTransport(['off']), run: first.run, sleep }).enableJs(brave)).toMatchObject({
       ok: false,
       reason: 'system_events_denied',
     });
-    const second = scriptedRun([{ stderr: 'osascript is not allowed assistive access. (-25211)', status: 1 }]);
+    const second = scriptedRun([{ stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stderr: 'osascript is not allowed assistive access. (-25211)', status: 1 }]);
     expect(await new BrowserSetup({ transport: probeTransport(['off']), run: second.run, sleep }).enableJs(brave)).toMatchObject({
       ok: false,
       reason: 'accessibility_denied',
@@ -256,6 +256,16 @@ describe('BrowserSetup menu toggling', () => {
     expect(text).toContain('click foundItem');
     expect(text.indexOf('click foundBar')).toBeLessThan(text.indexOf('click foundItem'));
     expect(text).toContain('set frontmost of process prevFront to true');
+  });
+});
+
+describe('BrowserSetup greyed-out menu item', () => {
+  it('reports menu_disabled without clicking when the item is greyed out with the menu open', async () => {
+    const { run, calls } = scriptedRun([{ stdout: 'windows=0|enabled(before open)=false|enabled(menu open)=false|mark=none' }]);
+    const res = await new BrowserSetup({ transport: probeTransport(['off']), run, sleep: async () => {} }).enableJs(brave);
+    expect(res).toMatchObject({ ok: false, reason: 'menu_disabled' });
+    expect((res as { message: string }).message).toContain('no normal window on this desktop');
+    expect(calls.map((c) => c.lines)).toEqual([buildMenuInfoOpenScript()]);
   });
 });
 

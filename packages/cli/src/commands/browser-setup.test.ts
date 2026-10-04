@@ -29,6 +29,7 @@ interface Script {
   menu?: Record<string, any>;
   disable?: Record<string, any>;
   diagnose?: string[];
+  windows?: Array<{ windowIndex: number; status: string }>;
 }
 
 function fakeSetup(script: Script = {}) {
@@ -51,6 +52,7 @@ function fakeSetup(script: Script = {}) {
     }) as any,
     openAutomationPane: vi.fn(async () => void calls.push('open:automation')) as any,
     openAccessibilityPane: vi.fn(async () => void calls.push('open:accessibility')) as any,
+    windowStatuses: vi.fn(async () => script.windows ?? []) as any,
     diagnose: vi.fn(async (b: any, o: any) => {
       calls.push(`diagnose:${b.name}:${o.click}`);
       return script.diagnose ?? ['probe before: js_disabled'];
@@ -182,6 +184,40 @@ describe('rh browser setup', () => {
     await browserSetupCommand([], b.options);
     expect(b.calls).toContain('open:automation');
     expect(b.out.join('\n')).toContain('System Events');
+  });
+
+  it('guides the user when the menu item is greyed out and retries', async () => {
+    const h = harness({
+      script: { inspect: { 'Brave Browser': ['js_disabled', 'ready'] } },
+      answers: ['y', ''],
+    });
+    const enable = h.options.setup.enableJs as any;
+    enable
+      .mockResolvedValueOnce({ ok: false, reason: 'menu_disabled', message: 'greyed out' })
+      .mockResolvedValueOnce({ ok: true, changed: true, state: 'checked' });
+    expect(await browserSetupCommand([], h.options)).toBe(0);
+    expect(enable).toHaveBeenCalledTimes(2);
+    expect(h.asked[1]).toContain('Bring a normal Brave Browser window to the front');
+    expect(h.out.join('\n')).toContain('greyed out');
+    expect(h.out.join('\n')).toContain('✔ Brave Browser  fast path is on');
+  });
+
+  it('stops retrying when the user types n', async () => {
+    const h = harness({ script: { inspect: { 'Brave Browser': ['js_disabled'] } }, answers: ['y', 'n'] });
+    (h.options.setup.enableJs as any).mockResolvedValue({ ok: false, reason: 'menu_disabled', message: 'greyed out' });
+    await browserSetupCommand([], h.options);
+    expect(h.options.setup.enableJs).toHaveBeenCalledTimes(1);
+    expect(h.out.join('\n')).toContain('greyed out');
+  });
+
+  it('warns that the setting is per profile when other windows are still off', async () => {
+    const h = harness({
+      script: { inspect: { 'Brave Browser': ['js_disabled', 'ready'] }, windows: [{ windowIndex: 1, status: 'ready' }, { windowIndex: 2, status: 'js_disabled' }] },
+      answers: ['y'],
+    });
+    await browserSetupCommand([], h.options);
+    expect(h.out.join('\n')).toContain('per profile');
+    expect(h.out.join('\n')).toContain('(2)');
   });
 
   it('records manual when the menu item is missing', async () => {
