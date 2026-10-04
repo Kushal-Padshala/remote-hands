@@ -6,6 +6,7 @@ import {
   ACCESSIBILITY_PANE_URL,
   AUTOMATION_PANE_URL,
   BrowserSetup,
+  buildMenuInfoOpenScript,
   buildMenuInfoScript,
   buildMenuStateScript,
   buildMenuToggleScript,
@@ -59,7 +60,7 @@ describe('menu scripts', () => {
 
   const hasOsacompile = spawnSync('osacompile', ['-h']).error === undefined && process.platform === 'darwin';
   it.skipIf(!hasOsacompile)('both scripts compile (syntax only, nothing is executed)', () => {
-    for (const lines of [buildMenuStateScript(), buildMenuToggleScript(), buildMenuInfoScript()]) {
+    for (const lines of [buildMenuStateScript(), buildMenuToggleScript(), buildMenuInfoScript(), buildMenuInfoOpenScript()]) {
       const args = ['-o', `/tmp/rh-setup-compile-${process.pid}.scpt`];
       for (const l of lines) args.push('-e', l);
       expect(() => execFileSync('osacompile', args, { stdio: 'pipe' })).not.toThrow();
@@ -324,21 +325,26 @@ describe('setup state', () => {
 describe('BrowserSetup.diagnose', () => {
   const sleep = async () => {};
   it('is read-only unless click is requested', async () => {
-    const { run, calls } = scriptedRun([{ stdout: 'View|Developer|Allow JavaScript from Apple Events|enabled=true|mark=none\n' }]);
+    const { run, calls } = scriptedRun([
+      { stdout: 'View|Developer|Allow JavaScript from Apple Events|enabled=true|mark=none\n' },
+      { stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none\n' },
+    ]);
     const lines = await new BrowserSetup({ transport: probeTransport(['off']), run, sleep }).diagnose(brave, { click: false });
     expect(lines[0]).toBe('probe before: js_disabled');
     expect(lines[1]).toContain('before menu: View|Developer|Allow JavaScript from Apple Events|enabled=true|mark=none');
-    expect(calls.map((c) => c.lines)).toEqual([buildMenuInfoScript()]);
+    expect(lines[2]).toContain('front+open menu: windows=1|enabled(before open)=false|enabled(menu open)=true');
+    expect(calls.map((c) => c.lines)).toEqual([buildMenuInfoScript(), buildMenuInfoOpenScript()]);
   });
 
   it('with click: info, toggle, probe, info', async () => {
     const { run, calls } = scriptedRun([
       { stdout: 'View|Developer|X|enabled=true|mark=none' },
+      { stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' },
       { stdout: 'clicked' },
       { stdout: 'View|Developer|X|enabled=true|mark=\u2713' },
     ]);
     const lines = await new BrowserSetup({ transport: probeTransport(['off', 'on']), run, sleep }).diagnose(brave, { click: true });
-    expect(calls.map((c) => c.lines)).toEqual([buildMenuInfoScript(), buildMenuToggleScript(), buildMenuInfoScript()]);
+    expect(calls.map((c) => c.lines)).toEqual([buildMenuInfoScript(), buildMenuInfoOpenScript(), buildMenuToggleScript(), buildMenuInfoScript()]);
     expect(lines.join('\n')).toContain('click: clicked');
     expect(lines.join('\n')).toContain('probe after: ready');
   });

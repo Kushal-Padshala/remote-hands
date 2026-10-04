@@ -115,6 +115,49 @@ export function buildMenuInfoScript(): string[] {
   ];
 }
 
+/**
+ * Diagnostics with the browser in front and the menu path opened (menu items are only
+ * validated, and so enabled or greyed out, while the app is active and the menu is open).
+ * Escapes the menus and gives focus back. Prints
+ * `windows=<n>|enabled(before open)=<b>|enabled(menu open)=<b>|mark=<char or none>`.
+ */
+export function buildMenuInfoOpenScript(): string[] {
+  return [
+    'on run argv',
+    ...findMenuItemLines(),
+    'if foundItem is missing value then return "missing"',
+    'set prevFront to ""',
+    'try',
+    'set prevFront to name of first application process whose frontmost is true',
+    'end try',
+    'set winCount to count of windows',
+    'set frontmost to true',
+    'delay 0.5',
+    'set en0 to enabled of foundItem',
+    'click foundBar',
+    'delay 0.3',
+    'if foundMid is not missing value then',
+    'click foundMid',
+    'delay 0.3',
+    'end if',
+    'set en1 to enabled of foundItem',
+    'set mark to value of attribute "AXMenuItemMarkChar" of foundItem',
+    'if mark is missing value then set mark to "none"',
+    'end tell',
+    'tell application "System Events"',
+    'key code 53',
+    'delay 0.1',
+    'key code 53',
+    'try',
+    'if prevFront is not "" and prevFront is not procName then set frontmost of process prevFront to true',
+    'end try',
+    'end tell',
+    'end tell',
+    'return "windows=" & winCount & "|enabled(before open)=" & (en0 as text) & "|enabled(menu open)=" & (en1 as text) & "|mark=" & (mark as text)',
+    'end run',
+  ];
+}
+
 /** Clicks the menu item and prints `clicked`; `rh:menu_missing` when absent. argv: browser process name. */
 export function buildMenuToggleScript(): string[] {
   return [
@@ -274,6 +317,8 @@ export class BrowserSetup {
     };
     lines.push(`probe before: ${(await this.inspect(b)).status}`);
     await info('before');
+    const front = await this.runScript(b, buildMenuInfoOpenScript());
+    lines.push(`front+open menu: ${front.ok ? front.stdout.trim() : `${front.reason}: ${front.message}`}`);
     if (opts.click) {
       const clicked = await this.runScript(b, buildMenuToggleScript());
       lines.push(`click: ${clicked.ok ? clicked.stdout.trim() : `${clicked.reason}: ${clicked.message}`}`);
