@@ -56,6 +56,7 @@ const USAGE = [
 const WHY =
   'Remote Hands controls your browser tabs through AppleScript. Browsers keep that off until you allow it. ' +
   'While it is on, any app that macOS lets control your browser can run JavaScript in your tabs. ' +
+  'I will open an empty window in the browser for a moment to switch it on, then close that window. ' +
   'You can switch it off again any time (rh browser setup --disable).';
 
 export type BrowserOutcome = 'ready' | 'declined' | 'skipped' | 'manual' | 'failed';

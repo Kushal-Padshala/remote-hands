@@ -164,6 +164,51 @@ export function buildMenuInfoOpenScript(): string[] {
   ];
 }
 
+/**
+ * A short-lived, empty window. Chromium greys the setting out while the browser has no
+ * usable window on the current desktop (windows on another Space, minimized, none), so
+ * setup opens one on this desktop, flips the setting, and closes it again. Prints the new
+ * window's id. argv: none. Never launches a closed browser.
+ */
+export function buildTempWindowOpenScript(b: BrowserApp): string[] {
+  return [
+    'on run argv',
+    `if not (application "${b.name}" is running) then error "rh:not_running"`,
+    `tell application "${b.name}"`,
+    'activate',
+    'set theWin to make new window',
+    'delay 0.4',
+    'try',
+    'set URL of active tab of theWin to "about:blank"',
+    'end try',
+    'delay 0.6',
+    'return (id of theWin) as text',
+    'end tell',
+    'end run',
+  ];
+}
+
+/** Closes the temporary window. argv: window id. A window that is already gone is fine. */
+export function buildTempWindowCloseScript(b: BrowserApp): string[] {
+  return [
+    'on run argv',
+    'set wid to item 1 of argv',
+    `if not (application "${b.name}" is running) then return "gone"`,
+    `tell application "${b.name}"`,
+    'repeat with w in windows',
+    'try',
+    'if ((id of w) as text) is wid then',
+    'close w',
+    'return "closed"',
+    'end if',
+    'end try',
+    'end repeat',
+    'end tell',
+    'return "gone"',
+    'end run',
+  ];
+}
+
 /** Clicks the menu item and prints `clicked`; `rh:menu_missing` when absent. argv: browser process name. */
 export function buildMenuToggleScript(): string[] {
   return [
@@ -402,6 +447,30 @@ export class BrowserSetup {
     return menu.state === 'checked' ? 'on' : 'off';
   }
 
+  private usesTempWindow(b: BrowserApp): boolean {
+    // Chromium-family browsers with a plain window dictionary; Safari and Arc are handled differently.
+    return b.family === 'chromium' && !b.inlineTabSpecifier;
+  }
+
+  private async openTempWindow(b: BrowserApp): Promise<string | null> {
+    if (!this.usesTempWindow(b)) return null;
+    try {
+      const res = await this.run(buildTempWindowOpenScript(b), [], MENU_TIMEOUT_MS);
+      const id = res.stdout.trim();
+      return res.status === 0 && id ? id : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async closeTempWindow(b: BrowserApp, id: string): Promise<void> {
+    try {
+      await this.run(buildTempWindowCloseScript(b), [id], MENU_TIMEOUT_MS);
+    } catch {
+      // best effort: an empty window left behind is harmless
+    }
+  }
+
   private async toggleTo(b: BrowserApp, want: 'checked' | 'unchecked'): Promise<ToggleOutcome> {
     const wantState = want === 'checked' ? 'on' : 'off';
     const before = await this.currentState(b);
@@ -409,16 +478,25 @@ export class BrowserSetup {
     if (before === 'missing') return { ok: false, reason: 'menu_missing', message: menuMissingMessage(b) };
     if (before === wantState) return { ok: true, changed: false, state: want };
 
-    // Chromium greys the item out while the browser has no usable window on this desktop
-    // (windows on another Space, minimized, none open). Check with the menu open, so the
-    // user gets a clear instruction instead of a click that silently does nothing.
+    const tempId = await this.openTempWindow(b);
+    try {
+      return await this.flip(b, want, wantState);
+    } finally {
+      if (tempId) await this.closeTempWindow(b, tempId);
+    }
+  }
+
+  private async flip(b: BrowserApp, want: 'checked' | 'unchecked', wantState: 'on' | 'off'): Promise<ToggleOutcome> {
+    // Chromium greys the item out while the browser has no usable window on this desktop.
+    // Check with the menu open, so the user gets a clear instruction instead of a click
+    // that silently does nothing.
     const pre = await this.runScript(b, buildMenuInfoOpenScript());
     if (!pre.ok) return pre;
     if (/enabled\(menu open\)=false/.test(pre.stdout)) {
       return {
         ok: false,
         reason: 'menu_disabled',
-        message: `${b.name} has the "${JS_MENU_ITEM}" menu item greyed out. That usually means it has no normal window on this desktop (windows on another Space, minimized, or only a private window).`,
+        message: `${b.name} still has the "${JS_MENU_ITEM}" menu item greyed out, even with a window open on this desktop. It may be blocked by a browser or organisation policy, or only a private window is available.`,
       };
     }
 

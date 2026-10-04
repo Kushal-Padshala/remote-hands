@@ -10,6 +10,8 @@ import {
   buildMenuInfoScript,
   buildMenuStateScript,
   buildMenuToggleScript,
+  buildTempWindowCloseScript,
+  buildTempWindowOpenScript,
   classifyToggleError,
   JS_MENU_ITEM,
   readSetupState,
@@ -60,7 +62,7 @@ describe('menu scripts', () => {
 
   const hasOsacompile = spawnSync('osacompile', ['-h']).error === undefined && process.platform === 'darwin';
   it.skipIf(!hasOsacompile)('both scripts compile (syntax only, nothing is executed)', () => {
-    for (const lines of [buildMenuStateScript(), buildMenuToggleScript(), buildMenuInfoScript(), buildMenuInfoOpenScript()]) {
+    for (const lines of [buildMenuStateScript(), buildMenuToggleScript(), buildMenuInfoScript(), buildMenuInfoOpenScript(), buildTempWindowOpenScript(brave), buildTempWindowCloseScript(brave)]) {
       const args = ['-o', `/tmp/rh-setup-compile-${process.pid}.scpt`];
       for (const l of lines) args.push('-e', l);
       expect(() => execFileSync('osacompile', args, { stdio: 'pipe' })).not.toThrow();
@@ -152,12 +154,18 @@ describe('BrowserSetup menu toggling', () => {
   });
 
   it('enableJs trusts the probe: off, click once, verify by probe', async () => {
-    const { run, calls } = scriptedRun([{ stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stdout: 'clicked' }]);
+    const { run, calls } = scriptedRun([{ stdout: '12345' }, { stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stdout: 'clicked' }]);
     const transport = probeTransport(['off', 'off', 'on']);
     const res = await new BrowserSetup({ transport, run, sleep }).enableJs(brave);
     expect(res).toEqual({ ok: true, changed: true, state: 'checked' });
-    expect(calls.map((c) => c.lines)).toEqual([buildMenuInfoOpenScript(), buildMenuToggleScript()]);
-    expect(calls[0]!.argv).toEqual(['Brave Browser']);
+    expect(calls.map((c) => c.lines)).toEqual([
+      buildTempWindowOpenScript(brave),
+      buildMenuInfoOpenScript(),
+      buildMenuToggleScript(),
+      buildTempWindowCloseScript(brave),
+    ]);
+    expect(calls[1]!.argv).toEqual(['Brave Browser']);
+    expect(calls[3]!.argv).toEqual(['12345']);
   });
 
   it('enableJs never clicks when the probe already works', async () => {
@@ -175,7 +183,7 @@ describe('BrowserSetup menu toggling', () => {
       state: 'unchecked',
     });
     expect(off.calls).toHaveLength(0);
-    const on = scriptedRun([{ stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stdout: 'clicked' }]);
+    const on = scriptedRun([{ stdout: '12345' }, { stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stdout: 'clicked' }]);
     expect(await new BrowserSetup({ transport: probeTransport(['on', 'on', 'off']), run: on.run, sleep }).disableJs(brave)).toEqual({
       ok: true,
       changed: true,
@@ -191,7 +199,7 @@ describe('BrowserSetup menu toggling', () => {
       state: 'checked',
     });
     expect(checked.calls).toHaveLength(1);
-    const unchecked = scriptedRun([{ stdout: 'unchecked' }, { stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stdout: 'clicked' }, { stdout: 'checked' }]);
+    const unchecked = scriptedRun([{ stdout: 'unchecked' }, { stdout: '12345' }, { stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stdout: 'clicked' }, { stdout: 'checked' }]);
     expect(await new BrowserSetup({ transport: probeTransport(['nowin']), run: unchecked.run, sleep }).enableJs(brave)).toEqual({
       ok: true,
       changed: true,
@@ -212,7 +220,7 @@ describe('BrowserSetup menu toggling', () => {
   });
 
   it('fails with manual steps when the click never changes the probe', async () => {
-    const { run } = scriptedRun([{ stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stdout: 'clicked' }]);
+    const { run } = scriptedRun([{ stdout: '12345' }, { stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stdout: 'clicked' }]);
     const transport = probeTransport(['off']);
     const res = await new BrowserSetup({ transport, run, sleep }).enableJs(brave);
     expect(res).toMatchObject({ ok: false, reason: 'script_error' });
@@ -222,12 +230,12 @@ describe('BrowserSetup menu toggling', () => {
   });
 
   it('classifies osascript failures from the click step', async () => {
-    const first = scriptedRun([{ stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stderr: 'Not authorized to send Apple events to System Events. (-1743)', status: 1 }]);
+    const first = scriptedRun([{ stdout: '12345' }, { stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stderr: 'Not authorized to send Apple events to System Events. (-1743)', status: 1 }]);
     expect(await new BrowserSetup({ transport: probeTransport(['off']), run: first.run, sleep }).enableJs(brave)).toMatchObject({
       ok: false,
       reason: 'system_events_denied',
     });
-    const second = scriptedRun([{ stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stderr: 'osascript is not allowed assistive access. (-25211)', status: 1 }]);
+    const second = scriptedRun([{ stdout: '12345' }, { stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stderr: 'osascript is not allowed assistive access. (-25211)', status: 1 }]);
     expect(await new BrowserSetup({ transport: probeTransport(['off']), run: second.run, sleep }).enableJs(brave)).toMatchObject({
       ok: false,
       reason: 'accessibility_denied',
@@ -261,11 +269,11 @@ describe('BrowserSetup menu toggling', () => {
 
 describe('BrowserSetup greyed-out menu item', () => {
   it('reports menu_disabled without clicking when the item is greyed out with the menu open', async () => {
-    const { run, calls } = scriptedRun([{ stdout: 'windows=0|enabled(before open)=false|enabled(menu open)=false|mark=none' }]);
+    const { run, calls } = scriptedRun([{ stdout: '12345' }, { stdout: 'windows=0|enabled(before open)=false|enabled(menu open)=false|mark=none' }]);
     const res = await new BrowserSetup({ transport: probeTransport(['off']), run, sleep: async () => {} }).enableJs(brave);
     expect(res).toMatchObject({ ok: false, reason: 'menu_disabled' });
-    expect((res as { message: string }).message).toContain('no normal window on this desktop');
-    expect(calls.map((c) => c.lines)).toEqual([buildMenuInfoOpenScript()]);
+    expect((res as { message: string }).message).toContain('even with a window open on this desktop');
+    expect(calls.map((c) => c.lines)).toEqual([buildTempWindowOpenScript(brave), buildMenuInfoOpenScript(), buildTempWindowCloseScript(brave)]);
   });
 });
 
@@ -388,5 +396,40 @@ describe('BrowserSetup.diagnose per-window probes', () => {
     expect(lines).toContain('window 2: js_disabled');
     expect(evaluate.mock.calls[1]![1]).toEqual({ windowId: 'w1', tabKey: 't1' });
     expect(evaluate.mock.calls[2]![1]).toEqual({ windowId: 'w2', tabKey: 't9' });
+  });
+});
+
+describe('temporary window', () => {
+  it('scripts are guarded, never touch a closed browser and pass the id through argv', () => {
+    const open = buildTempWindowOpenScript(brave).join('\n');
+    expect(open).toContain('application "Brave Browser" is running');
+    expect(open).toContain('make new window');
+    expect(open).toContain('about:blank');
+    const close = buildTempWindowCloseScript(brave).join('\n');
+    expect(close).toContain('item 1 of argv');
+    expect(close).toContain('close w');
+  });
+
+  it('is skipped for Safari and Arc and when opening fails; a failed close is harmless', async () => {
+    const sleep = async () => {};
+    const safariRun = scriptedRun([{ stdout: 'missing' }]);
+    await new BrowserSetup({ transport: probeTransport(['nowin']), run: safariRun.run, sleep }).enableJs(safari);
+    expect(safariRun.calls.some((c) => c.lines === buildTempWindowOpenScript(safari))).toBe(false);
+
+    const failOpen = scriptedRun([{ stderr: 'boom', status: 1 }, { stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' }, { stdout: 'clicked' }]);
+    const res = await new BrowserSetup({ transport: probeTransport(['off', 'on']), run: failOpen.run, sleep }).enableJs(brave);
+    expect(res).toMatchObject({ ok: true, changed: true });
+    expect(failOpen.calls.some((c) => c.lines.join('\n') === buildTempWindowCloseScript(brave).join('\n'))).toBe(false);
+  });
+
+  it('closes the temporary window even when the toggle fails', async () => {
+    const { run, calls } = scriptedRun([
+      { stdout: '777' },
+      { stdout: 'windows=1|enabled(before open)=false|enabled(menu open)=true|mark=none' },
+      { stderr: 'osascript is not allowed assistive access. (-25211)', status: 1 },
+    ]);
+    const res = await new BrowserSetup({ transport: probeTransport(['off']), run, sleep: async () => {} }).enableJs(brave);
+    expect(res).toMatchObject({ ok: false, reason: 'accessibility_denied' });
+    expect(calls[calls.length - 1]!.argv).toEqual(['777']);
   });
 });
