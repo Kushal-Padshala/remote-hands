@@ -100,7 +100,7 @@ async function enableFlow(b: BrowserApp, ctx: Ctx): Promise<BrowserOutcome> {
     }
   }
 
-  let res = await ctx.setup.enableJs(b);
+  let res = await ctx.setup.enableJs(b, { onGuide: (m) => ctx.out(`  ${m}`) });
   // Greyed-out menu item: no usable window on this desktop. Let the user fix it and retry.
   for (let retry = 0; !res.ok && res.reason === 'menu_disabled' && ctx.interactive && retry < 3; retry += 1) {
     ctx.out(`✖ ${b.name}  ${res.message}`);
@@ -110,7 +110,7 @@ async function enableFlow(b: BrowserApp, ctx: Ctx): Promise<BrowserOutcome> {
       .trim()
       .toLowerCase();
     if (answer === 'n' || answer === 'no') break;
-    res = await ctx.setup.enableJs(b);
+    res = await ctx.setup.enableJs(b, { onGuide: (m) => ctx.out(`  ${m}`) });
   }
   if (!res.ok) {
     ctx.out(`✖ ${b.name}  ${res.message}`);

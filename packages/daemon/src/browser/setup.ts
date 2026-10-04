@@ -209,6 +209,66 @@ export function buildTempWindowCloseScript(b: BrowserApp): string[] {
   ];
 }
 
+/**
+ * Second way to trigger the same menu command, the way a person would: bring the browser
+ * forward and use the Help menu's search (Cmd+Shift+/), type the item's name and press
+ * Return. This goes through the normal AppKit menu path instead of an accessibility press.
+ * argv: browser process name. Prints `searched`.
+ */
+export function buildHelpSearchScript(): string[] {
+  return [
+    'on run argv',
+    'set procName to item 1 of argv',
+    'tell application "System Events"',
+    'if not (exists process procName) then error "rh:not_running"',
+    'end tell',
+    'tell application procName to activate',
+    'delay 0.9',
+    'tell application "System Events"',
+    'keystroke "/" using {command down, shift down}',
+    'delay 0.7',
+    `keystroke "${JS_MENU_ITEM}"`,
+    'delay 0.9',
+    'key code 125',
+    'delay 0.2',
+    'key code 36',
+    'end tell',
+    'return "searched"',
+    'end run',
+  ];
+}
+
+/**
+ * Last resort: brings the browser forward and opens View > Developer (or the item's menu)
+ * and LEAVES it open so the user can click the item themselves. Prints `opened`.
+ * argv: browser process name.
+ */
+export function buildOpenMenuForUserScript(): string[] {
+  return [
+    'on run argv',
+    ...findMenuItemLines(),
+    'if foundItem is missing value then error "rh:menu_missing"',
+    'end tell',
+    'end tell',
+    'tell application procName to activate',
+    'delay 0.9',
+    'tell application "System Events"',
+    'tell process procName',
+    'click foundBar',
+    'delay 0.3',
+    'if foundMid is not missing value then click foundMid',
+    'end tell',
+    'end tell',
+    'return "opened"',
+    'end run',
+  ];
+}
+
+/** Escapes any open menus. */
+export function buildEscapeScript(): string[] {
+  return ['on run argv', 'tell application "System Events"', 'key code 53', 'delay 0.1', 'key code 53', 'end tell', 'return "escaped"', 'end run'];
+}
+
 /** Clicks the menu item and prints `clicked`; `rh:menu_missing` when absent. argv: browser process name. */
 export function buildMenuToggleScript(): string[] {
   return [
@@ -292,8 +352,8 @@ export interface BrowserSetupDeps {
 }
 
 const MENU_TIMEOUT_MS = 10_000;
-const VERIFY_ATTEMPTS = 8;
 const VERIFY_INTERVAL_MS = 300;
+const GUIDE_SECONDS = 45;
 
 const defaultOpen = (url: string): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -349,13 +409,13 @@ export class BrowserSetup {
   }
 
   /** Turns the setting on; reads first and clicks only when it is unchecked. */
-  async enableJs(b: BrowserApp): Promise<ToggleOutcome> {
-    return this.toggleTo(b, 'checked');
+  async enableJs(b: BrowserApp, opts: { onGuide?: (message: string) => void } = {}): Promise<ToggleOutcome> {
+    return this.toggleTo(b, 'checked', opts.onGuide);
   }
 
   /** Turns the setting off; reads first and clicks only when it is checked. */
-  async disableJs(b: BrowserApp): Promise<ToggleOutcome> {
-    return this.toggleTo(b, 'unchecked');
+  async disableJs(b: BrowserApp, opts: { onGuide?: (message: string) => void } = {}): Promise<ToggleOutcome> {
+    return this.toggleTo(b, 'unchecked', opts.onGuide);
   }
 
   /** Probes the active tab of every window; used to spot profiles where the setting is still off. */
@@ -471,7 +531,7 @@ export class BrowserSetup {
     }
   }
 
-  private async toggleTo(b: BrowserApp, want: 'checked' | 'unchecked'): Promise<ToggleOutcome> {
+  private async toggleTo(b: BrowserApp, want: 'checked' | 'unchecked', onGuide?: (message: string) => void): Promise<ToggleOutcome> {
     const wantState = want === 'checked' ? 'on' : 'off';
     const before = await this.currentState(b);
     if (typeof before === 'object') return before;
@@ -480,43 +540,73 @@ export class BrowserSetup {
 
     const tempId = await this.openTempWindow(b);
     try {
-      return await this.flip(b, want, wantState);
+      return await this.flip(b, want, wantState, onGuide);
     } finally {
       if (tempId) await this.closeTempWindow(b, tempId);
     }
   }
 
-  private async flip(b: BrowserApp, want: 'checked' | 'unchecked', wantState: 'on' | 'off'): Promise<ToggleOutcome> {
-    // Chromium greys the item out while the browser has no usable window on this desktop.
-    // Check with the menu open, so the user gets a clear instruction instead of a click
-    // that silently does nothing.
-    const pre = await this.runScript(b, buildMenuInfoOpenScript());
-    if (!pre.ok) return pre;
-    if (/enabled\(menu open\)=false/.test(pre.stdout)) {
-      return {
-        ok: false,
-        reason: 'menu_disabled',
-        message: `${b.name} still has the "${JS_MENU_ITEM}" menu item greyed out, even with a window open on this desktop. It may be blocked by a browser or organisation policy, or only a private window is available.`,
-      };
-    }
-
-    const clicked = await this.runScript(b, buildMenuToggleScript());
-    if (!clicked.ok) return clicked;
-
-    for (let attempt = 0; attempt < VERIFY_ATTEMPTS; attempt += 1) {
+  /** Polls until the browser reports the wanted state (probe first, menu check mark if the probe cannot tell). */
+  private async waitFor(b: BrowserApp, wantState: 'on' | 'off', want: 'checked' | 'unchecked', attempts: number): Promise<boolean> {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       const probe = await this.inspect(b);
       const now = probe.status === 'ready' ? 'on' : probe.status === 'js_disabled' ? 'off' : null;
-      if (now === wantState) return { ok: true, changed: true, state: want };
+      if (now === wantState) return true;
       if (now === null) {
         const menu = await this.menuState(b);
-        if (menu.ok && menu.state === want) return { ok: true, changed: true, state: want };
+        if (menu.ok && menu.state === want) return true;
       }
       await this.sleep(VERIFY_INTERVAL_MS);
     }
+    return false;
+  }
+
+  /**
+   * Three ways to flip the setting, each verified by probing the browser, tried in order:
+   * an accessibility click on the menu item, the Help-menu search (a normal AppKit menu
+   * path), and finally opening the menu for the user to click it themselves.
+   */
+  private async flip(
+    b: BrowserApp,
+    want: 'checked' | 'unchecked',
+    wantState: 'on' | 'off',
+    onGuide?: (message: string) => void,
+  ): Promise<ToggleOutcome> {
+    const hard = (r: Extract<ToggleOutcome, { ok: false }>): boolean =>
+      r.reason === 'system_events_denied' || r.reason === 'accessibility_denied' || r.reason === 'not_running';
+
+    const clicked = await this.runScript(b, buildMenuToggleScript());
+    if (!clicked.ok) {
+      if (hard(clicked) || clicked.reason === 'menu_missing') return clicked;
+    } else if (await this.waitFor(b, wantState, want, 4)) {
+      return { ok: true, changed: true, state: want };
+    }
+
+    const searched = await this.runScript(b, buildHelpSearchScript());
+    if (!searched.ok) {
+      if (hard(searched)) return searched;
+    } else if (await this.waitFor(b, wantState, want, 6)) {
+      return { ok: true, changed: true, state: want };
+    }
+
+    if (onGuide) {
+      const opened = await this.runScript(b, buildOpenMenuForUserScript());
+      if (opened.ok) {
+        onGuide(
+          `I opened ${b.name}'s View > Developer menu. Click "${JS_MENU_ITEM}" there (I will notice and carry on; I wait up to ${GUIDE_SECONDS} seconds).`,
+        );
+        if (await this.waitFor(b, wantState, want, Math.ceil((GUIDE_SECONDS * 1000) / VERIFY_INTERVAL_MS))) {
+          return { ok: true, changed: true, state: want };
+        }
+        // Close the menu if nobody used it.
+        await this.run(buildEscapeScript(), [], MENU_TIMEOUT_MS).catch(() => undefined);
+      }
+    }
+
     return {
       ok: false,
       reason: 'script_error',
-      message: `I clicked the menu item in ${b.name}, but the setting did not change. Turn it ${want === 'checked' ? 'on' : 'off'} yourself: ${b.name} menu bar > View > Developer > ${JS_MENU_ITEM}.`,
+      message: `I could not switch it ${want === 'checked' ? 'on' : 'off'} automatically in ${b.name}. Do it yourself: ${b.name} menu bar > View > Developer > ${JS_MENU_ITEM} (use a normal window).`,
     };
   }
 
