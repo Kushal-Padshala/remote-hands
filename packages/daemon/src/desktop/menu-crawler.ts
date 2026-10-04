@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { fastExec } from './fast-exec.js';
 import type { ExecFunction } from './macos-driver.js';
 
 export interface MenuItemNode {
@@ -8,10 +8,7 @@ export interface MenuItemNode {
   children?: MenuItemNode[];
 }
 
-const defaultExec: ExecFunction = (cmd, args) => {
-  const res = spawnSync(cmd, args, { encoding: 'utf-8' });
-  return { stdout: res.stdout || '', stderr: res.stderr || '', status: res.status };
-};
+const defaultExec: ExecFunction = fastExec;
 
 export async function crawlAppMenu(
   appName: string,

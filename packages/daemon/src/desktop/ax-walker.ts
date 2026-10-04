@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { fastExec } from './fast-exec.js';
 import type { ExecFunction, MacOsDriver } from './macos-driver.js';
 
 export interface RawAxNode {
@@ -43,18 +43,12 @@ export class AxWalker {
     if (options && 'openApp' in options) {
       this.exec = options.exec;
     } else if (options && typeof options === 'object') {
-      this.exec = options.exec ?? options.driver?.exec ?? ((cmd, args) => {
-        const res = spawnSync(cmd, args, { encoding: 'utf-8' });
-        return { stdout: res.stdout || '', stderr: res.stderr || '', status: res.status };
-      });
+      this.exec = options.exec ?? options.driver?.exec ?? fastExec;
       if (typeof options.allowOcr === 'boolean') {
         this.allowOcr = options.allowOcr;
       }
     } else {
-      this.exec = (cmd, args) => {
-        const res = spawnSync(cmd, args, { encoding: 'utf-8' });
-        return { stdout: res.stdout || '', stderr: res.stderr || '', status: res.status };
-      };
+      this.exec = fastExec;
     }
   }
 

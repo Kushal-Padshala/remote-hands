@@ -70,6 +70,7 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
     }
     return null;
   };
+  cache.name = name; cache.role = role; cache.visible = visible;
   cache.pageKey = () => [performance.timeOrigin, location.href, scrollX, scrollY, innerWidth, innerHeight,
     [...document.querySelectorAll('input,textarea,select')].filter(safe)
       .map((e) => [identity(e), e.value, e.checked, e.selectedIndex, e.disabled, e.readOnly])];
@@ -131,22 +132,30 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   }
   const text = words.join('\\n').slice(0, 6000);
   const height = document.documentElement.scrollHeight;
-  const page_key = cache.pageKey();
+  // Light mode (window.__rhLight, set by the fast engine): no guards/marker and a page_key
+  // of [timeOrigin] only, so no input values (password plaintext included) leave the page.
+  const light = window.__rhLight === true;
+  const page_key = light ? [performance.timeOrigin] : cache.pageKey();
   const guards = {};
-  for (const a of actions) {
-    if (!(a.node in guards)) guards[a.node] = cache.guard(cache.nodes.get(a.node));
+  let marker;
+  if (!light) {
+    for (const a of actions) {
+      if (!(a.node in guards)) guards[a.node] = cache.guard(cache.nodes.get(a.node));
+    }
+    const semantics = actions.map(({ rect, ...action }) => action);
+    marker = [performance.timeOrigin, location.href, scrollX, scrollY, innerWidth, innerHeight,
+      document.title, text, semantics, page_key[6]];
   }
-  const semantics = actions.map(({ rect, ...action }) => action);
-  const marker = [performance.timeOrigin, location.href, scrollX, scrollY, innerWidth, innerHeight,
-    document.title, text, semantics, page_key[6]];
   const omitted_actions = Math.max(0, actions.length - 250);
   actions.splice(250);
   actions.forEach((a, i) => a.id = 'e' + (i + 1));
   if (scrollY + innerHeight < height - 2) actions.push({ id: 'scroll_down', kind: 'scroll', label: 'Scroll down', delta: 560 });
   if (scrollY > 0) actions.push({ id: 'scroll_up', kind: 'scroll', label: 'Scroll up', delta: -560 });
   actions.push({ id: 'wait', kind: 'wait', label: 'Wait for the page to update' });
-  return { url: location.href, title: document.title, w: innerWidth, h: innerHeight, text,
+  const out = { url: location.href, title: document.title, w: innerWidth, h: innerHeight, text,
     scroll: { y: scrollY, height }, actions, elements: actions, marker, page_key, guards, omitted_actions };
+  if (light) { delete out.marker; delete out.guards; }
+  return out;
 })()`;
 
 export function formatIndexedElements(elements: IndexedElement[], text?: string): string {

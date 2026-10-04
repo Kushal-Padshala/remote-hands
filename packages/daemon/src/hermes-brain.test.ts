@@ -224,4 +224,20 @@ describe('HermesBrain Memory Operations', () => {
     expect(ctx.augmentedPrompt).toContain('X Composer');
     expect(ctx.augmentedPrompt).toContain('https://x.com/compose/post');
   });
+
+  it('attached-targets mandate prefers MCP tools and keeps rh commands as fallback', async () => {
+    const brain = new HermesBrain(tmpDir);
+    const ctx = await brain.prepareTaskContext({
+      prompt: 'post to x',
+      attachments: [
+        { type: 'browser_tab', id: 'tab-1', browser: 'Google Chrome', title: 'X Composer', url: 'https://x.com/compose/post' },
+      ],
+    });
+    const mandate = ctx.augmentedPrompt.split('\n').find((l) => l.startsWith('Mandate:'))!;
+    for (const tool of ['browser_focus', 'desktop_windows', 'desktop_open']) expect(mandate).toContain(tool);
+    expect(mandate).toMatch(/fallback/i);
+    expect(mandate).toContain('`rh browser focus`');
+    expect(mandate).toContain('`rh desktop window focus`');
+    expect(mandate).toContain('without exploratory scans');
+  });
 });

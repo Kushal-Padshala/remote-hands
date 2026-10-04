@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { fastExec } from './fast-exec.js';
 import type { ExecFunction } from './macos-driver.js';
 
 export interface AxElementTarget {
@@ -7,15 +7,20 @@ export interface AxElementTarget {
   role?: string;
   label?: string;
   windowTitle?: string | undefined;
+  /** Match ONLY by bounds (+role); never by index counter or label. Requires bounds. */
+  strict?: boolean;
 }
 
-const defaultExec: ExecFunction = (cmd, args) => {
-  const res = spawnSync(cmd, args, { encoding: 'utf-8' });
-  return { stdout: res.stdout || '', stderr: res.stderr || '', status: res.status };
-};
+const defaultExec: ExecFunction = fastExec;
 
 function normalizeTarget(target: number | AxElementTarget): AxElementTarget {
   return typeof target === 'number' ? { index: target } : target;
+}
+
+export interface AxActionResult {
+  success: boolean;
+  error?: string;
+  method?: 'ax' | 'cgevent';
 }
 
 export async function performAxAction(
@@ -24,6 +29,15 @@ export async function performAxAction(
   actionName: string = 'AXPress',
   execFunc: ExecFunction = defaultExec,
 ): Promise<boolean> {
+  return (await performAxActionDetailed(appName, target, actionName, execFunc)).success;
+}
+
+export async function performAxActionDetailed(
+  appName: string,
+  target: number | AxElementTarget,
+  actionName: string = 'AXPress',
+  execFunc: ExecFunction = defaultExec,
+): Promise<AxActionResult> {
   const normTarget = normalizeTarget(target);
   const escapedApp = appName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const escapedAction = actionName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -35,6 +49,8 @@ export async function performAxAction(
   const targetH = hasBounds ? normTarget.bounds![3] : 0;
   const escapedRole = (normTarget.role ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const escapedLabel = (normTarget.label ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const strict = normTarget.strict === true;
+  if (strict && !hasBounds) return { success: false, error: 'strict match requires bounds' };
   const escapedWinTitle = (normTarget.windowTitle ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
   const swiftScript = `
@@ -142,6 +158,7 @@ func getBounds(_ el: AXUIElement) -> (Int, Int, Int, Int)? {
 
 let targetIndex = ${targetIndex}
 let hasBounds = ${hasBounds}
+let strictMatch = ${strict}
 let targetX = ${targetX}
 let targetY = ${targetY}
 let targetW = ${targetW}
@@ -181,7 +198,7 @@ func checkElement(_ el: AXUIElement, depth: Int) {
             }
             if isAllowed {
                 currentCounter += 1
-                if targetIndex > 0 && currentCounter == targetIndex {
+                if !strictMatch && targetIndex > 0 && currentCounter == targetIndex {
                     targetEl = c
                     return
                 }
@@ -196,7 +213,7 @@ func checkElement(_ el: AXUIElement, depth: Int) {
                 }
             }
 
-            if !targetLabel.isEmpty && !trimmed.isEmpty {
+            if !strictMatch && !targetLabel.isEmpty && !trimmed.isEmpty {
                 let roleMatches = targetRole.isEmpty || role == targetRole || role.contains(targetRole) || targetRole.contains(role)
                 if trimmed.caseInsensitiveCompare(targetLabel) == .orderedSame {
                     if roleMatches {
@@ -235,7 +252,8 @@ guard let found = targetEl ?? fallbackEl else {
 
 let action = "${escapedAction}" as CFString
 var res: AXError = AXUIElementPerformAction(found, action)
-if res != .success && action as String == "AXPress" {
+var usedPhysicalClick: Bool = false
+if res != .success && !strictMatch && action as String == "AXPress" {
     var cur = found
     for _ in 0..<4 {
         var parentVal: AnyObject?
@@ -254,7 +272,7 @@ if res != .success && action as String == "AXPress" {
         }
     }
 }
-if res != .success && action as String == "AXPress" {
+if res != .success && !strictMatch && action as String == "AXPress" {
     var chListVal: AnyObject?
     if AXUIElementCopyAttributeValue(found, kAXChildrenAttribute as CFString, &chListVal) == .success, let chList = chListVal as? [AXUIElement] {
         for c in chList {
@@ -281,23 +299,36 @@ if res != .success && action as String == "AXPress", let (x, y, w, h) = getBound
         down.post(tap: .cghidEventTap)
         usleep(30000)
         up.post(tap: .cghidEventTap)
+        usedPhysicalClick = true
         res = .success
     }
 }
 if res == .success {
-    print("{\\"success\\":true}")
+    if usedPhysicalClick {
+        print("{\\"success\\":true,\\"method\\":\\"cgevent\\"}")
+    } else {
+        print("{\\"success\\":true,\\"method\\":\\"ax\\"}")
+    }
 } else {
-    print("{\\"success\\":false}")
+    print("{\\"success\\":false,\\"error\\":\\"AXPress failed\\"}")
 }
 `;
 
+  let res;
   try {
-    const res = execFunc('swift', ['-e', swiftScript]);
-    if (res.status !== 0 || !res.stdout.trim()) return false;
-    const parsed = JSON.parse(res.stdout.trim());
-    return Boolean(parsed.success);
+    res = execFunc('swift', ['-e', swiftScript]);
   } catch {
-    return false;
+    return { success: false, error: 'swift exec failed' };
+  }
+  if (res.status !== 0 || !res.stdout.trim()) return { success: false, error: 'swift exec failed' };
+  try {
+    const parsed = JSON.parse(res.stdout.trim()) as { success?: unknown; error?: unknown; method?: unknown };
+    const out: AxActionResult = { success: Boolean(parsed.success) };
+    if (typeof parsed.error === 'string') out.error = parsed.error;
+    if (parsed.method === 'ax' || parsed.method === 'cgevent') out.method = parsed.method;
+    return out;
+  } catch {
+    return { success: false, error: 'unparsable result' };
   }
 }
 

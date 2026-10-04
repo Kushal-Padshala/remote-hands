@@ -8,8 +8,13 @@ import { GuidanceManager } from './guidance-manager.js';
 import { MacOsDriver, type ActiveWindowContext } from '../desktop/macos-driver.js';
 import { LocalTaskStore } from '../local-task-store.js';
 import type { TaskStore } from '../task-store.js';
-import { ProcessAgentRunner, type AgentRunner } from '../agy-runner.js';
+import { ProcessAgentRunner, parseAgyStreamLine, HUD_TASK_MODE, type AgentRunner } from '../agy-runner.js';
+import { WarmAgySession } from '../warm-agy-session.js';
+import { SLIM_COMPUTER_PROMPT } from '../computer/prompt.js';
 import { DynamicPowerManager } from '../system/power-manager.js';
+
+/** The warm agy process is stopped after this long unused; the hotkey starts a fresh one while the user types. */
+const HUD_AGY_IDLE_MS = Number(process.env.RH_HUD_AGY_IDLE_MS ?? 10 * 60_000);
 
 
 
@@ -148,7 +153,7 @@ export function formatContextualTaskPrompt(
   lines.push('2. Autonomous Research: If this task requires research (such as rental property marketing strategies, campaign setup requirements, ad platform configurations, or client redirection mechanisms), perform targeted web research and synthesize the needed steps immediately.');
   lines.push('3. Full-Speed Execution: Do not stall on exploratory discovery commands. Jump straight into executing the steps at full speed.');
   lines.push('4. Skill Reference: Apply the `remote-hands-operator` skill for blazing-fast in-place browser tab reuse, native window control, and zero-discovery execution.');
-  lines.push('5. ZERO SCREENSHOTS & ZERO PHYSICAL MOUSE MOVEMENTS: Strictly use `rh browser snapshot`, `rh browser click <index>`, `rh browser type <index>`, or `rh desktop ax-action <app> <index> [action]` with zero cursor movement. Never take screenshots and never simulate physical mouse clicks.');
+  lines.push('5. ZERO SCREENSHOTS & ZERO PHYSICAL MOUSE MOVEMENTS: Prefer the rh-computer MCP tools (browser_snapshot, browser_click, browser_type, browser_do for forms and multi-step browser sequences, desktop_snapshot, desktop_click, computer_batch) with zero cursor movement. If those tools are unavailable, use these shell commands as a fallback: `rh browser snapshot`, `rh browser click <index>`, `rh browser type <index>`, or `rh desktop ax-action <app> <index> [action]`. Never take screenshots and never simulate physical mouse clicks (except the physical-click fallback that desktop_click reports in its result).');
   return lines.join('\n');
 }
 
@@ -232,6 +237,8 @@ export interface HudCoordinatorOptions {
   macosDriver?: MacOsDriver | undefined;
   store?: TaskStore | undefined;
   runner?: AgentRunner | undefined;
+  /** Test seam: builds the default warm runner used when no `runner` is injected. */
+  defaultRunnerFactory?: (() => ProcessAgentRunner) | undefined;
   autoExecute?: boolean | undefined;
   onTaskCreated?: ((task: Task) => Promise<void> | void) | undefined;
   onTaskCompleted?: ((task: Task, summary: string) => Promise<void> | void) | undefined;
@@ -245,6 +252,8 @@ export class HudCoordinator {
   private macosDriver: MacOsDriver;
   private store?: TaskStore | undefined;
   private runner?: AgentRunner | undefined;
+  private defaultRunner?: ProcessAgentRunner | undefined;
+  private defaultRunnerFactory?: (() => ProcessAgentRunner) | undefined;
   private autoExecute: boolean;
   private onTaskCreated?: ((task: Task) => Promise<void> | void) | undefined;
   private onTaskCompleted?: ((task: Task, summary: string) => Promise<void> | void) | undefined;
@@ -268,6 +277,7 @@ export class HudCoordinator {
       this.macosDriver = opts.macosDriver || new MacOsDriver();
       this.store = opts.store;
       this.runner = opts.runner;
+      this.defaultRunnerFactory = opts.defaultRunnerFactory;
       this.autoExecute = opts.autoExecute ?? false;
       this.onTaskCreated = opts.onTaskCreated;
       this.onTaskCompleted = opts.onTaskCompleted;
@@ -329,8 +339,47 @@ export class HudCoordinator {
     }
   }
 
+  private inflight = new Set<Promise<void>>();
+
+  private trackExecution(promise: Promise<void>): void {
+    const tracked = promise.catch(() => {}).finally(() => {
+      this.inflight.delete(tracked);
+    });
+    this.inflight.add(tracked);
+  }
+
+  /** Resolves once every auto-executed task started so far has finished. */
+  async whenIdle(): Promise<void> {
+    while (this.inflight.size > 0) {
+      await Promise.all([...this.inflight]);
+    }
+  }
+
+  /** Stops the default warm runner (if any) so one-shot callers can exit. Safe to call repeatedly. */
+  dispose(): void {
+    const runner = this.defaultRunner;
+    this.defaultRunner = undefined;
+    runner?.stop();
+  }
+
+  private getRunner(): AgentRunner {
+    if (this.runner) return this.runner;
+    if (!this.defaultRunner) {
+      this.defaultRunner =
+        this.defaultRunnerFactory?.() ??
+        new ProcessAgentRunner(
+          'agy',
+          SLIM_COMPUTER_PROMPT,
+          undefined,
+          new WarmAgySession({ command: 'agy', parseLine: parseAgyStreamLine, idleMs: HUD_AGY_IDLE_MS }),
+        );
+    }
+    return this.defaultRunner;
+  }
+
   async cancelActiveTask(reason = 'Task cancelled by user from HUD'): Promise<void> {
     this.currentConversationId = undefined;
+    this.defaultRunner?.newConversation({ mode: HUD_TASK_MODE });
     await this.stopActiveTask(reason);
   }
 
@@ -394,7 +443,7 @@ export class HudCoordinator {
         this.macosDriver.focusWindow('Google Chrome').catch(() => {});
       }
 
-      const runner = this.runner || new ProcessAgentRunner('agy');
+      const runner = this.getRunner();
       const res = await runner.run(running, async (event) => {
         if (store.appendEvent) {
           await store.appendEvent(running!.id, event as any).catch(() => {});
@@ -497,7 +546,7 @@ export class HudCoordinator {
         prompt,
         goal: result.query,
         kind: windowContext.isBrowser ? 'browser' : 'mixed',
-        mode: 'autonomous',
+        mode: HUD_TASK_MODE,
         status: 'queued',
         model: 'gemini-3.8-flash',
         effort: 'low',
@@ -509,7 +558,7 @@ export class HudCoordinator {
         await this.onTaskCreated(task);
       }
       if (this.autoExecute) {
-        this.executeTaskStandalone(task, sendUpdate, signal).catch(() => {});
+        this.trackExecution(this.executeTaskStandalone(task, sendUpdate, signal));
       }
       return true;
     }
@@ -537,7 +586,7 @@ export class HudCoordinator {
           prompt,
           goal: result.query,
           kind: windowContext.isBrowser ? 'browser' : 'mixed',
-          mode: 'autonomous',
+          mode: HUD_TASK_MODE,
           status: 'queued',
           model: 'gemini-3.8-flash',
           effort: 'low',
@@ -549,7 +598,7 @@ export class HudCoordinator {
           await this.onTaskCreated(task);
         }
         if (this.autoExecute) {
-          this.executeTaskStandalone(task, sendUpdate, signal).catch(() => {});
+          this.trackExecution(this.executeTaskStandalone(task, sendUpdate, signal));
         }
         return true;
       }
@@ -604,6 +653,10 @@ export class HudCoordinator {
   }
 
   startListening(): { stop: () => void } {
+    if (!this.runner) {
+      this.getRunner();
+      this.defaultRunner?.prewarm({ mode: HUD_TASK_MODE });
+    }
     let activePrompt: { close: () => void } | null = null;
     const runnerListener = this.hudRunner.startListener(async (event: any) => {
       try {
@@ -616,6 +669,7 @@ export class HudCoordinator {
             activePrompt = null;
           }
           this.currentConversationId = undefined;
+          this.defaultRunner?.newConversation({ mode: HUD_TASK_MODE });
           const promptArgs: any[] = [
             event.app,
             async (result: any, sendUpdate: any) => {
@@ -648,6 +702,7 @@ export class HudCoordinator {
           activePrompt = null;
         }
         runnerListener.stop();
+        this.defaultRunner?.stop();
       },
     };
 

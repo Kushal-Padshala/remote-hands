@@ -14,6 +14,7 @@ import { guideCommand, executeGuideCommand } from './commands/guide.js';
 
 import { permissionsCommand } from './commands/permissions.js';
 import { contextCommand } from './commands/context.js';
+import { mcpCommand } from './commands/mcp.js';
 
 export {
   setupCommand,
@@ -31,6 +32,7 @@ export {
   guideCommand,
   executeGuideCommand,
   contextCommand,
+  mcpCommand,
   type CommandContext,
 };
 
@@ -51,11 +53,13 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
     stdout('  hud         Manage desktop overlay assistant and hotkey background service');
     stdout('  permissions Inspect and pre-authorize macOS and AI agent permissions');
     stdout('  browser     Run headless browser automation bridge with live screen streaming');
+    stdout('              (rh browser setup: turn on the fast browser path; rh browser doctor: check it per running browser)');
     stdout('  guide       Interactive visual guidance and annotation overlays');
     stdout('  approve     Request human-in-the-loop approval on the mobile app');
     stdout('  profiles    List detected Chrome browser profiles and launch commands');
     stdout('  context     List running apps, browser tabs, profiles, and local files');
-    stdout('  setup       Set up Cloudflare resources and pair this computer');
+    stdout('  mcp         Run or register the warm computer-use MCP server for agy');
+    stdout('  setup       Guided setup: Desktop HUD (this computer) or Remote use (phone)');
     stdout('  deploy      Deploy backend Worker and phone PWA to Cloudflare');
     stdout('  doctor      Check system prerequisites and connectivity');
     stdout('');
@@ -84,6 +88,10 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
 
   if (command === 'context') {
     return await contextCommand(args, context);
+  }
+
+  if (command === 'mcp') {
+    return await mcpCommand(args, context);
   }
 
   if (command === 'browser') {

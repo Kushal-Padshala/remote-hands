@@ -7,6 +7,7 @@ import { z } from 'zod';
 import type { DaemonConfig } from './config.js';
 import type { EventInput } from './task-store.js';
 import { HermesBrain } from './hermes-brain.js';
+import type { WarmAgySession, WarmSessionConfig } from './warm-agy-session.js';
 
 export interface AgentRunResult {
   events: readonly EventInput[];
@@ -25,6 +26,33 @@ export interface AgentRunner {
 }
 
 export type AgentStreamRecord = EventInput;
+
+/** Task mode used by every HUD-created task; the warm prewarm must use the same value. */
+export const HUD_TASK_MODE = 'autonomous';
+
+export interface WarmHint {
+  model?: string | undefined;
+  effort?: string | undefined;
+  mode?: string | undefined;
+}
+
+/** Single source of the warm-session config, shared by prewarm and runWarm so they cannot drift. */
+export function warmConfigFor(input: {
+  model?: string | null | undefined;
+  effort?: string | null | undefined;
+  workspace?: string | null | undefined;
+  mode?: string | null | undefined;
+  conversationId?: string | null | undefined;
+}): WarmSessionConfig {
+  const config: WarmSessionConfig = {
+    model: input.model || 'gemini-3.8-flash',
+    effort: input.effort || 'low',
+  };
+  if (input.workspace) config.workspace = input.workspace;
+  if (input.mode && input.mode !== 'default') config.mode = input.mode;
+  if (input.conversationId) config.conversationId = input.conversationId;
+  return config;
+}
 
 export const DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT =
   '[Context: Remote Hands autonomous control plane. You MUST follow the `remote-hands-operator` skill at all times. You are a supercharged, high-speed autonomous AI engineer operating the user\'s computer and browser directly from their mobile phone or desktop overlay.\n' +
@@ -381,14 +409,13 @@ export function parseAgyStreamLine(line: string): AgentStreamRecord | null {
     if (!summary) {
       summary = isError ? 'Task failed' : 'Task completed';
     }
-    return {
-      kind: 'result',
-      payload: {
-        summary,
-        conversation_id: res.conversation_id,
-        duration_seconds: res.duration_seconds,
-      },
+    const payload: { summary: string; conversation_id?: string | undefined; duration_seconds?: number | undefined; is_error?: boolean } = {
+      summary,
+      conversation_id: res.conversation_id,
+      duration_seconds: res.duration_seconds,
     };
+    if (isError) payload.is_error = true;
+    return { kind: 'result', payload };
   }
 
   const text = textRecord.safeParse(record);
@@ -471,11 +498,68 @@ export class ProcessAgentRunner implements AgentRunner {
   private agyCommand: string;
   private systemPrompt?: string;
   private hermesBrain: HermesBrain;
+  private warmSession: WarmAgySession | undefined;
 
-  constructor(agyCommand: string = 'agy', systemPrompt?: string, hermesBrain?: HermesBrain) {
+  constructor(agyCommand: string = 'agy', systemPrompt?: string, hermesBrain?: HermesBrain, warmSession?: WarmAgySession) {
     this.agyCommand = agyCommand;
     this.systemPrompt = systemPrompt ?? getDefaultRemoteHandsSystemPrompt();
     this.hermesBrain = hermesBrain ?? new HermesBrain();
+    this.warmSession = warmSession;
+  }
+
+  prewarm(hint?: WarmHint): void {
+    this.warmSession?.prewarm(warmConfigFor(hint ?? {}));
+  }
+
+  newConversation(hint?: WarmHint): void {
+    this.warmSession?.reset();
+    this.prewarm(hint);
+  }
+
+  stop(): void {
+    this.warmSession?.stop();
+  }
+
+  private async runWarm(
+    task: Task,
+    effectiveTask: Task,
+    onEvent?: (event: EventInput) => Promise<void> | void,
+    signal?: AbortSignal,
+  ): Promise<AgentRunResult> {
+    const session = this.warmSession!;
+    if (!task.conversation_id && session.hasHistory()) session.reset();
+    // Resuming an explicit conversation (the session respawns with --conversation) never
+    // re-sends the system prompt, even on a fresh process.
+    const isFirst = !task.conversation_id && !session.hasHistory();
+    // The warm agy process is spawned once, so REMOTE_HANDS_TASK_ID cannot reach `rh approve`
+    // through the environment; every turn names its task id so the model can pass --task=.
+    const taskLine = `Task id: ${task.id} (pass it to approvals as --task=${task.id})`;
+    const turnPrompt = `${taskLine}\n${effectiveTask.prompt}`;
+    const prompt = isFirst ? `${this.systemPrompt}\n\n${turnPrompt}` : turnPrompt;
+    const config = warmConfigFor({
+      model: effectiveTask.model,
+      effort: effectiveTask.effort,
+      workspace: task.workspace_path,
+      mode: task.mode,
+      conversationId: task.conversation_id || undefined,
+    });
+    const turn = await session.runTurn(prompt, config, onEvent, signal);
+    if (!turn.failed && !turn.aborted) {
+      try {
+        await this.hermesBrain.recordTaskCompletion({
+          prompt: task.prompt,
+          summary: turn.summary,
+          workspacePath: task.workspace_path || undefined,
+          conversationId: turn.conversationId,
+        });
+      } catch {}
+    }
+    return {
+      events: turn.events,
+      summary: turn.summary || (turn.failed ? 'Task failed' : 'Task completed'),
+      conversationId: turn.conversationId,
+      status: turn.failed ? 'failed' : 'done',
+    };
   }
 
   async run(
@@ -518,6 +602,10 @@ export class ProcessAgentRunner implements AgentRunner {
 
     if (effectiveTask.model === 'gemini-3.8-flash-high' && effectiveTask.effort === 'low') {
       effectiveTask.model = 'gemini-3.8-flash';
+    }
+
+    if (this.warmSession) {
+      return this.runWarm(task, effectiveTask, onEvent, signal);
     }
 
     const args = buildAgyArgs(effectiveTask, {

@@ -63,6 +63,8 @@ import {
 } from '../output/ui.js';
 
 import { HudServiceManager, type ChromeManager, type DynamicPowerManager } from '@remote-hands/daemon';
+import { browserSetupCommand, defaultAsk } from './browser-setup.js';
+import { mcpCommand } from './mcp.js';
 
 export interface CommandContext {
   stdout?: ((msg: string) => void) | undefined;
@@ -80,6 +82,16 @@ export interface CommandContext {
   frameSource?: any;
   localStore?: any;
   hudServiceManager?: any | undefined;
+  /** Injected AppleScript transport for `rh browser doctor` (tests). */
+  browserTransport?: import('./browser-doctor.js').BrowserDoctorTransport | undefined;
+  /** Injected pieces of `rh browser setup` (tests): setup service, prompt, TTY flag, state file. */
+  browserSetup?: Partial<import('./browser-setup.js').BrowserSetupOptions> | undefined;
+  /** Replaces the once-only browser setup offer made by `rh hud` and `rh setup` (tests). */
+  browserSetupOffer?: (() => Promise<void>) | undefined;
+  /** Prompt used by `rh setup` to ask what to set up (tests). */
+  ask?: ((question: string) => Promise<string>) | undefined;
+  /** Whether stdin is a terminal (tests); defaults to process.stdin.isTTY. */
+  isTTY?: boolean | undefined;
 }
 
 async function setupAgentAndPermissions(
@@ -130,14 +142,7 @@ async function setupAgentAndPermissions(
   }
 
   stdout(renderStepInfo('Verifying agy authentication...'));
-  const agyAuth = await runner('agy', ['-p', 'echo hello', '--print-timeout', '10s']);
-  const agyAuthOutput = (agyAuth.stdout + '\n' + agyAuth.stderr).toLowerCase();
-  const agyNeedsLogin = agyAuth.exitCode !== 0 ||
-    agyAuthOutput.includes('not authenticated') ||
-    agyAuthOutput.includes('sign in') ||
-    agyAuthOutput.includes('login') ||
-    agyAuthOutput.includes('oauth') ||
-    agyAuthOutput.includes('authorize');
+  const agyNeedsLogin = await agyNeedsSignIn(runner);
 
   if (agyNeedsLogin) {
     stdout(renderStepAction('agy requires sign-in — launching interactive session...'));
@@ -148,7 +153,7 @@ async function setupAgentAndPermissions(
     }
     await runner('agy', [], { interactive: true });
 
-    const agyRecheck = await runner('agy', ['-p', 'echo hello', '--print-timeout', '10s']);
+    const agyRecheck = await runner('agy', ['-p', 'reply with ok', '--print-timeout', '60s']);
     if (agyRecheck.exitCode !== 0) {
       stderr(renderStepError('agy sign-in was not completed.'));
       stderr('Please run "agy" in your terminal to sign in, then re-run "rh setup".');
@@ -180,7 +185,31 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   const fetchFn = context.fetchFn ?? globalThis.fetch.bind(globalThis);
   const projectRoot = resolveProjectRoot(context.projectRoot);
 
+  if (args.includes('--help') || args.includes('-h')) {
+    stdout('Usage: rh setup [--hud | --remote] [--yes] [--local] [--skip-permissions]');
+    stdout('');
+    stdout('Guided setup. Without a flag it asks what to set up first:');
+    stdout('  --hud     Desktop HUD on this computer: agent, permissions, browsers, tools, background service');
+    stdout('  --remote  Remote use from your phone: Cloudflare Worker, D1 and pairing');
+    stdout('  --yes     do not ask before turning on the fast browser setting');
+    return 0;
+  }
+
   const isLocal = args.includes('--local') || (context as any).local === true;
+
+  // `rh setup` asks what to set up first. The desktop HUD flow does everything it needs
+  // up front; remote (phone) use keeps the existing Cloudflare flow. Without a terminal
+  // and without a flag the old behaviour is unchanged.
+  if (!isLocal) {
+    let mode: 'hud' | 'remote' | 'default' = args.includes('--hud') ? 'hud' : args.includes('--remote') ? 'remote' : 'default';
+    if (mode === 'default' && (context.isTTY ?? Boolean(process.stdin.isTTY))) {
+      mode = await askSetupMode(context.ask ?? defaultAsk, stdout);
+    }
+    if (mode === 'hud') {
+      return hudSetupFlow(args, context, runner, fs, projectRoot, stdout, stderr);
+    }
+  }
+
   if (isLocal) {
     const LOCAL_STEPS = 4;
     stdout(renderBanner());
@@ -474,6 +503,8 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     stdout(renderStepInfo('Desktop Overlay hotkey service is supported on macOS'));
   }
 
+  await offerBrowserSetup(context);
+
   const pairingUrl = generatePairingUrl(webUrl, activePairingCode, effectiveOwnerToken, apiUrl);
   const summary = await formatPairingSummary({
     webUrl,
@@ -487,5 +518,132 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   stdout(`  • ${c.bold('Desktop Use:')} Press ${c.bold('Shift + Cmd + Space')} anywhere to use the overlay assistant directly.`);
   stdout(`    It is active in the background. You do not need to run "rh start" while at your computer.`);
   stdout(`  • ${c.bold('Remote Use:')} Run "${c.cyan('rh start')}" when stepping away to connect from your phone over any network.\n`);
+  return 0;
+}
+
+const AUTH_HINTS = ['not authenticated', 'sign in', 'sign-in', 'log in', 'login', 'oauth', 'authorize'];
+
+/**
+ * Is sign-in needed? `agy models` answers quickly when signed in, so it is tried first.
+ * Only when it does not settle the question a real prompt is sent, with a generous
+ * timeout (a cold agy takes a while to load its MCP servers: a slow answer is not a
+ * missing sign-in). Sign-in is requested only when agy's own output asks for it.
+ */
+async function agyNeedsSignIn(runner: CommandRunner): Promise<boolean> {
+  const models = await runner('agy', ['models']);
+  const modelsText = `${models.stdout}\n${models.stderr}`.toLowerCase();
+  if (models.exitCode === 0 && /gemini|claude|gpt/.test(modelsText) && !AUTH_HINTS.some((h) => modelsText.includes(h))) {
+    return false;
+  }
+  const probe = await runner('agy', ['-p', 'reply with ok', '--print-timeout', '60s']);
+  const text = `${probe.stdout}\n${probe.stderr}`.toLowerCase();
+  return AUTH_HINTS.some((h) => text.includes(h));
+}
+
+async function offerBrowserSetup(context: CommandContext): Promise<void> {
+  const { offerForContext } = await import('./browser-setup.js');
+  await offerForContext(context);
+}
+
+async function askSetupMode(
+  ask: (question: string) => Promise<string>,
+  stdout: (msg: string) => void,
+): Promise<'hud' | 'remote'> {
+  stdout(renderBanner());
+  stdout('What do you want to set up right now?\n');
+  stdout(`  ${c.bold('1) Desktop HUD')}   Press Shift + Cmd + Space on this computer and tell it what to do (recommended)`);
+  stdout(`  ${c.bold('2) Remote use')}    Control this computer from your phone (needs a free Cloudflare account)\n`);
+  for (;;) {
+    const answer = (await ask('Choose 1 or 2 [1]: ')).trim().toLowerCase();
+    if (answer === '' || answer === '1' || answer === 'hud') return 'hud';
+    if (answer === '2' || answer === 'remote') return 'remote';
+    stdout('Please type 1 or 2.');
+  }
+}
+
+/**
+ * Everything the desktop HUD needs, in one pass and in this order: the agent and its
+ * permissions, macOS permissions, browser setup (the fast browser path), the computer-use
+ * tools registered with the agent, then the background HUD service. Each step explains
+ * what it does and asks before changing anything that matters.
+ */
+async function hudSetupFlow(
+  args: string[],
+  context: CommandContext,
+  runner: CommandRunner,
+  fs: FileSystemAdapter,
+  projectRoot: string,
+  stdout: (msg: string) => void,
+  stderr: (msg: string) => void,
+): Promise<number> {
+  const TOTAL = 5;
+  stdout(renderBanner());
+
+  const agyErr = await setupAgentAndPermissions(args, context, runner, fs, projectRoot, stdout, stderr, 1, TOTAL);
+  if (agyErr !== null) return agyErr;
+
+  stdout(renderStepStart(2, TOTAL, 'Browsers (fast browser control)'));
+  if (process.platform === 'darwin') {
+    stdout(renderStepInfo('Checking the browsers you have open (Chrome, Brave, Arc, Edge, Safari)...'));
+    try {
+      await browserSetupCommand(args.includes('--yes') ? ['--yes'] : [], {
+        ...context.browserSetup,
+        stdout,
+        stderr,
+        isTTY: context.isTTY,
+        ask: context.ask,
+      });
+    } catch (err) {
+      stdout(renderStepInfo(`Browser setup skipped: ${err instanceof Error ? err.message : String(err)}`));
+    }
+  } else {
+    stdout(renderStepInfo('Fast browser control is macOS only for now; skipping.'));
+  }
+
+  stdout(renderStepStart(3, TOTAL, 'Computer-use tools for the agent'));
+  const stableCli = path.join(os.homedir(), '.remote-hands', 'cli', 'index.js');
+  const mcpOpts: Parameters<typeof mcpCommand>[1] = {
+    stdout: (msg) => stdout(renderStepInfo(msg)),
+    stderr,
+  };
+  if (await fs.exists(stableCli).catch(() => false)) mcpOpts.cliPath = stableCli;
+  if (context.runner) {
+    stdout(renderStepInfo('Skipped in test mode'));
+  } else {
+    const mcpCode = await mcpCommand(['install'], mcpOpts);
+    if (mcpCode === 0) {
+      stdout(renderStepSuccess('Registered the rh-computer tools with agy'));
+    } else {
+      stdout(renderStepInfo('Could not register the computer-use tools; run "rh mcp install" after fixing the message above.'));
+    }
+  }
+
+  stdout(renderStepStart(4, TOTAL, 'Desktop HUD background service'));
+  const hudService =
+    context.hudServiceManager ??
+    (context.runner
+      ? {
+          install: () => ({ success: true, plistPath: '/mock/LaunchAgents/com.remote-hands.hud.plist' }),
+          isInstalled: () => true,
+          isRunning: () => true,
+        }
+      : new HudServiceManager());
+  if (process.platform !== 'darwin') {
+    stdout(renderStepInfo('The desktop HUD hotkey service is supported on macOS.'));
+  } else {
+    const res = hudService.install();
+    if (res.success) {
+      stdout(renderStepSuccess('Desktop HUD installed and running in the background'));
+    } else {
+      stdout(renderStepInfo(`Desktop HUD note: ${res.error || 'could not auto-load the LaunchAgent'}`));
+    }
+  }
+
+  stdout(renderStepStart(5, TOTAL, 'Done'));
+  stdout(renderStepSuccess('Desktop HUD is ready'));
+  stdout(`\n  Press ${c.bold('Shift + Cmd + Space')} anywhere and type what you want done.`);
+  stdout('  The first request after logging in takes a few seconds longer while the agent starts.');
+  stdout(`  Check everything any time with "${c.cyan('rh browser doctor')}" and "${c.cyan('rh hud status')}".`);
+  stdout(`  Remote (phone) use is not set up yet: run "${c.cyan('rh setup --remote')}" when you want it.\n`);
   return 0;
 }

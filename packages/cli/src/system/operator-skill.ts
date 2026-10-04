@@ -37,6 +37,42 @@ Exploratory diagnostic commands are strictly forbidden:
 - All CLI utilities (\`rh browser\`, \`rh desktop\`, \`rh guide\`, \`rh approve\`) are pre-installed in \`PATH\` and available instantly.
 - Jump directly to the relevant files, tabs, or application windows.
 
+## MCP tools (preferred)
+
+When the \`rh-computer\` MCP server is registered with your agent (\`rh mcp install\`), prefer its tools over shell commands. They run in one warm process, so each call is much faster than spawning \`rh\`, and each action returns the fresh compact UI state, so a separate snapshot after every step is not needed.
+
+| Tool | Purpose |
+|---|---|
+| \`desktop_snapshot\` | List interactive elements of an app as \`[index] Role "label"\`. Optional \`app\` and \`filter\` (role/label substring). |
+| \`desktop_click\` | Press an element by index from the latest \`desktop_snapshot\` through native Accessibility. |
+| \`desktop_type\` | Type text into the focused element. |
+| \`desktop_key\` | Press a key or shortcut such as \`return\` or \`cmd+s\`. |
+| \`desktop_open\` | Launch or activate an app and return its UI state. |
+| \`desktop_menu\` | Fuzzy-search an app menu bar and trigger the best match. |
+| \`desktop_windows\` | List open windows as \`App - Title\`. |
+| \`browser_tabs\` | List browser tabs. |
+| \`browser_focus\` | Switch to an existing tab by index, URL substring or title; returns the page state. |
+| \`browser_open\` | Open a URL (reuses a matching tab) and return the page state. |
+| \`browser_snapshot\` | Re-read the interactive elements of the active tab as \`[id] role "label"\`. |
+| \`browser_click\` | Click a page element by its stable id; returns the new page state. |
+| \`browser_type\` | Type into a page element by its stable id (optional \`submit\` presses Enter); returns the new page state. |
+| \`browser_find\` | Search a large page for elements matching a query (optional \`limit\` 1-20) and return only the best matches. |
+| \`browser_do\` | Run 1-15 browser steps (\`click\`, \`type\`, \`select\`, \`check\`, \`press\`, \`scroll\`, \`wait\`) in one call and return the final page state. |
+| \`browser_extract\` | Read the visible page text (optional \`max_chars\` 200-20000) when you need to read content, not find controls. |
+| \`computer_batch\` | Run up to 12 tool calls in one round trip. |
+
+Rules:
+- Same-app rule: \`desktop_click\` must target the same app as the latest \`desktop_snapshot\`. Omit \`app\` on both calls or pass the same app to both, otherwise the call fails.
+- Browser ids (the numbers in brackets) are stable: they stay valid while the element stays on the page. Every browser action result already contains the updated state, so never call \`browser_snapshot\` again after an action.
+- Use \`browser_do\` to fill and submit a whole form or run any multi-step browser sequence in one call, with ids from the last state you saw. Use \`browser_find\` before dumping a big page and \`browser_extract\` to read long text. \`browser_focus\` and \`browser_open\` reuse existing tabs.
+- If a browser result begins with \`note: fast browser path unavailable\`, tell the user once to run \`rh browser setup\` and continue with the fallback.
+- Desktop indexes are only valid until the next snapshot or action. If an error says \`no longer present\` or \`not in last snapshot\`, call \`desktop_snapshot\` again and use the fresh indexes.
+- \`desktop_click\` presses by Accessibility with no mouse movement. If the element does not support \`AXPress\`, it may fall back to a physical click at the element center. The result then includes a \`note:\` line saying so. This is expected; do not retry.
+- \`computer_batch\` validates every step first and stops at the first failure. Index-based steps (\`desktop_click\`, \`browser_click\`, \`browser_type\`) refer to the UI state after the previous step, which you have not seen, so batch only steps that need no index, with at most one index-based step first or last. For browser sequences use \`browser_do\` instead.
+- The zero-discovery and zero-screenshot mandates apply unchanged to the MCP tools.
+
+The \`rh browser\` and \`rh desktop\` shell commands below remain available as a fallback when the MCP tools are not registered or a tool does not cover the action.
+
 ## Browser Automation & In-Place Tab Continuity
 
 Chrome is pre-launched and authenticated with the user's primary personal profile (logged into Google, GitHub, X, etc.).
@@ -218,7 +254,7 @@ rh approve "Post announcement tweet to @account: Launching Remote Hands 2.0" --r
 | Action | Command |
 |---|---|
 | List browser tabs | \`rh browser tabs\` |
-| Focus browser tab | \`rh browser focus <index|url|title>\` |
+| Focus browser tab | \`rh browser focus <index\\|url\\|title>\` |
 | Open URL (with auto-reuse) | \`rh browser open "<url>"\` |
 | Snapshot browser DOM | \`rh browser snapshot\` |
 | Click browser element | \`rh browser click <index>\` |
@@ -235,7 +271,7 @@ rh approve "Post announcement tweet to @account: Launching Remote Hands 2.0" --r
 | Select menu item | \`rh desktop menu "<app>" "<menu>" "<item>"\` |
 | Show browser guidance arrow | \`rh guide show --browser --index=<idx> --text="<msg>"\` |
 | Show desktop guidance arrow | \`rh guide show --desktop --app="<app>" --target="<btn>" --text="<msg>"\` |
-| Request phone approval | \`rh approve "<summary>" [--risk=high] [--action=publish|delete|push|pay|send]\` |
+| Request phone approval | \`rh approve "<summary>" [--risk=high] [--action=publish\\|delete\\|push\\|pay\\|send]\` |
 
 ## Common Mistakes & Rationalization Table
 
@@ -249,6 +285,7 @@ rh approve "Post announcement tweet to @account: Launching Remote Hands 2.0" --r
 | "I can post or delete without approval if the prompt said 'do it'." | Irreversible or public actions strictly require \`rh approve\` before execution. |
 | "The user rejected my approval so I should retry the exact same request." | Read the rejection reason from stderr, revise the content or approach, and re-request approval. |
 | "I should write a Swift or Python script with CGEvent or pyautogui to click." | Strictly prohibited. Never move the physical mouse pointer. Use \`rh browser click\` for web elements and \`rh desktop ax-action\` for desktop controls. |
+
 `;
 
 export async function ensureRemoteHandsOperatorSkill(

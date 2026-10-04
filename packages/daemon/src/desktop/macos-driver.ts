@@ -1,7 +1,7 @@
-import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { fastExec } from './fast-exec.js';
 
 export interface WindowInfo {
   app: string;
@@ -61,10 +61,7 @@ export class MacOsDriver {
   public exec: ExecFunction;
 
   constructor(options?: MacOsDriverOptions) {
-    this.exec = options?.exec ?? ((cmd, args) => {
-      const res = spawnSync(cmd, args, { encoding: 'utf-8' });
-      return { stdout: res.stdout || '', stderr: res.stderr || '', status: res.status };
-    });
+    this.exec = options?.exec ?? fastExec;
   }
 
   async openApp(appName: string): Promise<void> {

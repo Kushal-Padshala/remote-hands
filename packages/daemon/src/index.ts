@@ -1,4 +1,6 @@
 export * from './agy-runner.js';
+export * from './warm-agy-session.js';
+export * from './computer/prompt.js';
 export * from './approval-gate.js';
 export * from './browser-snapshot.js';
 export * from './browser-driver.js';
@@ -18,6 +20,15 @@ export * from './runtime.js';
 export * from './screen-capture.js';
 export * from './task-store.js';
 export * from './desktop/macos-driver.js';
+export * from './desktop/fast-exec.js';
+export * from './browser/browsers.js';
+export * from './browser/applescript.js';
+export * from './browser/transport.js';
+export * from './browser/page-scripts.js';
+export * from './browser/port.js';
+export * from './browser/render.js';
+export * from './browser/engine.js';
+export * from './browser/legacy-port.js';
 export {
   AxWalker,
   type RawAxNode,
@@ -44,3 +55,9 @@ export * from './system/power-manager.js';
 export * from './desktop/ax-actions.js';
 export * from './desktop/menu-crawler.js';
 export * from './desktop/slicer-adapter.js';
+export * from './computer/compact.js';
+export * from './computer/session.js';
+export * from './computer/tools.js';
+export * from './computer/mcp-server.js';
+export * from './browser/setup.js';
+export * from './browser/auto-enable.js';

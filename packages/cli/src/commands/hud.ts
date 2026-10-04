@@ -10,6 +10,7 @@ import * as fs from 'node:fs';
 import type { CommandContext } from './setup.js';
 import { c } from '../output/ui.js';
 import { ensureAgyPermissions } from '../system/agy-permissions.js';
+import { offerForContext } from './browser-setup.js';
 import {
   grantMacAutomationPermissions,
   ensureMacPermissions,
@@ -48,6 +49,7 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
     stdout('Configuring system permissions for desktop overlay assistant...');
     await ensureAgyPermissions(context.fs);
     grantMacAutomationPermissions();
+    await offerForContext(context);
     stdout('Installing Remote Hands Desktop Overlay background service...');
     const res = serviceManager.install();
     if (res.success) {
@@ -103,11 +105,18 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
         stdout(c.brightGreen(`\n✔ [Spotlight HUD] Task completed: ${summary}`));
       },
     });
-    const success = await coordinator.triggerPrompt(app);
-    if (success) {
-      stdout('✓ Action initiated from Spotlight HUD');
-    } else {
-      stdout('Spotlight HUD prompt cancelled');
+    try {
+      const success = await coordinator.triggerPrompt(app);
+      if (success) {
+        stdout('✓ Action initiated from Spotlight HUD');
+      } else {
+        stdout('Spotlight HUD prompt cancelled');
+      }
+      // triggerPrompt starts the task in the background; wait for it before stopping the runner.
+      await coordinator.whenIdle?.();
+    } finally {
+      // Stop the warm agy child so the one-shot process can exit.
+      coordinator.dispose?.();
     }
     return 0;
   }
@@ -115,6 +124,7 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
   if (subcommand === 'listen') {
     await ensureAgyPermissions(context.fs);
     grantMacAutomationPermissions();
+    await offerForContext(context);
     if (process.platform === 'darwin' && !context.runner && !args.includes('--skip-permissions') && !checkMacScreenCapture()) {
       await ensureMacPermissions(stdout);
     }

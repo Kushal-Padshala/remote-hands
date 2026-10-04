@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { BrowserDriver, ChromeManager, MacOsDriver } from '@remote-hands/daemon';
+import { browserDoctor } from './browser-doctor.js';
+import { browserSetupCommand } from './browser-setup.js';
 import type { CommandContext } from './setup.js';
 
 export function findChromeBinary(): string {
@@ -57,6 +59,26 @@ export async function browserCommand(args: string[], context: CommandContext = {
   const isHeadless = args.includes('--headless') || process.env.REMOTE_HANDS_HEADLESS === '1';
   const cleanArgs = args.filter((a) => a !== '--headless');
   const cdpUrl = process.env.BU_CDP_URL || 'http://127.0.0.1:9222';
+
+  // The doctor only asks AppleScript about browsers that are already running. Handle it
+  // before the CDP readiness check, which can spawn Chrome and prints the CDP warning.
+  if (cleanArgs[0] === 'doctor') {
+    return browserDoctor(cleanArgs.slice(1), {
+      transport: context.browserTransport,
+      env: context.env,
+      stdout,
+      stderr,
+    });
+  }
+
+  // Same for setup: it only talks to browsers that are already running.
+  if (cleanArgs[0] === 'setup') {
+    return browserSetupCommand(cleanArgs.slice(1), {
+      ...context.browserSetup,
+      stdout,
+      stderr,
+    });
+  }
 
   const ready = await ensureChromeAutomationReady({ headless: isHeadless, cdpUrl });
   if (!ready && !(process.platform === 'darwin' && ChromeManager.isSystemChromeRunning())) {

@@ -208,6 +208,21 @@ describe('HudCoordinator', () => {
     expect(formatted).toContain('Full-Speed Execution:');
   });
 
+  it('execution mandate prefers the rh-computer MCP tools, keeps rh shell commands as fallback and the zero-screenshot/zero-mouse rule', () => {
+    const formatted = formatContextualTaskPrompt('do it', { app: 'Arc', isBrowser: true });
+    const rule5 = formatted.split('\n').find((l) => l.startsWith('5. '))!;
+    expect(rule5).toContain('ZERO SCREENSHOTS & ZERO PHYSICAL MOUSE MOVEMENTS');
+    for (const tool of ['browser_snapshot', 'browser_click', 'browser_type', 'desktop_snapshot', 'desktop_click', 'computer_batch']) {
+      expect(rule5).toContain(tool);
+    }
+    expect(rule5).toContain('browser_do');
+    expect(rule5).toMatch(/fallback/i);
+    expect(rule5).toContain('`rh browser snapshot`');
+    expect(rule5).toContain('`rh desktop ax-action <app> <index> [action]`');
+    expect(rule5).toContain('Never take screenshots and never simulate physical mouse clicks');
+    expect(rule5).toContain('except the physical-click fallback that desktop_click reports in its result');
+  });
+
   it('formats rich contextual task prompt with user attached context', () => {
     const formatted = formatContextualTaskPrompt(
       'launch marketing campaign',
@@ -687,5 +702,112 @@ describe('HudCoordinator', () => {
       'To change the color in Bambu Studio, click the filament swatch under Project Filaments.',
       'DONE'
     );
+  });
+});
+
+describe('HudCoordinator default warm runner lifecycle', () => {
+  function makeDeps() {
+    const hudRunner: any = {
+      openPrompt: vi.fn(),
+      startListener: vi.fn().mockReturnValue({ stop: vi.fn() }),
+      openInteractivePrompt: vi.fn().mockReturnValue({ close: vi.fn() }),
+    };
+    const fakeRunner = {
+      run: vi.fn(),
+      prewarm: vi.fn(),
+      newConversation: vi.fn(),
+      stop: vi.fn(),
+    };
+    const defaultRunnerFactory = vi.fn(() => fakeRunner as any);
+    const deps = {
+      hudRunner,
+      intentResolver: { resolve: vi.fn() } as any,
+      guidanceManager: { startSession: vi.fn() } as any,
+      macosDriver: { getActiveWindowContext: vi.fn(), focusWindow: vi.fn() } as any,
+      store: {} as any,
+      defaultRunnerFactory,
+    };
+    return { hudRunner, fakeRunner, defaultRunnerFactory, deps };
+  }
+
+  it('prewarms the default runner on startListening and stops it on stop()', () => {
+    const { fakeRunner, defaultRunnerFactory, deps } = makeDeps();
+    const listener = new HudCoordinator(deps).startListening();
+    expect(defaultRunnerFactory).toHaveBeenCalledTimes(1);
+    expect(fakeRunner.prewarm).toHaveBeenCalledTimes(1);
+    expect(fakeRunner.prewarm).toHaveBeenCalledWith({ mode: 'autonomous' });
+    expect(fakeRunner.stop).not.toHaveBeenCalled();
+    listener.stop();
+    expect(fakeRunner.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts a fresh warm conversation on a new hotkey session and on cancel', async () => {
+    const { hudRunner, fakeRunner, deps } = makeDeps();
+    const coordinator = new HudCoordinator(deps);
+    coordinator.startListening();
+    const cb = hudRunner.startListener.mock.calls[0]![0];
+    await cb({ event: 'hotkey', app: 'Google Chrome' });
+    expect(fakeRunner.newConversation).toHaveBeenCalledTimes(1);
+    expect(fakeRunner.newConversation).toHaveBeenCalledWith({ mode: 'autonomous' });
+    await coordinator.cancelActiveTask();
+    expect(fakeRunner.newConversation).toHaveBeenCalledTimes(2);
+  });
+
+  it('dispose stops the default runner and is idempotent', () => {
+    const { fakeRunner, deps } = makeDeps();
+    const coordinator = new HudCoordinator(deps);
+    coordinator.startListening();
+    coordinator.dispose();
+    coordinator.dispose();
+    expect(fakeRunner.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('whenIdle resolves only after auto-executed tasks finish', async () => {
+    let finishRun!: (v: any) => void;
+    const runner = { run: vi.fn(() => new Promise((resolve) => { finishRun = resolve; })) };
+    const created: any[] = [];
+    const store = {
+      createTask: vi.fn(async (input: any) => {
+        const t = { id: 'task-idle', ...input };
+        created.push(t);
+        return t;
+      }),
+      claimNextTask: vi.fn(async () => created[0]),
+      markTaskRunning: vi.fn(async (id: string) => ({ id, status: 'running', ...created[0] })),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+      cancelTask: vi.fn().mockResolvedValue({ status: 'cancelled' }),
+    };
+    const { deps } = makeDeps();
+    const coordinator = new HudCoordinator({ ...deps, store: store as any, runner: runner as any, autoExecute: true });
+    deps.intentResolver.resolve.mockResolvedValue({ type: 'task' });
+    deps.macosDriver.getActiveWindowContext.mockResolvedValue({ app: 'Mail', title: 'Inbox', isBrowser: false });
+    await coordinator.handleResult({ query: 'open mail', app: 'Mail' } as any, () => {});
+    let idle = false;
+    const idlePromise = coordinator.whenIdle().then(() => { idle = true; });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(runner.run).toHaveBeenCalled();
+    expect(idle).toBe(false);
+    finishRun({ status: 'done', summary: 'ok', conversationId: 'c' });
+    await idlePromise;
+    expect(idle).toBe(true);
+  });
+
+  it('dispose is a no-op when a runner was injected or none was created', () => {
+    const { fakeRunner, deps } = makeDeps();
+    expect(() => new HudCoordinator(deps).dispose()).not.toThrow();
+    expect(() => new HudCoordinator({ ...deps, runner: { run: vi.fn() } as any }).dispose()).not.toThrow();
+    expect(fakeRunner.stop).not.toHaveBeenCalled();
+  });
+
+  it('does not create or prewarm a default runner when a runner is injected', () => {
+    const { hudRunner, fakeRunner, defaultRunnerFactory, deps } = makeDeps();
+    const injected = { run: vi.fn() };
+    const listener = new HudCoordinator({ ...deps, runner: injected as any }).startListening();
+    expect(hudRunner.startListener).toHaveBeenCalled();
+    listener.stop();
+    expect(defaultRunnerFactory).not.toHaveBeenCalled();
+    expect(fakeRunner.prewarm).not.toHaveBeenCalled();
+    expect(fakeRunner.stop).not.toHaveBeenCalled();
   });
 });
