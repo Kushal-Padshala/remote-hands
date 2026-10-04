@@ -40,7 +40,6 @@ export interface BrowserSetupOptions {
   now?: (() => Date) | undefined;
 }
 
-export const DEFAULT_STATE_PATH = defaultSetupStatePath();
 
 const USAGE = [
   'Usage: rh browser setup [--yes] [--disable] [--debug] [--browser <name>]',
@@ -211,7 +210,7 @@ function buildCtx(opts: BrowserSetupOptions, flags: { yes: boolean }): { ctx: Ct
   const transport = opts.transport ?? real;
   const setup = opts.setup ?? new BrowserSetup({ transport: real });
   const fs = opts.fs ?? nodeSetupFs;
-  const statePath = opts.statePath ?? DEFAULT_STATE_PATH;
+  const statePath = opts.statePath ?? defaultSetupStatePath();
   const ctx: Ctx = {
     out: opts.stdout,
     setup,
@@ -306,7 +305,7 @@ export async function offerBrowserSetupOnce(opts: BrowserSetupOptions): Promise<
   try {
     const { ctx, transport } = buildCtx(opts, { yes: false });
     const fs = opts.fs ?? nodeSetupFs;
-    const statePath = opts.statePath ?? DEFAULT_STATE_PATH;
+    const statePath = opts.statePath ?? defaultSetupStatePath();
     const state = await readSetupState(fs, statePath);
     const running = (await transport.environment()).running;
     const pending = BROWSERS.filter((b) => running.includes(b.name) && shouldOffer(state, b.name));
