@@ -11,6 +11,7 @@ import type { CommandContext } from './setup.js';
 import { c } from '../output/ui.js';
 import { ensureAgyPermissions } from '../system/agy-permissions.js';
 import { offerForContext } from './browser-setup.js';
+import { resolveFastLane } from '../system/fast-lane.js';
 import {
   ensureMacPermissions,
   checkMacScreenCapture,
@@ -126,8 +127,11 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
       await ensureMacPermissions(stdout);
     }
 
-    const coordinator = context.coordinator ?? new HudCoordinator({
+    // Local fast lane (off unless `rh fast-lane enable` was run); absent when the model is not installed.
+    const fast = context.coordinator ? undefined : await resolveFastLane(context, stdout);
 
+    const coordinator = context.coordinator ?? new HudCoordinator({
+      ...(fast ? { fastLane: fast.fastLane } : {}),
       autoExecute: true,
       onTaskCreated: (task) => {
         stdout(`\n${c.brightGreen('⚡')} [Spotlight HUD] New task initiated: "${((task as any).goal || task.prompt).slice(0, 60)}..."`);
@@ -157,7 +161,8 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
         try {
           listener.stop();
         } catch {}
-        resolve();
+        // Stop the local model process too, then let the process end.
+        Promise.resolve(fast?.dispose()).catch(() => {}).finally(resolve);
       };
       process.once('SIGINT', shutdown);
       process.once('SIGTERM', shutdown);
