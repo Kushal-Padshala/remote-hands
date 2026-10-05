@@ -253,7 +253,10 @@ export class LlamaSidecar {
         throw new Error(`llama-server exited before it was ready (${reason})${line ? `: ${redact(line)}` : ''}`);
       }
       try {
-        const res = await doFetch(`${this.baseUrl()}/health`, { headers: { Authorization: `Bearer ${key}` } });
+        const res = await doFetch(`${this.baseUrl()}/health`, {
+          headers: { Authorization: `Bearer ${key}` },
+          signal: AbortSignal.timeout(2000),
+        });
         if (res.ok) {
           const body = (await res.json().catch(() => null)) as { status?: string } | null;
           if (body === null || body.status === 'ok') break;

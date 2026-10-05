@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildPrompt, LlamaDecisionEngine, parseDecision } from './decide.js';
+import { buildPrompt, LlamaDecisionEngine, MIN_LETTER_MASS, parseDecision } from './decide.js';
 
 const opts2 = [
   { id: 'open', text: 'Open an application' },
@@ -50,6 +50,18 @@ describe('buildPrompt', () => {
     expect(prompt).not.toContain('<think>');
   });
 
+  it('caps the size of untrusted state, question and option text so the prompt fits the context', () => {
+    const huge = 'word '.repeat(20_000);
+    const { prompt } = buildPrompt(
+      { state: huge, question: huge, options: [{ id: 'a', text: huge }, { id: 'b', text: 'short' }] },
+      'qwen3-instruct',
+    );
+    expect(prompt.length).toBeLessThan(8_000);
+    expect(prompt).toContain('[state truncated]');
+    expect(prompt).toContain('B. short');
+    expect(prompt).toContain('Answer with the letter only.'); // the tail instructions survive truncation
+  });
+
   it('keeps each option on one line even if its text has newlines', () => {
     const { prompt } = buildPrompt({ state: 's', question: 'q', options: [{ id: 'a', text: 'line one\nline two' }, { id: 'b', text: 'two' }] }, 'qwen3-instruct');
     expect(prompt).toContain('A. line one line two\nB. two');
@@ -81,7 +93,7 @@ describe('parseDecision', () => {
 
   it('returns no decision when the model emitted no option letter', () => {
     const r = parseDecision(top([['<think>', -0.1], ['Okay', -2]]), letters, opts2);
-    expect(r).toEqual({ choice: null, probabilities: {}, gapNats: 0 });
+    expect(r).toEqual({ choice: null, probabilities: {}, gapNats: 0, letterMass: 0 });
   });
 
   it('returns no decision for a malformed response', () => {
@@ -90,9 +102,23 @@ describe('parseDecision', () => {
     expect(parseDecision({ completion_probabilities: [] }, letters, opts2).choice).toBeNull();
   });
 
-  it('never maps a letter outside the offered options', () => {
+  it('never maps a letter outside the offered options: a model that picked C of two options made no decision', () => {
     const r = parseDecision(top([['C', -0.01], ['A', -2]]), letters, opts2);
-    expect(r.choice).toBe('open');
+    expect(r.choice).toBeNull();
+  });
+
+  it('reports the probability mass on the option letters', () => {
+    const r = parseDecision(top([['A', -0.25], ['B', -1.5], ['<think>', -6.8]]), letters, opts2);
+    expect(r.letterMass).toBeCloseTo(Math.exp(-0.25) + Math.exp(-1.5), 6);
+  });
+
+  it('makes no decision when the model put most of its probability on something that is not an option', () => {
+    // 90% on "The", and B only barely inside the top list: renormalising would fake a confident B.
+    const r = parseDecision(top([['The', -0.1], ['A', -4], ['B', -9]]), letters, opts2);
+    expect(MIN_LETTER_MASS).toBe(0.5);
+    expect(r.choice).toBeNull();
+    expect(r.gapNats).toBe(0);
+    expect(r.letterMass).toBeLessThan(MIN_LETTER_MASS);
   });
 });
 
@@ -151,6 +177,17 @@ describe('LlamaDecisionEngine', () => {
     const engine = new LlamaDecisionEngine(sidecar(), 'qwen3-instruct', fetchFn as any);
     await expect(engine.decide({ state: 's', question: 'q', options: opts2 })).rejects.toThrow('ECONNREFUSED');
     expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('times out a request that never answers instead of hanging the pilot', async () => {
+    const hang = vi.fn((_url: string, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+      }),
+    );
+    const engine = new LlamaDecisionEngine(sidecar(), 'qwen3-instruct', hang as any, 25);
+    await expect(engine.decide({ state: 's', question: 'q', options: opts2 })).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(hang).toHaveBeenCalledTimes(2); // one retry, then the error surfaces
   });
 
   it('rejects too many options before touching the sidecar', async () => {

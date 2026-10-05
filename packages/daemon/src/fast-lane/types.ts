@@ -22,6 +22,11 @@ export interface DecideResult {
    * `choice` is null. Small gaps mean the model is unsure; the pilot hands over to the brain.
    */
   gapNats: number;
+  /**
+   * Probability mass the model put on the option letters (0 to 1). Low mass means it wanted to say
+   * something else, so the choice is null rather than a confident-looking guess.
+   */
+  letterMass: number;
   latencyMs: number;
   promptTokens: number;
 }

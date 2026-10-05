@@ -87,6 +87,13 @@ describe('LlamaSidecar', () => {
     expect(sidecar.isRunning()).toBe(true);
   });
 
+  it('gives every health check a timeout signal so a wedged server cannot stall startup', async () => {
+    const { sidecar, fetchFn } = harness();
+    await sidecar.start();
+    const init = fetchFn.mock.calls[0]![1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it('waits through loading responses until the health check is ok', async () => {
     const { sidecar, fetchFn } = harness({ health: [loading, loading, ok] });
     await sidecar.start();
