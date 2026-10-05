@@ -21,7 +21,11 @@ export interface OptionContext {
   brief?: string | undefined;
   /** Values the pilot may type, by name (from the request, slots or the brain's brief). */
   facts: Record<string, string>;
-  history: ReadonlyArray<{ op: string; elementId?: string | undefined }>;
+  history: ReadonlyArray<{ op: string; elementId?: string | undefined; page?: string | undefined }>;
+  /** Ids of radios and checkboxes the pilot itself checked on this page (not page defaults). */
+  pilotChecked?: ReadonlySet<string> | undefined;
+  /** Identifies the current page, so earlier actions on other pages (which reuse ids) do not count. */
+  pageKey?: string | undefined;
   maxOptions?: number | undefined;
 }
 
@@ -31,7 +35,8 @@ const HANDOFF_TEXT = 'I am not sure what to do next; ask for help.';
 const FILL_ROLES = new Set(['textbox', 'searchbox', 'textarea', 'combobox', 'spinbutton', 'input']);
 const CHECK_ROLES = new Set(['checkbox', 'radio', 'switch', 'menuitemcheckbox', 'menuitemradio']);
 const INERT_ROLES = new Set(['heading', 'text', 'image', 'img', 'paragraph', 'separator', 'status', 'group', 'wait']);
-const FORWARD = /^(next|continue|submit|start|begin|search|save|done|finish|ok|okay|confirm|sign in|log in|login|apply|go|get started|proceed)\b/i;
+const FORWARD =
+  /^(?:next|continue|submit|start|begin|search|save|done|finish|ok|okay|confirm|sign in|log in|login|apply|go|get started|proceed|check ?out|sign up|register|download|upload|send|add (?:\S+ )*?to (?:my )?(?:cart|basket|bag))\b/i;
 
 function words(s: string): string[] {
   return s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3);
@@ -69,14 +74,16 @@ export function buildOptions(view: PilotView, ctx: OptionContext): PilotOption[]
   const factValues = new Set(Object.values(ctx.facts));
   const hasFacts = Object.keys(ctx.facts).length > 0;
   const recent = ctx.history.slice(-6);
-  const used = (id: string) => recent.filter((h) => h.elementId === id).length;
+  const used = (id: string) => recent.filter((h) => h.elementId === id && (ctx.pageKey === undefined || h.page === ctx.pageKey)).length;
+  const pilotChecked = ctx.pilotChecked ?? new Set<string>();
 
-  // A group of radios is a run of consecutive radio elements. Once one is chosen the rest are not
-  // offered: choosing another would change the answer, and a model that keeps trying to is stuck.
+  // A group of radios is a run of consecutive radio elements. Once the pilot has chosen one the rest
+  // are not offered: choosing another would change the answer, and a model that keeps trying to is
+  // stuck. A radio that was already checked when the page loaded is only a default, and stays changeable.
   const answeredRadio = new Set<number>();
   let run: number[] = [];
   const closeRun = () => {
-    if (run.some((i) => view.elements[i]!.checked === true)) for (const i of run) answeredRadio.add(i);
+    if (run.some((i) => pilotChecked.has(view.elements[i]!.id))) for (const i of run) answeredRadio.add(i);
     run = [];
   };
   view.elements.forEach((e, i) => {

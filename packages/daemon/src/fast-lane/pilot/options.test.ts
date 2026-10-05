@@ -98,18 +98,25 @@ describe('buildOptions: what is offered', () => {
     expect(all.filter((t) => t.startsWith('click'))).toEqual(['click [4] button "Go"']);
   });
 
-  it('does not re-offer a checked radio or checkbox, nor the unchosen radios of the same group', () => {
+  it('does not re-offer a checked radio or checkbox, nor the unchosen radios of a group the pilot answered', () => {
     const v = view([el(1, 'radio', 'A', { checked: true }), el(2, 'radio', 'B'), el(3, 'checkbox', 'C', { checked: true }), el(4, 'checkbox', 'D')]);
-    const all = texts(v, ctx());
+    const all = texts(v, ctx({ pilotChecked: new Set(['1']) }));
     expect(all.some((t) => t.includes('[1]') || t.includes('[2]') || t.includes('[3]'))).toBe(false);
     expect(all).toContain('tick [4] checkbox "D"');
   });
 
-  it('stops offering the other radios of a group once one is chosen', () => {
+  it('stops offering the other radios of a group once the pilot chose one', () => {
     const v = view([el(7, 'radio', 'Very concerned'), el(8, 'radio', 'Somewhat concerned', { checked: true }), el(9, 'radio', 'Not very concerned'), el(12, 'button', 'Next')]);
-    const all = texts(v, ctx());
+    const all = texts(v, ctx({ pilotChecked: new Set(['8']) }));
     expect(all.some((t) => t.includes('[7]') || t.includes('[9]') || t.includes('[8]'))).toBe(false);
     expect(all).toContain('click [12] button "Next"');
+  });
+
+  it('keeps offering the other radios when the checked one is only a page default the pilot did not choose', () => {
+    const v = view([el(1, 'radio', 'Standard shipping', { checked: true }), el(2, 'radio', 'Express shipping'), el(3, 'button', 'Continue')]);
+    const all = texts(v, ctx({ goal: 'choose express shipping' }));
+    expect(all).toContain('select [2] radio "Express shipping"');
+    expect(all.some((t) => t.includes('[1]'))).toBe(false); // the default itself is not offered again
   });
 
   it('keeps offering a second radio group that has no answer yet when something separates the groups', () => {
@@ -118,7 +125,7 @@ describe('buildOptions: what is offered', () => {
       el(3, 'button', 'Help'),
       el(4, 'radio', 'Monthly'), el(5, 'radio', 'Yearly'),
     ]);
-    const all = texts(v, ctx());
+    const all = texts(v, ctx({ pilotChecked: new Set(['1']) }));
     expect(all).toContain('select [4] radio "Monthly"');
     expect(all).toContain('select [5] radio "Yearly"');
     expect(all.some((t) => t.includes('[2]'))).toBe(false);
@@ -126,7 +133,7 @@ describe('buildOptions: what is offered', () => {
 
   it('keeps unchecked checkboxes next to a checked one (more than one can be ticked)', () => {
     const v = view([el(1, 'checkbox', 'A', { checked: true }), el(2, 'checkbox', 'B')]);
-    expect(texts(v, ctx())).toContain('tick [2] checkbox "B"');
+    expect(texts(v, ctx({ pilotChecked: new Set(['1']) }))).toContain('tick [2] checkbox "B"');
   });
 
   it('offers scroll only when the page has a scroll action', () => {
@@ -166,6 +173,21 @@ describe('buildOptions: ranking', () => {
     const worn = buildOptions(v, ctx({ goal: 'continue', history: [{ op: 'click', elementId: '2' }, { op: 'click', elementId: '2' }] }));
     expect(fresh[0]!.text).toContain('[2]');
     expect(worn[0]!.text).toContain('[1]');
+  });
+
+  it('only counts earlier actions on the same page when demoting a worn element (ids are reused across pages)', () => {
+    const v = view([el(1, 'button', 'Next'), el(2, 'button', 'Continue')]);
+    const onThisPage = buildOptions(v, ctx({ goal: 'continue', pageKey: 'page-3', history: [{ op: 'click', elementId: '2', page: 'page-3' }, { op: 'click', elementId: '2', page: 'page-3' }] }));
+    const onEarlierPages = buildOptions(v, ctx({ goal: 'continue', pageKey: 'page-3', history: [{ op: 'click', elementId: '2', page: 'page-1' }, { op: 'click', elementId: '2', page: 'page-2' }] }));
+    expect(onThisPage[0]!.text).toContain('[1]');
+    expect(onEarlierPages[0]!.text).toContain('[2]');
+  });
+
+  it('boosts add to cart, checkout, sign up and search buttons so a long page does not cut them', () => {
+    for (const label of ['Add to cart', 'Checkout', 'Sign up', 'Search', 'Download invoice']) {
+      const many = [...Array.from({ length: 14 }, (_, i) => el(i + 1, 'link', `Footer link ${i + 1}`)), el(40, 'button', label)];
+      expect(buildOptions(view(many), ctx({ goal: 'xyz' }))[0]!.text).toBe(`click [40] button "${label}"`);
+    }
   });
 
   it('keeps document order for equally scored elements', () => {

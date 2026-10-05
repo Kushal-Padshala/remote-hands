@@ -57,7 +57,7 @@ describe('pilot acceptance (scripted oracle)', () => {
     const site = new LoginSite();
     const policy: Policy = (i) => {
       if (/Which value belongs in the field/.test(i.question)) {
-        return find(i, i.question.includes('"Email"') ? /^email = / : /^password = /);
+        return find(i, i.question.includes('"Email"') ? /^email$/ : /^password$/);
       }
       return find(i, /^fill \[\d+\] textbox "Email"/) ?? find(i, /^fill \[\d+\] textbox "Password"/) ?? find(i, /^click \[\d+\] button "Sign in"/);
     };
@@ -80,7 +80,7 @@ describe('pilot acceptance (scripted oracle)', () => {
   it('stops at Place order when the approval is rejected and never places the order', async () => {
     const site = new ShopSite();
     const policy: Policy = (i) => {
-      if (/Which value belongs in the field/.test(i.question)) return find(i, /^search_query = /);
+      if (/Which value belongs in the field/.test(i.question)) return find(i, /^search_query$/);
       const done = recent(i);
       return (
         find(i, /^fill \[1\] textbox "Search products"/) ??
