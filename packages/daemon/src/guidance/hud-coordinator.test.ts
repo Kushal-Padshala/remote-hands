@@ -820,6 +820,93 @@ describe('HudCoordinator', () => {
     expect(updateSender).toHaveBeenCalledWith('COMPLETE', 'Downloaded files successfully', 'DONE');
   });
 
+  function deferredDigestHarness(onTaskCompleted?: () => Promise<void> | void) {
+    const createdTasks: any[] = [];
+    const store = {
+      createTask: vi.fn(async (input: any) => {
+        const { goal, ...rest } = input;
+        const task = { id: `digest-${createdTasks.length + 1}`, ...rest };
+        createdTasks.push(task);
+        return task;
+      }),
+      markTaskRunning: vi.fn(async (id: string) => createdTasks.find((task) => task.id === id)),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+      cancelTask: vi.fn().mockResolvedValue(undefined),
+      failTask: vi.fn().mockResolvedValue(undefined),
+    };
+    const taskCoordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: store as any,
+      runner: { run: vi.fn().mockResolvedValue({ status: 'done', summary: 'Answered seven questions' }) } as any,
+      autoExecute: false,
+      onTaskCompleted,
+    });
+    return { taskCoordinator, store, createdTasks };
+  }
+
+  it('does not carry a digest when stopped while completion is pending', async () => {
+    const { taskCoordinator, store, createdTasks } = deferredDigestHarness();
+    let finishCompletion!: () => void;
+    let completionStarted!: () => void;
+    const started = new Promise<void>((resolve) => { completionStarted = resolve; });
+    store.completeTask.mockImplementationOnce(() => {
+      completionStarted();
+      return new Promise<void>((resolve) => { finishCompletion = resolve; });
+    });
+    await taskCoordinator.handleResult({ query: 'complete this survey', app: 'Google Chrome' });
+    const execution = taskCoordinator.executeTaskStandalone(createdTasks[0]);
+    await started;
+    await taskCoordinator.stopActiveTask();
+    finishCompletion();
+    await execution;
+    await taskCoordinator.handleResult({ query: 'write answers to a note', app: 'Google Chrome' });
+    expect(createdTasks[1].prompt).not.toContain('Previous task (just finished)');
+  });
+
+  it('does not carry a digest when cancelled during the completion callback', async () => {
+    let finishCallback!: () => void;
+    let callbackStarted!: () => void;
+    const started = new Promise<void>((resolve) => { callbackStarted = resolve; });
+    const { taskCoordinator, createdTasks } = deferredDigestHarness(() => {
+      callbackStarted();
+      return new Promise<void>((resolve) => { finishCallback = resolve; });
+    });
+    await taskCoordinator.handleResult({ query: 'complete this survey', app: 'Google Chrome' });
+    const execution = taskCoordinator.executeTaskStandalone(createdTasks[0]);
+    await started;
+    await taskCoordinator.cancelActiveTask();
+    finishCallback();
+    await execution;
+    await taskCoordinator.handleResult({ query: 'write answers to a note', app: 'Google Chrome' });
+    expect(createdTasks[1].prompt).not.toContain('Previous task (just finished)');
+  });
+
+  it('pairs the digest with the goal of the task actually claimed from the queue', async () => {
+    const { taskCoordinator, store, createdTasks } = deferredDigestHarness();
+    await taskCoordinator.handleResult({ query: 'complete the survey', app: 'Google Chrome' });
+    await taskCoordinator.handleResult({ query: 'play my liked songs', app: 'Google Chrome' });
+    Object.assign(store, { claimNextTask: vi.fn().mockResolvedValueOnce(createdTasks[0]) });
+    await taskCoordinator.executeTaskStandalone(createdTasks[1]);
+    await taskCoordinator.handleResult({ query: 'write answers to a note', app: 'Google Chrome' });
+    const section = createdTasks[2].prompt.split('Previous task (just finished)')[1];
+    expect(section).toContain('Goal: complete the survey');
+    expect(section).not.toContain('Goal: play my liked songs');
+  });
+
+  it('does not carry a digest when the completion callback fails the task', async () => {
+    const { taskCoordinator, createdTasks } = deferredDigestHarness(() => {
+      throw new Error('Completion failed');
+    });
+    await taskCoordinator.handleResult({ query: 'complete this survey', app: 'Google Chrome' });
+    await taskCoordinator.executeTaskStandalone(createdTasks[0]);
+    await taskCoordinator.handleResult({ query: 'write answers to a note', app: 'Google Chrome' });
+    expect(createdTasks[1].prompt).not.toContain('Previous task (just finished)');
+  });
+
   it('classifies complex instructional requests as autonomous goals and executes via agent', async () => {
     expect(
       isAutonomousGoal('can you please teach me how to change the color of the overlay which i have added here')

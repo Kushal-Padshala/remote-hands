@@ -428,10 +428,9 @@ export class HudCoordinator {
     // Only a task that finishes successfully leaves a digest; a failed or stopped one must not
     // let an older digest be presented as "just finished".
     this.lastTaskDigest = undefined;
-    const query = this.taskQueries.get(task.id);
-    this.taskQueries.delete(task.id);
     const abortController = new AbortController();
-    this.activeExecution = { taskId: task.id, abortController };
+    const execution = { taskId: task.id, abortController };
+    this.activeExecution = execution;
 
     if (signal) {
       if (signal.aborted) {
@@ -442,6 +441,7 @@ export class HudCoordinator {
     }
 
     let running: Task | undefined;
+    let completedDigest: PreviousTaskDigest | undefined;
     try {
       if (store.claimNextTask) {
         const claimed = await store.claimNextTask('machine-local');
@@ -470,6 +470,8 @@ export class HudCoordinator {
         this.activeExecution.taskId = running.id;
       }
       this.currentTaskId = running.id;
+      const query = this.taskQueries.get(running.id);
+      this.taskQueries.delete(running.id);
 
       await store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
 
@@ -519,8 +521,8 @@ export class HudCoordinator {
         }
       } else {
         await store.completeTask(running.id, { summary: res.summary, conversationId: res.conversationId });
-        this.lastTaskDigest = {
-          goal: String(query ?? task.prompt ?? '').slice(0, PREVIOUS_TASK_GOAL_MAX),
+        completedDigest = {
+          goal: String(query ?? running.prompt ?? '').slice(0, PREVIOUS_TASK_GOAL_MAX),
           summary: res.summary ?? '',
           finishedAt: Date.now(),
         };
@@ -530,6 +532,11 @@ export class HudCoordinator {
       }
       if (this.onTaskCompleted && !abortController.signal.aborted) {
         await this.onTaskCompleted(running, res.summary);
+      }
+      // Completion hooks can fail, cancel this task, or start another one. Only the
+      // successful execution that still owns the coordinator may publish its result.
+      if (completedDigest && !abortController.signal.aborted && this.activeExecution === execution) {
+        this.lastTaskDigest = completedDigest;
       }
     } catch (err: any) {
       const targetId = running?.id || task.id;
