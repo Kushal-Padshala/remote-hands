@@ -103,9 +103,18 @@ describe('downloadVerified', () => {
       let pulls = 0;
       const body = new ReadableStream<Uint8Array>({
         pull(controller) {
-          // A real connection delivers some bytes, then drops.
-          if (pulls++ === 0) controller.enqueue(CONTENT.subarray(0, 500));
-          else controller.error(new Error('connection reset'));
+          // A real connection delivers some bytes, then drops a moment later. The delay lets the
+          // reader take the first chunk: erroring a stream discards chunks it has not read yet.
+          if (pulls++ === 0) {
+            controller.enqueue(CONTENT.subarray(0, 500));
+            return undefined;
+          }
+          return new Promise<void>((resolve) =>
+            setTimeout(() => {
+              controller.error(new Error('connection reset'));
+              resolve();
+            }, 30),
+          );
         },
       });
       return new Response(body, { status: 200 });
