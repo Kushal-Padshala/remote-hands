@@ -168,8 +168,8 @@ export class ComputerSession {
     return this.deps.browser.open(url);
   }
 
-  browserSnapshot(): Promise<string> {
-    return this.deps.browser.snapshot();
+  browserSnapshot(opts?: { text?: boolean }): Promise<string> {
+    return opts === undefined ? this.deps.browser.snapshot() : this.deps.browser.snapshot(opts);
   }
 
   browserClick(index: number): Promise<string> {

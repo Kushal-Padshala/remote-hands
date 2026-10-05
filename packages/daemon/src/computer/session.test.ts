@@ -287,6 +287,15 @@ describe('ComputerSession browser (delegates to the BrowserPort)', () => {
     expect(deps.browser.snapshot).toHaveBeenCalledWith();
   });
 
+  it('snapshot forwards the text option to the port only when given', async () => {
+    const deps = makeDeps();
+    const s = new ComputerSession(deps);
+    await s.browserSnapshot({ text: true });
+    expect(deps.browser.snapshot).toHaveBeenLastCalledWith({ text: true });
+    await s.browserSnapshot();
+    expect(deps.browser.snapshot).toHaveBeenLastCalledWith();
+  });
+
   it('click passes the index and returns the port text', async () => {
     const deps = makeDeps();
     expect(await new ComputerSession(deps).browserClick(7)).toBe('click text');
