@@ -44,6 +44,14 @@ describe('SLIM_COMPUTER_PROMPT', () => {
     expect(rule3).toContain('except the physical-click fallback that desktop_click reports in its result');
   });
 
+  it('rule 3 names the blocked osascript paths and the desktop_key alternative', () => {
+    const rule3 = SLIM_COMPUTER_PROMPT.split('\n').find((l) => l.startsWith('3.')) ?? '';
+    expect(rule3).toContain('Executing JavaScript through AppleScript is turned off');
+    expect(rule3).toContain('not allowed to send keystrokes');
+    expect(rule3).toContain('desktop_key');
+    expect(rule3).toContain('except the physical-click fallback that desktop_click reports in its result');
+  });
+
   it('has a concise browser rule block covering stable ids, no re-snapshot, browser_do/find/extract and the fallback note', () => {
     const rule = SLIM_COMPUTER_PROMPT.split('\n').find((l) => l.startsWith('5. Browser')) ?? '';
     expect(rule).toMatch(/stable numbers/);

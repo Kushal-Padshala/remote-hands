@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { HudCoordinator, isAutonomousGoal, formatContextualTaskPrompt, formatHudStatus } from './hud-coordinator.js';
+import {
+  HudCoordinator,
+  isAutonomousGoal,
+  formatContextualTaskPrompt,
+  formatHudStatus,
+  formatPreviousTaskSection,
+} from './hud-coordinator.js';
 
 describe('HudCoordinator', () => {
   let mockHudRunner: any;
@@ -223,6 +229,14 @@ describe('HudCoordinator', () => {
     expect(rule5).toContain('except the physical-click fallback that desktop_click reports in its result');
   });
 
+  it('execution mandate tells the agent not to open SKILL.md and keeps rule numbering', () => {
+    const formatted = formatContextualTaskPrompt('do it', { app: 'Arc', isBrowser: true });
+    const rule4 = formatted.split('\n').find((l) => l.startsWith('4. '))!;
+    expect(rule4).toContain('Do not open or read any SKILL.md');
+    expect(formatted).not.toContain('Apply the `remote-hands-operator` skill');
+    expect(formatted.split('\n').some((l) => l.startsWith('5. '))).toBe(true);
+  });
+
   it('formats rich contextual task prompt with user attached context', () => {
     const formatted = formatContextualTaskPrompt(
       'launch marketing campaign',
@@ -254,6 +268,39 @@ describe('HudCoordinator', () => {
     expect(formatted).toContain('https://example.com/prop/101');
     expect(formatted).toContain('ad-banner.png');
     expect(formatted).toContain('Target Mandate:');
+  });
+
+  describe('previous task digest', () => {
+    const NOW = 1_000_000_000;
+    const fresh = { goal: 'complete the survey', summary: 'Q1 Somewhat confident\nQ2 Somewhat concerned', finishedAt: NOW - 60_000 };
+
+    it('returns no lines without a digest, with a blank summary, or when older than 10 minutes', () => {
+      expect(formatPreviousTaskSection(undefined, NOW)).toEqual([]);
+      expect(formatPreviousTaskSection({ ...fresh, summary: '   \n' }, NOW)).toEqual([]);
+      expect(formatPreviousTaskSection({ ...fresh, finishedAt: NOW - 10 * 60_000 - 1 }, NOW)).toEqual([]);
+    });
+
+    it('includes goal and summary for a fresh digest', () => {
+      const text = formatPreviousTaskSection(fresh, NOW).join('\n');
+      expect(text).toContain('Previous task (just finished)');
+      expect(text).toContain('Goal: complete the survey');
+      expect(text).toContain('Q2 Somewhat concerned');
+      expect(text).toContain('do not re-derive it from transcripts or files');
+    });
+
+    it('truncates a long summary to 2000 chars with a marker', () => {
+      const text = formatPreviousTaskSection({ ...fresh, summary: 'x'.repeat(5000) }, NOW).join('\n');
+      expect(text).toContain('x'.repeat(2000));
+      expect(text).not.toContain('x'.repeat(2001));
+      expect(text).toContain('[summary truncated]');
+    });
+
+    it('formatContextualTaskPrompt appends the section only when a digest is passed', () => {
+      const ctx = { app: 'Arc', isBrowser: true };
+      expect(formatContextualTaskPrompt('do it', ctx)).not.toContain('Previous task');
+      const recent = { ...fresh, finishedAt: Date.now() - 1000 };
+      expect(formatContextualTaskPrompt('do it', ctx, undefined, recent)).toContain('Previous task (just finished)');
+    });
   });
 
   it('formats hud status from various agent stream events', () => {
@@ -568,6 +615,134 @@ describe('HudCoordinator', () => {
     expect(createdTasks[1].conversation_id).toBe('conv-hud-99');
   });
 
+  it('injects the previous task summary into a new hotkey session but not into a same-session follow-up', async () => {
+    let submitCallback: any;
+    mockHudRunner.openInteractivePrompt = vi.fn().mockImplementation((_app: any, onSubmit: any) => {
+      submitCallback = onSubmit;
+      return { close: vi.fn() };
+    });
+    const createdTasks: any[] = [];
+    const mockStore = {
+      createTask: vi.fn().mockImplementation(async (input: any) => {
+        const t = { id: `task-${createdTasks.length + 1}`, ...input };
+        createdTasks.push(t);
+        return t;
+      }),
+      markTaskRunning: vi.fn().mockImplementation(async (id: string) => ({ id, status: 'running' })),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockRunner = {
+      run: vi.fn().mockResolvedValue({ status: 'done', summary: 'Answered 7 survey questions', conversationId: 'conv-1' }),
+    };
+    const coordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: mockStore as any,
+      runner: mockRunner as any,
+      autoExecute: true,
+    });
+
+    coordinator.startListening();
+    const hotkeyCb = mockHudRunner.startListener.mock.calls[0]![0];
+    await hotkeyCb({ event: 'hotkey', app: 'Google Chrome' });
+    await submitCallback({ query: 'complete this survey for me', app: 'Google Chrome' }, () => {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(createdTasks[0].prompt).not.toContain('Previous task');
+
+    // same session follow-up: conversation already carries history
+    await submitCallback({ query: 'click the first result and add to cart', app: 'Google Chrome' }, () => {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(createdTasks[1].conversation_id).toBe('conv-1');
+    expect(createdTasks[1].prompt).not.toContain('Previous task');
+
+    // new hotkey session: conversation reset, digest injected
+    await hotkeyCb({ event: 'hotkey', app: 'Google Chrome' });
+    await submitCallback({ query: 'add all the questions and answers in a new note', app: 'Google Chrome' }, () => {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(createdTasks[2].conversation_id).toBeNull();
+    expect(createdTasks[2].prompt).toContain('Previous task (just finished)');
+    expect(createdTasks[2].prompt).toContain('Answered 7 survey questions');
+  });
+
+  function digestHarness(runResults: Array<{ status: 'done' | 'failed'; summary: string }>, dropGoal: boolean) {
+    let submitCallback: any;
+    mockHudRunner.openInteractivePrompt = vi.fn().mockImplementation((_app: any, onSubmit: any) => {
+      submitCallback = onSubmit;
+      return { close: vi.fn() };
+    });
+    const createdTasks: any[] = [];
+    const mockStore = {
+      createTask: vi.fn().mockImplementation(async (input: any) => {
+        const { goal, ...rest } = input;
+        const t = { id: `task-${createdTasks.length + 1}`, ...(dropGoal ? rest : input) };
+        createdTasks.push(t);
+        return t;
+      }),
+      markTaskRunning: vi.fn().mockImplementation(async (id: string) => ({ id, status: 'running' })),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+      failTask: vi.fn().mockResolvedValue(undefined),
+    };
+    const run = vi.fn();
+    runResults.forEach((r, i) => run.mockResolvedValueOnce({ ...r, conversationId: `conv-${i + 1}` }));
+    const coordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: mockStore as any,
+      runner: { run } as any,
+      autoExecute: true,
+    });
+    coordinator.startListening();
+    const hotkeyCb = mockHudRunner.startListener.mock.calls[0]![0];
+    const newSessionTask = async (query: string) => {
+      await hotkeyCb({ event: 'hotkey', app: 'Google Chrome' });
+      await submitCallback({ query, app: 'Google Chrome' }, () => {});
+      await new Promise((r) => setTimeout(r, 20));
+    };
+    return { createdTasks, newSessionTask };
+  }
+
+  it('digest goal is the user query, not the stored prompt, so digests never nest', async () => {
+    const { createdTasks, newSessionTask } = digestHarness(
+      [
+        { status: 'done', summary: 'Answered 7 survey questions' },
+        { status: 'done', summary: 'Wrote the note' },
+      ],
+      true,
+    );
+    await newSessionTask('complete this survey for me');
+    await newSessionTask('add all the questions and answers in a new note');
+    const second = createdTasks[1].prompt as string;
+    expect(second).toContain('Goal: complete this survey for me');
+    expect(second.match(/Execution Mandate:/g)).toHaveLength(1);
+
+    await newSessionTask('now play shuffled liked songs');
+    const third = createdTasks[2].prompt as string;
+    expect(third).toContain('Goal: add all the questions and answers in a new note');
+    expect(third).not.toContain('Goal: complete this survey for me');
+    expect(third.match(/Execution Mandate:/g)).toHaveLength(1);
+  });
+
+  it('does not reuse an older digest after the next task failed', async () => {
+    const { createdTasks, newSessionTask } = digestHarness(
+      [
+        { status: 'done', summary: 'Answered 7 survey questions' },
+        { status: 'failed', summary: 'Could not open Notes' },
+      ],
+      false,
+    );
+    await newSessionTask('complete this survey for me');
+    await newSessionTask('add the answers to a note');
+    expect(createdTasks[1].prompt).toContain('Answered 7 survey questions');
+    await newSessionTask('try again to add the answers to a note');
+    expect(createdTasks[2].prompt).not.toContain('Previous task');
+  });
+
   it('allows stopping active process and executing follow-up instructions in the same chat session', async () => {
     let submitCallback: any;
     let stopCallback: any;
@@ -643,6 +818,93 @@ describe('HudCoordinator', () => {
     expect(createdTasks.length).toBe(2);
     expect(createdTasks[1].goal).toBe('download CS 350 lab 3 handouts instead');
     expect(updateSender).toHaveBeenCalledWith('COMPLETE', 'Downloaded files successfully', 'DONE');
+  });
+
+  function deferredDigestHarness(onTaskCompleted?: () => Promise<void> | void) {
+    const createdTasks: any[] = [];
+    const store = {
+      createTask: vi.fn(async (input: any) => {
+        const { goal, ...rest } = input;
+        const task = { id: `digest-${createdTasks.length + 1}`, ...rest };
+        createdTasks.push(task);
+        return task;
+      }),
+      markTaskRunning: vi.fn(async (id: string) => createdTasks.find((task) => task.id === id)),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+      cancelTask: vi.fn().mockResolvedValue(undefined),
+      failTask: vi.fn().mockResolvedValue(undefined),
+    };
+    const taskCoordinator = new HudCoordinator({
+      hudRunner: mockHudRunner,
+      intentResolver: mockIntentResolver,
+      guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver,
+      store: store as any,
+      runner: { run: vi.fn().mockResolvedValue({ status: 'done', summary: 'Answered seven questions' }) } as any,
+      autoExecute: false,
+      onTaskCompleted,
+    });
+    return { taskCoordinator, store, createdTasks };
+  }
+
+  it('does not carry a digest when stopped while completion is pending', async () => {
+    const { taskCoordinator, store, createdTasks } = deferredDigestHarness();
+    let finishCompletion!: () => void;
+    let completionStarted!: () => void;
+    const started = new Promise<void>((resolve) => { completionStarted = resolve; });
+    store.completeTask.mockImplementationOnce(() => {
+      completionStarted();
+      return new Promise<void>((resolve) => { finishCompletion = resolve; });
+    });
+    await taskCoordinator.handleResult({ query: 'complete this survey', app: 'Google Chrome' });
+    const execution = taskCoordinator.executeTaskStandalone(createdTasks[0]);
+    await started;
+    await taskCoordinator.stopActiveTask();
+    finishCompletion();
+    await execution;
+    await taskCoordinator.handleResult({ query: 'write answers to a note', app: 'Google Chrome' });
+    expect(createdTasks[1].prompt).not.toContain('Previous task (just finished)');
+  });
+
+  it('does not carry a digest when cancelled during the completion callback', async () => {
+    let finishCallback!: () => void;
+    let callbackStarted!: () => void;
+    const started = new Promise<void>((resolve) => { callbackStarted = resolve; });
+    const { taskCoordinator, createdTasks } = deferredDigestHarness(() => {
+      callbackStarted();
+      return new Promise<void>((resolve) => { finishCallback = resolve; });
+    });
+    await taskCoordinator.handleResult({ query: 'complete this survey', app: 'Google Chrome' });
+    const execution = taskCoordinator.executeTaskStandalone(createdTasks[0]);
+    await started;
+    await taskCoordinator.cancelActiveTask();
+    finishCallback();
+    await execution;
+    await taskCoordinator.handleResult({ query: 'write answers to a note', app: 'Google Chrome' });
+    expect(createdTasks[1].prompt).not.toContain('Previous task (just finished)');
+  });
+
+  it('pairs the digest with the goal of the task actually claimed from the queue', async () => {
+    const { taskCoordinator, store, createdTasks } = deferredDigestHarness();
+    await taskCoordinator.handleResult({ query: 'complete the survey', app: 'Google Chrome' });
+    await taskCoordinator.handleResult({ query: 'play my liked songs', app: 'Google Chrome' });
+    Object.assign(store, { claimNextTask: vi.fn().mockResolvedValueOnce(createdTasks[0]) });
+    await taskCoordinator.executeTaskStandalone(createdTasks[1]);
+    await taskCoordinator.handleResult({ query: 'write answers to a note', app: 'Google Chrome' });
+    const section = createdTasks[2].prompt.split('Previous task (just finished)')[1];
+    expect(section).toContain('Goal: complete the survey');
+    expect(section).not.toContain('Goal: play my liked songs');
+  });
+
+  it('does not carry a digest when the completion callback fails the task', async () => {
+    const { taskCoordinator, createdTasks } = deferredDigestHarness(() => {
+      throw new Error('Completion failed');
+    });
+    await taskCoordinator.handleResult({ query: 'complete this survey', app: 'Google Chrome' });
+    await taskCoordinator.executeTaskStandalone(createdTasks[0]);
+    await taskCoordinator.handleResult({ query: 'write answers to a note', app: 'Google Chrome' });
+    expect(createdTasks[1].prompt).not.toContain('Previous task (just finished)');
   });
 
   it('classifies complex instructional requests as autonomous goals and executes via agent', async () => {

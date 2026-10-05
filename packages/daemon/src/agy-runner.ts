@@ -639,6 +639,7 @@ export class ProcessAgentRunner implements AgentRunner {
           REMOTE_HANDS_TASK_ID: task.id,
           BU_CDP_URL: process.env.BU_CDP_URL || 'http://127.0.0.1:9222',
           CHROME_REMOTE_DEBUGGING_PORT: process.env.CHROME_REMOTE_DEBUGGING_PORT || '9222',
+          NODE_NO_WARNINGS: '1',
         },
         detached: process.platform !== 'win32',
       });

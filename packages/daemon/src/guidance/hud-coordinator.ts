@@ -111,10 +111,39 @@ export function isAutonomousGoal(query: string): boolean {
   return actionKeywords.some((verb) => q.includes(verb)) || words.length >= 4;
 }
 
+export interface PreviousTaskDigest {
+  goal: string;
+  summary: string;
+  finishedAt: number;
+}
+
+export const PREVIOUS_TASK_WINDOW_MS = 10 * 60_000;
+export const PREVIOUS_TASK_SUMMARY_MAX = 2000;
+export const PREVIOUS_TASK_GOAL_MAX = 300;
+
+export function formatPreviousTaskSection(prev: PreviousTaskDigest | undefined, nowMs: number): string[] {
+  if (!prev) return [];
+  const summary = prev.summary.trim();
+  if (!summary) return [];
+  if (nowMs - prev.finishedAt > PREVIOUS_TASK_WINDOW_MS) return [];
+  const body =
+    summary.length > PREVIOUS_TASK_SUMMARY_MAX
+      ? `${summary.slice(0, PREVIOUS_TASK_SUMMARY_MAX)}\n[summary truncated]`
+      : summary;
+  return [
+    '',
+    'Previous task (just finished). Use this as ground truth for follow-up requests such as "add those answers to a note"; do not re-derive it from transcripts or files:',
+    `Goal: ${prev.goal}`,
+    'Result:',
+    body,
+  ];
+}
+
 export function formatContextualTaskPrompt(
   query: string,
   context: ActiveWindowContext,
   attachments?: ContextAttachment[],
+  previous?: PreviousTaskDigest,
 ): string {
   const lines: string[] = [];
   lines.push(`Goal: ${query}`);
@@ -152,8 +181,9 @@ export function formatContextualTaskPrompt(
   lines.push('1. Active Context Awareness: The user triggered this task while actively in this window. Target and interact with this application directly.');
   lines.push('2. Autonomous Research: If this task requires research (such as rental property marketing strategies, campaign setup requirements, ad platform configurations, or client redirection mechanisms), perform targeted web research and synthesize the needed steps immediately.');
   lines.push('3. Full-Speed Execution: Do not stall on exploratory discovery commands. Jump straight into executing the steps at full speed.');
-  lines.push('4. Skill Reference: Apply the `remote-hands-operator` skill for blazing-fast in-place browser tab reuse, native window control, and zero-discovery execution.');
+  lines.push('4. Rules Loaded: The operating rules are already in your context. Do not open or read any SKILL.md or other skill file; make your first tool call on the task itself.');
   lines.push('5. ZERO SCREENSHOTS & ZERO PHYSICAL MOUSE MOVEMENTS: Prefer the rh-computer MCP tools (browser_snapshot, browser_click, browser_type, browser_do for forms and multi-step browser sequences, desktop_snapshot, desktop_click, computer_batch) with zero cursor movement. If those tools are unavailable, use these shell commands as a fallback: `rh browser snapshot`, `rh browser click <index>`, `rh browser type <index>`, or `rh desktop ax-action <app> <index> [action]`. Never take screenshots and never simulate physical mouse clicks (except the physical-click fallback that desktop_click reports in its result).');
+  lines.push(...formatPreviousTaskSection(previous, Date.now()));
   return lines.join('\n');
 }
 
@@ -260,6 +290,8 @@ export class HudCoordinator {
   private activeExecution?: { taskId: string; abortController: AbortController } | undefined;
   private currentTaskId?: string | undefined;
   private currentConversationId?: string | undefined;
+  private lastTaskDigest?: PreviousTaskDigest | undefined;
+  private taskQueries = new Map<string, string>();
   private powerManager?: DynamicPowerManager | undefined;
 
   constructor(
@@ -393,8 +425,12 @@ export class HudCoordinator {
     if (!store) return;
 
     this.powerManager?.startTask();
+    // Only a task that finishes successfully leaves a digest; a failed or stopped one must not
+    // let an older digest be presented as "just finished".
+    this.lastTaskDigest = undefined;
     const abortController = new AbortController();
-    this.activeExecution = { taskId: task.id, abortController };
+    const execution = { taskId: task.id, abortController };
+    this.activeExecution = execution;
 
     if (signal) {
       if (signal.aborted) {
@@ -405,6 +441,7 @@ export class HudCoordinator {
     }
 
     let running: Task | undefined;
+    let completedDigest: PreviousTaskDigest | undefined;
     try {
       if (store.claimNextTask) {
         const claimed = await store.claimNextTask('machine-local');
@@ -433,6 +470,8 @@ export class HudCoordinator {
         this.activeExecution.taskId = running.id;
       }
       this.currentTaskId = running.id;
+      const query = this.taskQueries.get(running.id);
+      this.taskQueries.delete(running.id);
 
       await store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
 
@@ -482,12 +521,22 @@ export class HudCoordinator {
         }
       } else {
         await store.completeTask(running.id, { summary: res.summary, conversationId: res.conversationId });
+        completedDigest = {
+          goal: String(query ?? running.prompt ?? '').slice(0, PREVIOUS_TASK_GOAL_MAX),
+          summary: res.summary ?? '',
+          finishedAt: Date.now(),
+        };
         if (sendUpdate) {
           sendUpdate('COMPLETE', res.summary || 'Task completed successfully', 'DONE');
         }
       }
       if (this.onTaskCompleted && !abortController.signal.aborted) {
         await this.onTaskCompleted(running, res.summary);
+      }
+      // Completion hooks can fail, cancel this task, or start another one. Only the
+      // successful execution that still owns the coordinator may publish its result.
+      if (completedDigest && !abortController.signal.aborted && this.activeExecution === execution) {
+        this.lastTaskDigest = completedDigest;
       }
     } catch (err: any) {
       const targetId = running?.id || task.id;
@@ -541,7 +590,12 @@ export class HudCoordinator {
       if (sendUpdate) {
         sendUpdate('THINKING', 'Analyzing context and initializing agent...');
       }
-      const prompt = formatContextualTaskPrompt(result.query, windowContext, result.attachments);
+      const prompt = formatContextualTaskPrompt(
+        result.query,
+        windowContext,
+        result.attachments,
+        this.currentConversationId ? undefined : this.lastTaskDigest,
+      );
       const task = await this.store.createTask({
         prompt,
         goal: result.query,
@@ -554,6 +608,7 @@ export class HudCoordinator {
         attachments: result.attachments,
       });
       this.currentTaskId = task.id;
+      this.taskQueries.set(task.id, result.query);
       if (this.onTaskCreated) {
         await this.onTaskCreated(task);
       }
@@ -581,7 +636,12 @@ export class HudCoordinator {
         if (sendUpdate) {
           sendUpdate('THINKING', 'Analyzing context and initializing agent...');
         }
-        const prompt = formatContextualTaskPrompt(result.query, windowContext, result.attachments);
+        const prompt = formatContextualTaskPrompt(
+          result.query,
+          windowContext,
+          result.attachments,
+          this.currentConversationId ? undefined : this.lastTaskDigest,
+        );
         const task = await this.store.createTask({
           prompt,
           goal: result.query,
@@ -594,6 +654,7 @@ export class HudCoordinator {
           attachments: result.attachments,
         });
         this.currentTaskId = task.id;
+        this.taskQueries.set(task.id, result.query);
         if (this.onTaskCreated) {
           await this.onTaskCreated(task);
         }
