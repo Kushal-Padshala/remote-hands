@@ -2,13 +2,14 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import type { ContextAttachment, Task } from '@remote-hands/shared';
+import type { FastLane, FastLaneOutcome } from '../fast-lane/fast-lane.js';
 import { SpotlightHudRunner, type SpotlightPromptResult, type HudUpdateSender } from '../desktop/spotlight-hud.js';
 import { IntentResolver } from './intent-resolver.js';
 import { GuidanceManager } from './guidance-manager.js';
 import { MacOsDriver, type ActiveWindowContext } from '../desktop/macos-driver.js';
 import { LocalTaskStore } from '../local-task-store.js';
 import type { TaskStore } from '../task-store.js';
-import { ProcessAgentRunner, parseAgyStreamLine, HUD_TASK_MODE, type AgentRunner } from '../agy-runner.js';
+import { ProcessAgentRunner, parseAgyStreamLine, HUD_TASK_MODE, type AgentRunner, type AgentRunResult } from '../agy-runner.js';
 import { WarmAgySession } from '../warm-agy-session.js';
 import { SLIM_COMPUTER_PROMPT } from '../computer/prompt.js';
 import { DynamicPowerManager } from '../system/power-manager.js';
@@ -273,6 +274,11 @@ export interface HudCoordinatorOptions {
   onTaskCreated?: ((task: Task) => Promise<void> | void) | undefined;
   onTaskCompleted?: ((task: Task, summary: string) => Promise<void> | void) | undefined;
   powerManager?: DynamicPowerManager | undefined;
+  /**
+   * Optional fast lane in front of the agent (instant skills, the page pilot). Absent by default:
+   * without it the task path below is exactly the old one.
+   */
+  fastLane?: Pick<FastLane, 'attempt' | 'prewarm'> | undefined;
 }
 
 export class HudCoordinator {
@@ -293,6 +299,7 @@ export class HudCoordinator {
   private lastTaskDigest?: PreviousTaskDigest | undefined;
   private taskQueries = new Map<string, string>();
   private powerManager?: DynamicPowerManager | undefined;
+  private fastLane?: Pick<FastLane, 'attempt' | 'prewarm'> | undefined;
 
   constructor(
     hudRunnerOrOptions?: SpotlightHudRunner | HudCoordinatorOptions,
@@ -314,6 +321,7 @@ export class HudCoordinator {
       this.onTaskCreated = opts.onTaskCreated;
       this.onTaskCompleted = opts.onTaskCompleted;
       this.powerManager = opts.powerManager || new DynamicPowerManager();
+      this.fastLane = opts.fastLane;
       if (this.store === undefined) {
         this.store = this.initDefaultStore();
       }
@@ -482,8 +490,28 @@ export class HudCoordinator {
         this.macosDriver.focusWindow('Google Chrome').catch(() => {});
       }
 
+      // The fast lane gets the first try. It either finishes the request, or the agent carries on
+      // (with a note of what was already done). It never fails the task: errors mean "continue".
+      let taskForAgent: Task = running;
+      let fastLaneResult: AgentRunResult | undefined;
+      if (this.fastLane) {
+        const outcome = await this.fastLane
+          .attempt({
+            taskId: running.id,
+            query: query ?? running.prompt,
+            signal: abortController.signal,
+            onUpdate: (text) => sendUpdate?.('WORKING', text),
+          })
+          .catch((): FastLaneOutcome => ({ kind: 'continue' }));
+        if (outcome.kind === 'handled') {
+          fastLaneResult = { events: [], summary: outcome.summary, conversationId: null, status: outcome.status };
+        } else if (outcome.addendum) {
+          taskForAgent = { ...running, prompt: `${running.prompt}\n\n${outcome.addendum}` };
+        }
+      }
+
       const runner = this.getRunner();
-      const res = await runner.run(running, async (event) => {
+      const res = fastLaneResult ?? await runner.run(taskForAgent, async (event) => {
         if (store.appendEvent) {
           await store.appendEvent(running!.id, event as any).catch(() => {});
         }
@@ -731,6 +759,7 @@ export class HudCoordinator {
           }
           this.currentConversationId = undefined;
           this.defaultRunner?.newConversation({ mode: HUD_TASK_MODE });
+          this.fastLane?.prewarm();
           const promptArgs: any[] = [
             event.app,
             async (result: any, sendUpdate: any) => {

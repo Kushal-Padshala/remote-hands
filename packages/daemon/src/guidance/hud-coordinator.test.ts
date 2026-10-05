@@ -1075,3 +1075,130 @@ describe('HudCoordinator default warm runner lifecycle', () => {
     expect(fakeRunner.stop).not.toHaveBeenCalled();
   });
 });
+
+describe('HudCoordinator fast lane', () => {
+  function harness(fastLane?: { attempt: (...a: any[]) => Promise<any>; prewarm: () => void }) {
+    const hudRunner: any = { openPrompt: vi.fn(), startListener: vi.fn(), openInteractivePrompt: vi.fn(() => ({ close: vi.fn() })) };
+    const created: any[] = [];
+    const store = {
+      createTask: vi.fn(async (input: any) => {
+        const t = { id: `task-${created.length + 1}`, ...input };
+        created.push(t);
+        return t;
+      }),
+      markTaskRunning: vi.fn(async (id: string) => ({ ...created.find((t) => t.id === id), status: 'running' })),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+      failTask: vi.fn().mockResolvedValue(undefined),
+      cancelTask: vi.fn().mockResolvedValue(undefined),
+    };
+    const runner = { run: vi.fn(async () => ({ status: 'done' as const, summary: 'agent did it', conversationId: 'conv-1', events: [] })) };
+    const macosDriver: any = {
+      getActiveWindowContext: vi.fn().mockResolvedValue({ app: 'Google Chrome', title: 'Portal', url: 'https://x.test', isBrowser: true }),
+      focusWindow: vi.fn().mockResolvedValue(undefined),
+    };
+    const coordinator = new HudCoordinator({
+      hudRunner,
+      intentResolver: { resolve: vi.fn() } as any,
+      guidanceManager: { startSession: vi.fn() } as any,
+      macosDriver,
+      store: store as any,
+      runner: runner as any,
+      autoExecute: true,
+      ...(fastLane ? { fastLane } : {}),
+    } as any);
+    const updates: Array<[string, string]> = [];
+    const submit = async (query: string) => {
+      await coordinator.handleResult({ query, app: 'Google Chrome' } as any, (status: string, text: string) => updates.push([status, text]));
+      await coordinator.whenIdle();
+    };
+    return { coordinator, store, runner, created, updates, submit, hudRunner };
+  }
+
+  it('runs the agent exactly as before when no fast lane is configured', async () => {
+    const h = harness();
+    await h.submit('complete this survey for me');
+    expect(h.runner.run).toHaveBeenCalledTimes(1);
+    const task = (h.runner.run.mock.calls[0] as unknown as [any])[0];
+    expect(task.prompt).toBe(h.created[0].prompt);
+    expect(h.store.completeTask).toHaveBeenCalledWith('task-1', expect.objectContaining({ summary: 'agent did it' }));
+  });
+
+  it('completes the task with the fast-lane summary and never calls the agent when handled', async () => {
+    const attempt = vi.fn(async () => ({ kind: 'handled', status: 'done', summary: 'Opened Spotify' }));
+    const h = harness({ attempt, prewarm: vi.fn() });
+    await h.submit('complete this survey for me');
+    expect(h.runner.run).not.toHaveBeenCalled();
+    expect(h.store.completeTask).toHaveBeenCalledWith('task-1', expect.objectContaining({ summary: 'Opened Spotify' }));
+    expect(h.updates).toContainEqual(['COMPLETE', 'Opened Spotify']);
+    const args = (attempt.mock.calls[0] as unknown as [any])[0];
+    expect(args).toMatchObject({ taskId: 'task-1' });
+    expect(args.query).toBe('complete this survey for me');
+    expect(args.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('streams fast-lane progress to the HUD', async () => {
+    const attempt = vi.fn(async (a: any) => {
+      a.onUpdate('click [1] button "Go"');
+      return { kind: 'handled', status: 'done', summary: 'ok' };
+    });
+    const h = harness({ attempt, prewarm: vi.fn() });
+    await h.submit('complete this survey for me');
+    expect(h.updates).toContainEqual(['WORKING', 'click [1] button "Go"']);
+  });
+
+  it('hands the agent the original prompt plus what the fast lane did when it continues', async () => {
+    const attempt = vi.fn(async () => ({ kind: 'continue', addendum: 'The fast lane already did these steps in the browser:\n1. click [2] radio "A"' }));
+    const h = harness({ attempt, prewarm: vi.fn() });
+    await h.submit('complete this survey for me');
+    const task = (h.runner.run.mock.calls[0] as unknown as [any])[0];
+    expect(task.prompt.startsWith(h.created[0].prompt)).toBe(true);
+    expect(task.prompt).toContain('The fast lane already did these steps');
+    expect(h.store.completeTask).toHaveBeenCalledWith('task-1', expect.objectContaining({ summary: 'agent did it' }));
+  });
+
+  it('leaves the prompt untouched when the fast lane continues without a note', async () => {
+    const h = harness({ attempt: vi.fn(async () => ({ kind: 'continue' })), prewarm: vi.fn() });
+    await h.submit('complete this survey for me');
+    const task = (h.runner.run.mock.calls[0] as unknown as [any])[0];
+    expect(task.prompt).toBe(h.created[0].prompt);
+  });
+
+  it('still runs the agent when the fast lane throws', async () => {
+    const h = harness({ attempt: vi.fn(async () => { throw new Error('model exploded'); }), prewarm: vi.fn() });
+    await h.submit('complete this survey for me');
+    expect(h.runner.run).toHaveBeenCalledTimes(1);
+    expect(h.store.failTask).not.toHaveBeenCalled();
+  });
+
+  it('cancels the task when the user stops it during a handled fast-lane run', async () => {
+    let coordinator: HudCoordinator | undefined;
+    const attempt = vi.fn(async () => {
+      await coordinator!.cancelActiveTask();
+      return { kind: 'handled', status: 'done', summary: 'Stopped.' };
+    });
+    const h = harness({ attempt, prewarm: vi.fn() });
+    coordinator = h.coordinator;
+    await h.submit('complete this survey for me');
+    expect(h.store.cancelTask).toHaveBeenCalled();
+    expect(h.store.completeTask).not.toHaveBeenCalled();
+    expect(h.runner.run).not.toHaveBeenCalled();
+  });
+
+  it('does not let the next prompt reuse a handled task as an agent conversation', async () => {
+    const attempt = vi.fn(async () => ({ kind: 'handled', status: 'done', summary: 'Opened Spotify' }));
+    const h = harness({ attempt, prewarm: vi.fn() });
+    await h.submit('complete this survey for me');
+    await h.submit('complete the second survey for me');
+    expect(h.created[1].conversation_id).toBeNull();
+  });
+
+  it('warms the model up on the hotkey', async () => {
+    const prewarm = vi.fn();
+    const h = harness({ attempt: vi.fn(), prewarm });
+    h.coordinator.startListening();
+    const hotkey = h.hudRunner.startListener.mock.calls[0]![0];
+    await hotkey({ event: 'hotkey', app: 'Google Chrome' });
+    expect(prewarm).toHaveBeenCalledTimes(1);
+  });
+});
