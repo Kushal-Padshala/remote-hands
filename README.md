@@ -193,6 +193,18 @@ Choosing the Desktop HUD does the whole setup in one pass: sign-in and permissio
 
 The browser part is also available on its own: run `rh browser setup` (it is also offered automatically by `rh hud install`). It checks the browsers you have open (Chrome, Brave, Arc, Edge, Safari) and, with your permission, turns on each browser's "Allow JavaScript from Apple Events" setting so the HUD can drive your own signed-in tabs quickly. macOS asks you to allow the control once per browser; click Allow. Undo any time with `rh browser setup --disable`. Without it, browser tasks still work through a slower Chrome-only fallback. `rh browser doctor` shows what is ready.
 
+### 5. Fast lane: a small local model for instant requests (optional, macOS)
+
+The HUD can run a small model on your Mac so simple requests finish in a second or two instead of waiting for the agent: open an app or a web address, write a note, send a message (after you approve it), set the volume, play or pause music, and click through ordinary web-page flows. Anything it is not sure about goes to the agent exactly as before, together with a note of what it already did. It is free, runs entirely on your machine, and is **off until you turn it on**.
+
+```bash
+rh fast-lane install   # one-time download, about 1.3-2.5GB (needs 8GB of memory or more)
+rh fast-lane enable    # turn it on; `rh fast-lane disable` turns it off
+rh fast-lane status
+```
+
+How it works, what it will and will not do on its own, and measured speeds: [docs/fast-lane/README.md](docs/fast-lane/README.md).
+
 ---
 
 ## CLI Command Reference
@@ -205,6 +217,7 @@ The browser part is also available on its own: run `rh browser setup` (it is als
 | `rh profiles` | List all discovered local Google Chrome profiles |
 | `rh doctor` | Diagnose system dependencies, Chrome CDP status, and network reachability |
 | `rh pair` | Pair a new mobile device using a one-time code |
+| `rh fast-lane` | Local model for instant simple requests: `status`, `install`, `enable`, `disable` (off by default) |
 
 ---
 
