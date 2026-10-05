@@ -1,5 +1,5 @@
 import os from 'node:os';
-import { pickModel, pickRuntime, type ModelEntry, type RuntimeEntry } from './catalog.js';
+import { pickModel, pickRuntime, type ModelEntry, type ModelTier, type RuntimeEntry } from './catalog.js';
 
 export interface HardwareInfo {
   platform: NodeJS.Platform;
@@ -25,7 +25,7 @@ export function detectHardware(osModule: OsLike = os): HardwareInfo {
   return { platform: osModule.platform(), arch: osModule.arch(), totalRamBytes: osModule.totalmem() };
 }
 
-export function assessCapability(hw: HardwareInfo): Capability {
+export function assessCapability(hw: HardwareInfo, tier?: ModelTier): Capability {
   const runtime = pickRuntime(hw.platform, hw.arch);
   if (runtime === null) {
     return {
@@ -35,7 +35,7 @@ export function assessCapability(hw: HardwareInfo): Capability {
       runtime: null,
     };
   }
-  const model = pickModel(hw.totalRamBytes);
+  const model = pickModel(hw.totalRamBytes, tier);
   if (model === null) {
     return {
       supported: false,

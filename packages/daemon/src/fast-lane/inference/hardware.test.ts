@@ -25,6 +25,12 @@ describe('assessCapability', () => {
     expect(cap.model?.tier).toBe('lite');
   });
 
+  it('honours a tier override', () => {
+    const cap = assessCapability({ platform: 'darwin', arch: 'arm64', totalRamBytes: 8 * GB }, 'standard');
+    expect(cap.supported).toBe(true);
+    expect(cap.model?.tier).toBe('standard');
+  });
+
   it('reports not enough memory below 8GB', () => {
     const cap = assessCapability({ platform: 'darwin', arch: 'arm64', totalRamBytes: 4 * GB });
     expect(cap.supported).toBe(false);

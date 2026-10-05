@@ -21,6 +21,18 @@ describe('pickModel', () => {
   });
 });
 
+describe('pickModel with a tier override', () => {
+  it('lets someone with 8GB choose the standard model, and someone with plenty choose the lite one', () => {
+    expect(pickModel(8 * GB, 'standard')?.tier).toBe('standard');
+    expect(pickModel(32 * GB, 'lite')?.tier).toBe('lite');
+  });
+
+  it('still refuses machines under 8GB whatever the override', () => {
+    expect(pickModel(7.9 * GB, 'standard')).toBeNull();
+    expect(pickModel(7.9 * GB, 'lite')).toBeNull();
+  });
+});
+
 describe('catalog integrity', () => {
   it('pins every model by checksum, size, license and immutable commit', () => {
     expect(MODELS.length).toBe(2);

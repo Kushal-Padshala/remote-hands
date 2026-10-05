@@ -76,3 +76,4 @@ export * from './fast-lane/skills/runner.js';
 export * from './fast-lane/pilot/types.js';
 export * from './fast-lane/pilot/env.js';
 export * from './fast-lane/pilot/pilot.js';
+export * from './fast-lane/config.js';

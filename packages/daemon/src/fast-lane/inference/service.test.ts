@@ -84,6 +84,19 @@ describe('FastLaneInference.status', () => {
   });
 });
 
+describe('FastLaneInference tier override', () => {
+  it('uses the chosen tier instead of the one memory suggests, and needs its own install', async () => {
+    const f = fakes();
+    const lite = new FastLaneInference({ homeDir: home, hardware: hw(16), tier: 'lite', deps: f as any });
+    expect(lite.status()).toMatchObject({ state: 'not-installed', tier: 'lite', handoffGapNats: 1.5 });
+    await lite.install();
+    expect(lite.status().state).toBe('ready');
+    // the same machine without the override wants the standard model, which is not installed
+    const standard = new FastLaneInference({ homeDir: home, hardware: hw(16), deps: f as any });
+    expect(standard.status().state).toBe('not-installed');
+  });
+});
+
 describe('FastLaneInference.install', () => {
   it('installs the runtime then the pinned model, writes the state marker and becomes ready', async () => {
     const { svc, f } = make(16);

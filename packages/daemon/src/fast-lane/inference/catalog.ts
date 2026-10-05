@@ -86,10 +86,14 @@ export function modelUrl(entry: ModelEntry): string {
   return `https://huggingface.co/${entry.repo}/resolve/${entry.commit}/${entry.file}`;
 }
 
-/** 16GB and up: standard 4B. 8GB up to just under 16GB: lite 2B. Under 8GB: fast lane off. */
-export function pickModel(totalRamBytes: number): ModelEntry | null {
-  const tier: ModelTier | null = totalRamBytes >= 16 * GB ? 'standard' : totalRamBytes >= 8 * GB ? 'lite' : null;
-  if (tier === null) return null;
+/**
+ * 16GB and up: standard 4B. 8GB up to just under 16GB: lite 2B. Under 8GB: fast lane off. A tier
+ * override (someone choosing the stronger model on 8GB, or the lighter one on a big machine) is
+ * honoured, but never below 8GB.
+ */
+export function pickModel(totalRamBytes: number, override?: ModelTier): ModelEntry | null {
+  if (totalRamBytes < 8 * GB) return null;
+  const tier: ModelTier = override ?? (totalRamBytes >= 16 * GB ? 'standard' : 'lite');
   return MODELS.find((m) => m.tier === tier) ?? null;
 }
 

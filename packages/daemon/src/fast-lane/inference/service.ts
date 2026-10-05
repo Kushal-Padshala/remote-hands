@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DecideInput, DecideResult, DecisionEngine } from '../types.js';
-import { modelUrl, type ModelEntry } from './catalog.js';
+import { modelUrl, type ModelEntry, type ModelTier } from './catalog.js';
 import { LlamaDecisionEngine } from './decide.js';
 import { downloadVerified } from './download.js';
 import { assessCapability, detectHardware, type HardwareInfo } from './hardware.js';
@@ -23,6 +23,8 @@ type SidecarHandle = Pick<LlamaSidecar, 'ensureStarted' | 'baseUrl' | 'apiKey' |
 
 export interface FastLaneInferenceOptions {
   homeDir?: string | undefined;
+  /** Choose a model tier instead of the one the machine's memory suggests (never below 8GB). */
+  tier?: ModelTier | undefined;
   hardware?: HardwareInfo | undefined;
   deps?: Partial<{
     download: typeof downloadVerified;
@@ -46,6 +48,7 @@ interface InstallState {
 export class FastLaneInference implements DecisionEngine {
   private readonly home: string;
   private readonly hardware: HardwareInfo;
+  private readonly tier: ModelTier | undefined;
   private readonly deps: NonNullable<FastLaneInferenceOptions['deps']>;
   private sidecar: SidecarHandle | undefined;
   private engine: LlamaDecisionEngine | undefined;
@@ -53,6 +56,7 @@ export class FastLaneInference implements DecisionEngine {
   constructor(opts: FastLaneInferenceOptions = {}) {
     this.home = opts.homeDir ?? os.homedir();
     this.hardware = opts.hardware ?? detectHardware();
+    this.tier = opts.tier;
     this.deps = opts.deps ?? {};
   }
 
@@ -65,7 +69,7 @@ export class FastLaneInference implements DecisionEngine {
   }
 
   private installedPaths(): { modelPath: string; serverPath: string; model: ModelEntry } | null {
-    const cap = assessCapability(this.hardware);
+    const cap = assessCapability(this.hardware, this.tier);
     if (!cap.supported || !cap.model || !cap.runtime) return null;
     let state: InstallState;
     try {
@@ -85,7 +89,7 @@ export class FastLaneInference implements DecisionEngine {
   }
 
   status(): InferenceStatus {
-    const cap = assessCapability(this.hardware);
+    const cap = assessCapability(this.hardware, this.tier);
     if (!cap.supported || !cap.model) return { state: 'unsupported', ...(cap.reason ? { reason: cap.reason } : {}) };
     const common = { model: cap.model.id, tier: cap.model.tier, handoffGapNats: cap.model.handoffGapNats } as const;
     if (this.installedPaths() === null) return { state: 'not-installed', ...common };
@@ -94,11 +98,11 @@ export class FastLaneInference implements DecisionEngine {
 
   /** Gap (nats) below which the pilot hands over to the brain; 2.0 when the hardware is unsupported. */
   handoffGapNats(): number {
-    return assessCapability(this.hardware).model?.handoffGapNats ?? 2.0;
+    return assessCapability(this.hardware, this.tier).model?.handoffGapNats ?? 2.0;
   }
 
   async install(onProgress?: (stage: InstallStage, done: number, total: number) => void): Promise<void> {
-    const cap = assessCapability(this.hardware);
+    const cap = assessCapability(this.hardware, this.tier);
     if (!cap.supported || !cap.model || !cap.runtime) throw new Error(cap.reason ?? 'The fast lane is not supported on this machine.');
     const install = this.deps.ensureRuntime ?? ensureRuntime;
     const download = this.deps.download ?? downloadVerified;
@@ -149,7 +153,7 @@ export class FastLaneInference implements DecisionEngine {
     const sidecar = this.getSidecar();
     if (sidecar === null) throw new Error('The fast lane is not installed yet.');
     if (this.engine === undefined) {
-      const model = assessCapability(this.hardware).model!;
+      const model = assessCapability(this.hardware, this.tier).model!;
       this.engine = new LlamaDecisionEngine(sidecar, model.promptFormat, this.deps.fetch);
     }
     return this.engine.decide(input);
