@@ -26,6 +26,7 @@ describe('mac-permissions', () => {
   });
 
   it('detects host app name from environment variables', () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
     const origEnv = { ...process.env };
     try {
       delete process.env.__CFBundleIdentifier;
@@ -70,4 +71,3 @@ describe('mac-permissions', () => {
   });
 
 });
-

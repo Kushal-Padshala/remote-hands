@@ -1,9 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { setupCommand } from './setup.js';
 import type { CommandRunner } from '../cloudflare/wrangler.js';
 import type { FileSystemAdapter } from '../cloudflare/project.js';
 
 describe('Setup Command Flow', () => {
+  const originalPlatform = process.platform;
+  afterEach(() => Object.defineProperty(process, 'platform', { value: originalPlatform }));
   it('executes setup steps in order and prints pairing information without leaking secret', async () => {
     const executedCommands: string[] = [];
     const outputLines: string[] = [];
@@ -388,7 +390,8 @@ describe('Setup Command Flow', () => {
     expect(errorLines.join('\n')).toContain('agy sign-in was not completed');
   });
 
-  it('runs zero-account local setup without checking Cloudflare credentials', async () => {
+  it.each(['darwin', 'linux'])('runs zero-account setup without Cloudflare credentials on %s', async (platform) => {
+    Object.defineProperty(process, 'platform', { value: platform });
     const executedCommands: string[] = [];
     const outputLines: string[] = [];
     const files: Record<string, string> = {};
@@ -427,12 +430,15 @@ describe('Setup Command Flow', () => {
     expect(executedCommands.some((c) => c.includes('wrangler'))).toBe(false);
     expect(files['/config/daemon.json']).toContain('"mode": "local"');
     expect(outputLines.join('\n')).toContain('Zero-account local setup complete!');
-    expect(outputLines.join('\n')).toContain('Desktop Overlay Assistant installed and active');
+    expect(outputLines.join('\n')).toContain(platform === 'darwin'
+      ? 'Desktop Overlay Assistant installed and active'
+      : 'Desktop Overlay hotkey service is supported on macOS');
     expect(outputLines.join('\n')).toContain('1. Desktop Use (Active now):');
     expect(outputLines.join('\n')).toContain('2. Remote Mobile Use:');
   });
 
-  it('installs desktop overlay assistant with injected service manager', async () => {
+  it.each(['darwin', 'linux'])('installs the desktop overlay only on macOS: %s', async (platform) => {
+    Object.defineProperty(process, 'platform', { value: platform });
     const outputLines: string[] = [];
     const mockService = {
       install: vi.fn().mockReturnValue({ success: true, plistPath: '/test/hud.plist' }),
@@ -457,8 +463,10 @@ describe('Setup Command Flow', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(mockService.install).toHaveBeenCalled();
-    expect(outputLines.join('\n')).toContain('Desktop Overlay Assistant installed and active');
+    expect(mockService.install).toHaveBeenCalledTimes(platform === 'darwin' ? 1 : 0);
+    expect(outputLines.join('\n')).toContain(platform === 'darwin'
+      ? 'Desktop Overlay Assistant installed and active'
+      : 'Desktop Overlay hotkey service is supported on macOS');
   });
 
   it('skips desktop overlay assistant when --no-hud flag is provided', async () => {

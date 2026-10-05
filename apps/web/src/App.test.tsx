@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
 import type { MachineRow, TaskRow } from '@remote-hands/shared';
 import { App } from './App.js';
 import { NewTaskScreen } from './screens/NewTaskScreen.js';
@@ -21,7 +21,8 @@ class MockSocket {
 
   triggerMessage(data: unknown) {
     if (this.onmessage) {
-      this.onmessage({ data: JSON.stringify(data) });
+      // Flush React's approval-id reset effect before the next simulated user action.
+      act(() => this.onmessage?.({ data: JSON.stringify(data) }));
     }
   }
 }

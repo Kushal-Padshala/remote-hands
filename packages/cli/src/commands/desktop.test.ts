@@ -362,7 +362,9 @@ describe('desktopCommand', () => {
 
   it('reports invalid click target', async () => {
     const stderr = vi.fn();
-    const code = await desktopCommand(['click', 'invalid-coord-here'], { stderr });
+    const code = await desktopCommand(['click', 'invalid-coord-here'], {
+      stderr, walker: { walkActiveApp: async () => [] },
+    });
     expect(code).toBe(1);
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining('Invalid click target'));
   });
@@ -583,13 +585,6 @@ describe('desktopCommand', () => {
     expect(stderr).toHaveBeenCalledWith('Failed to capture desktop screenshot');
   });
 
-  it('dispatches menu-search command successfully', async () => {
-    const stdout = vi.fn();
-    const stderr = vi.fn();
-    const code = await desktopCommand(['menu-search', 'Bambu Studio', 'slice'], { stdout, stderr });
-    expect([0, 1]).toContain(code);
-  });
-
   it('handles menu-search with mocked success and triggeredPath', async () => {
     const searchMock = vi.fn().mockResolvedValue({
       success: true,
@@ -642,12 +637,6 @@ describe('desktopCommand', () => {
     const code2 = await desktopCommand(['menu-search', 'Bambu Studio'], { stderr: stderr2 });
     expect(code2).toBe(1);
     expect(stderr2).toHaveBeenCalledWith('Usage: rh desktop menu-search <app> <query>');
-  });
-
-  it('dispatches menu-list command successfully', async () => {
-    const stdout = vi.fn();
-    const code = await desktopCommand(['menu-list', 'Bambu Studio'], { stdout });
-    expect([0, 1]).toContain(code);
   });
 
   it('handles menu-list with mocked menu tree', async () => {
