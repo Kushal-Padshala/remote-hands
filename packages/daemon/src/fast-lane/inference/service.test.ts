@@ -33,6 +33,7 @@ function fakes() {
     const serverPath = path.join(o.homeDir, '.remote-hands', 'fast-lane', 'runtime', `${entry.build}-${entry.platform}`, entry.archiveDir, 'llama-server');
     fs.mkdirSync(path.dirname(serverPath), { recursive: true });
     fs.writeFileSync(serverPath, '#!/bin/sh\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(path.dirname(path.dirname(serverPath)), '.complete'), entry.build);
     return { serverPath };
   });
   const sidecars: any[] = [];

@@ -45,6 +45,8 @@ export async function extractTarGz(archive: string, dir: string): Promise<void> 
   await run('tar', ['-xzf', archive, '-C', dir]);
 }
 
+const MARKER = '.complete';
+
 function isExecutable(file: string): boolean {
   try {
     fs.accessSync(file, fs.constants.X_OK);
@@ -54,13 +56,30 @@ function isExecutable(file: string): boolean {
   }
 }
 
+export function runtimeDir(homeDir: string, entry: RuntimeEntry): string {
+  return path.join(homeDir, '.remote-hands', 'fast-lane', 'runtime', `${entry.build}-${entry.platform}`);
+}
+
+export function runtimeServerPath(homeDir: string, entry: RuntimeEntry): string {
+  return path.join(runtimeDir(homeDir, entry), entry.archiveDir, 'llama-server');
+}
+
+/**
+ * True only for a finished install: the server binary exists AND the completion marker written
+ * after extraction is present. A run that died mid-extraction leaves a binary without its
+ * libraries next to it, which must never count as installed.
+ */
+export function isRuntimeInstalled(homeDir: string, entry: RuntimeEntry): boolean {
+  return isExecutable(runtimeServerPath(homeDir, entry)) && fs.existsSync(path.join(runtimeDir(homeDir, entry), MARKER));
+}
+
 /** Installs the pinned llama-server build under ~/.remote-hands/fast-lane/runtime and returns its path. */
 export async function ensureRuntime(entry: RuntimeEntry, opts: EnsureRuntimeOptions): Promise<{ serverPath: string }> {
   const download = opts.deps?.download ?? downloadVerified;
   const extract = opts.deps?.extract ?? extractTarGz;
-  const dir = path.join(opts.homeDir, '.remote-hands', 'fast-lane', 'runtime', `${entry.build}-${entry.platform}`);
-  const serverPath = path.join(dir, entry.archiveDir, 'llama-server');
-  if (isExecutable(serverPath)) return { serverPath };
+  const dir = runtimeDir(opts.homeDir, entry);
+  const serverPath = runtimeServerPath(opts.homeDir, entry);
+  if (isRuntimeInstalled(opts.homeDir, entry)) return { serverPath };
 
   fs.mkdirSync(dir, { recursive: true });
   const archive = await download({
@@ -70,8 +89,12 @@ export async function ensureRuntime(entry: RuntimeEntry, opts: EnsureRuntimeOpti
     bytes: entry.bytes,
     onProgress: opts.onProgress,
   });
+  // Start from a clean directory: leftovers of an interrupted extraction must not mix with the new files.
+  fs.rmSync(path.join(dir, entry.archiveDir), { recursive: true, force: true });
+  fs.rmSync(path.join(dir, MARKER), { force: true });
   await extract(archive, dir);
   if (!fs.existsSync(serverPath)) throw new Error('llama-server missing from runtime archive');
   fs.chmodSync(serverPath, 0o755);
+  fs.writeFileSync(path.join(dir, MARKER), entry.build);
   return { serverPath };
 }

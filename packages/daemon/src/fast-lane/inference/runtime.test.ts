@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RUNTIMES } from './catalog.js';
-import { assertSafeTarListing, ensureRuntime, extractTarGz } from './runtime.js';
+import { assertSafeTarListing, ensureRuntime, extractTarGz, isRuntimeInstalled } from './runtime.js';
 
 const entry = RUNTIMES.find((r) => r.platform === 'darwin-arm64')!;
 let home: string;
@@ -45,12 +45,44 @@ describe('ensureRuntime', () => {
   it('does nothing when the server is already installed', async () => {
     fs.mkdirSync(path.dirname(serverPath()), { recursive: true });
     fs.writeFileSync(serverPath(), '#!/bin/sh\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(installDir(), '.complete'), entry.build);
     const download = vi.fn();
     const extract = fakeExtract();
     const { serverPath: out } = await ensureRuntime(entry, { homeDir: home, deps: { download: download as any, extract } });
     expect(out).toBe(serverPath());
     expect(download).not.toHaveBeenCalled();
     expect(extract).not.toHaveBeenCalled();
+  });
+
+  it('writes a completion marker only after a successful install', async () => {
+    const download = vi.fn(async (req: { destination: string }) => req.destination);
+    expect(isRuntimeInstalled(home, entry)).toBe(false);
+    await ensureRuntime(entry, { homeDir: home, deps: { download: download as any, extract: fakeExtract() } });
+    expect(fs.existsSync(path.join(installDir(), '.complete'))).toBe(true);
+    expect(isRuntimeInstalled(home, entry)).toBe(true);
+  });
+
+  it('does not write the marker when extraction fails', async () => {
+    const download = vi.fn(async (req: { destination: string }) => req.destination);
+    const extract = vi.fn(async () => {
+      throw new Error('tar failed');
+    });
+    await expect(ensureRuntime(entry, { homeDir: home, deps: { download: download as any, extract } })).rejects.toThrow('tar failed');
+    expect(isRuntimeInstalled(home, entry)).toBe(false);
+  });
+
+  it('treats a server binary without the marker as a broken install and extracts again over a clean directory', async () => {
+    // A previous run died after llama-server was written but before the libraries next to it.
+    fs.mkdirSync(path.dirname(serverPath()), { recursive: true });
+    fs.writeFileSync(serverPath(), '#!/bin/sh\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(path.dirname(serverPath()), 'stale-leftover.dylib'), 'old');
+    expect(isRuntimeInstalled(home, entry)).toBe(false);
+    const download = vi.fn(async (req: { destination: string }) => req.destination);
+    const extract = fakeExtract();
+    await ensureRuntime(entry, { homeDir: home, deps: { download: download as any, extract } });
+    expect(extract).toHaveBeenCalledTimes(1);
+    expect(fs.existsSync(path.join(path.dirname(serverPath()), 'stale-leftover.dylib'))).toBe(false);
+    expect(isRuntimeInstalled(home, entry)).toBe(true);
   });
 
   it('throws when the archive did not contain llama-server', async () => {

@@ -6,7 +6,7 @@ import { modelUrl, type ModelEntry } from './catalog.js';
 import { LlamaDecisionEngine } from './decide.js';
 import { downloadVerified } from './download.js';
 import { assessCapability, detectHardware, type HardwareInfo } from './hardware.js';
-import { ensureRuntime } from './runtime.js';
+import { ensureRuntime, isRuntimeInstalled, runtimeServerPath } from './runtime.js';
 import { LlamaSidecar } from './server.js';
 
 export interface InferenceStatus {
@@ -75,14 +75,13 @@ export class FastLaneInference implements DecisionEngine {
     }
     if (state.verified !== true || state.modelId !== cap.model.id || state.runtimeBuild !== cap.runtime.build) return null;
     const modelPath = this.modelPath(cap.model);
-    const serverPath = this.dir('runtime', `${cap.runtime.build}-${cap.runtime.platform}`, cap.runtime.archiveDir, 'llama-server');
+    if (!isRuntimeInstalled(this.home, cap.runtime)) return null;
     try {
       if (fs.statSync(modelPath).size !== cap.model.bytes) return null;
-      fs.accessSync(serverPath, fs.constants.X_OK);
     } catch {
       return null;
     }
-    return { modelPath, serverPath, model: cap.model };
+    return { modelPath, serverPath: runtimeServerPath(this.home, cap.runtime), model: cap.model };
   }
 
   status(): InferenceStatus {
