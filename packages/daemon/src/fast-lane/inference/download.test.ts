@@ -123,6 +123,21 @@ describe('downloadVerified', () => {
     expect(fs.statSync(path.join(dir, 'model.gguf.partial')).size).toBe(500);
   });
 
+  it('rejects instead of crashing when the disk write fails', async () => {
+    // A read-only directory makes opening the .partial file fail, like a full or vanished disk would.
+    const readonly = path.join(dir, 'ro');
+    fs.mkdirSync(readonly);
+    fs.chmodSync(readonly, 0o555);
+    try {
+      const fetch = fakeFetch(CONTENT);
+      await expect(
+        downloadVerified(req({ destination: path.join(readonly, 'model.gguf') }), { fetch: fetch as any }),
+      ).rejects.toThrow(/EACCES|permission denied/i);
+    } finally {
+      fs.chmodSync(readonly, 0o755);
+    }
+  });
+
   it('restarts when the partial is larger than the expected size', async () => {
     fs.writeFileSync(path.join(dir, 'model.gguf.partial'), Buffer.alloc(CONTENT.length + 10, 7));
     const fetch = fakeFetch(CONTENT);

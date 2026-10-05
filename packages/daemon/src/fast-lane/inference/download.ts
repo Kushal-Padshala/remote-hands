@@ -72,16 +72,46 @@ export async function downloadVerified(req: DownloadRequest, deps: Partial<Downl
     if (res.body === null) throw new Error('download failed (empty response)');
 
     const out = fs.createWriteStream(partial, { flags: offset > 0 ? 'a' : 'w' });
+    // A failed write (full disk, vanished directory) must reject this call, not crash the process
+    // through an unhandled stream 'error', and must not leave us waiting for a 'drain' that never comes.
+    let writeError: Error | undefined;
+    out.on('error', (err) => {
+      writeError = err;
+    });
     let done = offset;
     try {
       for await (const chunk of Readable.fromWeb(res.body as never) as AsyncIterable<Buffer>) {
-        if (!out.write(chunk)) await new Promise<void>((resolve) => out.once('drain', resolve));
+        if (writeError) throw writeError;
+        if (!out.write(chunk)) {
+          await new Promise<void>((resolve, reject) => {
+            const cleanup = () => {
+              out.off('drain', onDrain);
+              out.off('error', onError);
+            };
+            const onDrain = () => {
+              cleanup();
+              resolve();
+            };
+            const onError = (err: Error) => {
+              cleanup();
+              reject(err);
+            };
+            out.once('drain', onDrain);
+            out.once('error', onError);
+          });
+        }
         done += chunk.length;
         onProgress?.(done, bytes);
       }
+      if (writeError) throw writeError;
     } finally {
-      await new Promise<void>((resolve) => out.end(resolve));
+      await new Promise<void>((resolve) => {
+        if (out.destroyed || out.writableFinished) return resolve();
+        out.once('error', () => resolve());
+        out.end(() => resolve());
+      });
     }
+    if (writeError) throw writeError;
   }
 
   const size = fs.statSync(partial).size;
