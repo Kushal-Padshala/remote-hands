@@ -297,6 +297,9 @@ export class HudCoordinator {
   private currentTaskId?: string | undefined;
   private currentConversationId?: string | undefined;
   private lastTaskDigest?: PreviousTaskDigest | undefined;
+  /** The last digest came from a fast-lane task, which the agent's own conversation knows nothing about. */
+  private lastDigestFromFastLane = false;
+  private taskFront = new Map<string, { app: string; isBrowser: boolean }>();
   private taskQueries = new Map<string, string>();
   private powerManager?: DynamicPowerManager | undefined;
   private fastLane?: Pick<FastLane, 'attempt' | 'prewarm'> | undefined;
@@ -480,6 +483,8 @@ export class HudCoordinator {
       this.currentTaskId = running.id;
       const query = this.taskQueries.get(running.id);
       this.taskQueries.delete(running.id);
+      const front = this.taskFront.get(running.id);
+      this.taskFront.delete(running.id);
 
       await store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
 
@@ -499,6 +504,7 @@ export class HudCoordinator {
           .attempt({
             taskId: running.id,
             query: query ?? running.prompt,
+            front,
             signal: abortController.signal,
             onUpdate: (text) => sendUpdate?.('WORKING', text),
           })
@@ -565,6 +571,7 @@ export class HudCoordinator {
       // successful execution that still owns the coordinator may publish its result.
       if (completedDigest && !abortController.signal.aborted && this.activeExecution === execution) {
         this.lastTaskDigest = completedDigest;
+        this.lastDigestFromFastLane = fastLaneResult !== undefined;
       }
     } catch (err: any) {
       const targetId = running?.id || task.id;
@@ -622,7 +629,7 @@ export class HudCoordinator {
         result.query,
         windowContext,
         result.attachments,
-        this.currentConversationId ? undefined : this.lastTaskDigest,
+        this.currentConversationId && !this.lastDigestFromFastLane ? undefined : this.lastTaskDigest,
       );
       const task = await this.store.createTask({
         prompt,
@@ -637,6 +644,7 @@ export class HudCoordinator {
       });
       this.currentTaskId = task.id;
       this.taskQueries.set(task.id, result.query);
+      this.taskFront.set(task.id, { app: windowContext.app || result.app || '', isBrowser: windowContext.isBrowser === true });
       if (this.onTaskCreated) {
         await this.onTaskCreated(task);
       }
@@ -668,7 +676,7 @@ export class HudCoordinator {
           result.query,
           windowContext,
           result.attachments,
-          this.currentConversationId ? undefined : this.lastTaskDigest,
+          this.currentConversationId && !this.lastDigestFromFastLane ? undefined : this.lastTaskDigest,
         );
         const task = await this.store.createTask({
           prompt,
@@ -683,6 +691,7 @@ export class HudCoordinator {
         });
         this.currentTaskId = task.id;
         this.taskQueries.set(task.id, result.query);
+        this.taskFront.set(task.id, { app: windowContext.app || result.app || '', isBrowser: windowContext.isBrowser === true });
         if (this.onTaskCreated) {
           await this.onTaskCreated(task);
         }

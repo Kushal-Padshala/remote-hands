@@ -1193,6 +1193,29 @@ describe('HudCoordinator fast lane', () => {
     expect(h.created[1].conversation_id).toBeNull();
   });
 
+  it('tells the fast lane which window was in front when the request was typed', async () => {
+    const attempt = vi.fn(async () => ({ kind: 'continue' }));
+    const h = harness({ attempt, prewarm: vi.fn() });
+    await h.submit('complete this survey for me');
+    expect((attempt.mock.calls[0] as unknown as [any])[0].front).toEqual({ app: 'Google Chrome', isBrowser: true });
+  });
+
+  it('remembers what the fast lane did for the next prompt even inside an agent conversation', async () => {
+    const attempt = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: 'continue' }) // first task: the agent runs and opens conversation conv-1
+      .mockResolvedValueOnce({ kind: 'handled', status: 'done', summary: 'Opened Spotify' })
+      .mockResolvedValue({ kind: 'continue' });
+    const h = harness({ attempt, prewarm: vi.fn() });
+    await h.submit('complete this survey for me');
+    await h.submit('complete the second survey for me');
+    await h.submit('complete the third survey for me');
+    expect(h.created[1].conversation_id).toBe('conv-1');
+    expect(h.created[2].conversation_id).toBe('conv-1');
+    expect(h.created[2].prompt).toContain('Previous task (just finished)');
+    expect(h.created[2].prompt).toContain('Opened Spotify');
+  });
+
   it('warms the model up on the hotkey', async () => {
     const prewarm = vi.fn();
     const h = harness({ attempt: vi.fn(), prewarm });

@@ -3,6 +3,7 @@ import {
   FastLaneInference,
   MODELS,
   readFastLaneConfig,
+  readRunSummary,
   writeFastLaneConfig,
   type ModelEntry,
   type ModelTier,
@@ -46,15 +47,17 @@ export async function fastLaneCommand(args: string[], context: CommandContext = 
   const config = readFastLaneConfig(home, env);
   let tier: ModelTier | undefined = config.tier;
 
+  let chosenTier: ModelTier | undefined;
   if (sub === 'install') {
-    const flag = args.find((a) => a.startsWith('--tier='))?.slice('--tier='.length);
-    if (flag !== undefined) {
+    const at = args.findIndex((a) => a === '--tier' || a.startsWith('--tier='));
+    if (at !== -1) {
+      const flag = args[at]!.startsWith('--tier=') ? args[at]!.slice('--tier='.length) : args[at + 1];
       if (flag !== 'standard' && flag !== 'lite') {
         stderr('The model size must be standard or lite.');
         return 1;
       }
+      chosenTier = flag;
       tier = flag;
-      writeFastLaneConfig(home, { tier });
     }
   }
 
@@ -72,6 +75,11 @@ export async function fastLaneCommand(args: string[], context: CommandContext = 
     stdout(`State:     ${status.state === 'not-installed' ? 'not installed' : 'ready - the local model is installed'}`);
     if (model) stdout(`Model:     ${model.label} (${status.tier ?? model.tier} size, ${(model.bytes / 1e9).toFixed(1)}GB download)`);
     stdout(`Memory:    ${gb(context.fastLane?.totalRamBytes ?? os.totalmem())}`);
+    const recent = readRunSummary(home);
+    if (recent.total > 0) {
+      const median = recent.medianHandledMs === null ? '' : ` (median ${(recent.medianHandledMs / 1000).toFixed(1)}s)`;
+      stdout(`Recent:    ${recent.handled} of ${recent.total} requests finished by the fast lane${median}`);
+    }
     if (status.state === 'not-installed') stdout('Next:      rh fast-lane install');
     else stdout(`Next:      ${config.enabled ? 'rh fast-lane disable to turn it off' : 'rh fast-lane enable'}`);
     return 0;
@@ -95,6 +103,7 @@ export async function fastLaneCommand(args: string[], context: CommandContext = 
       stderr(`Install failed: ${err instanceof Error ? err.message : String(err)}`);
       return 1;
     }
+    if (chosenTier !== undefined) writeFastLaneConfig(home, { tier: chosenTier }); // only once it installed
     stdout('Installed. Turn it on with: rh fast-lane enable');
     return 0;
   }
@@ -110,6 +119,9 @@ export async function fastLaneCommand(args: string[], context: CommandContext = 
     }
     writeFastLaneConfig(home, { enabled: true });
     stdout('Fast lane is on. New requests in the HUD try it first; anything it is unsure about goes to the agent.');
+    if (env.RH_FAST_LANE !== undefined && ['0', 'false', 'off'].includes(env.RH_FAST_LANE.trim().toLowerCase())) {
+      stdout('Note: RH_FAST_LANE is set to off in this environment and overrides this setting until you unset it.');
+    }
     return 0;
   }
 

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFastLaneConfig } from '@remote-hands/daemon';
+import { appendRunRecord, readFastLaneConfig } from '@remote-hands/daemon';
 import { main } from '../index.js';
 
 let home: string;
@@ -61,6 +61,14 @@ describe('rh fast-lane status', () => {
     expect(text(r.out)).toContain('at least 8GB');
   });
 
+  it('shows how the recent requests went', async () => {
+    for (const elapsedMs of [900, 1100, 1300]) appendRunRecord(home, { at: '2026-10-04T10:00:00.000Z', lane: 'skill', result: 'handled', elapsedMs });
+    appendRunRecord(home, { at: '2026-10-04T10:00:00.000Z', lane: 'brain', result: 'continued', elapsedMs: 200 });
+    const r = run(['status'], { status: { state: 'ready', model: 'qwen3-4b-instruct-2507-q4km', tier: 'standard' } });
+    await r.code;
+    expect(text(r.out)).toContain('Recent:    3 of 4 requests finished by the fast lane (median 1.1s)');
+  });
+
   it('says when RH_FAST_LANE decides, not the file', async () => {
     const r = run(['status'], { env: { RH_FAST_LANE: '1' } });
     await r.code;
@@ -102,6 +110,19 @@ describe('rh fast-lane install', () => {
     expect(text(r.err)).not.toContain('    at ');
   });
 
+  it('accepts the size as a separate word too', async () => {
+    const ok = run(['install', '--tier', 'lite']);
+    expect(await ok.code).toBe(0);
+    expect(readFastLaneConfig(home, {}).tier).toBe('lite');
+  });
+
+  it('keeps the old size setting when the install of the new one fails', async () => {
+    expect(await run(['install', '--tier=standard']).code).toBe(0);
+    const failed = run(['install', '--tier=lite'], { install: vi.fn(async () => { throw new Error('offline'); }) as never });
+    expect(await failed.code).toBe(1);
+    expect(readFastLaneConfig(home, {}).tier).toBe('standard');
+  });
+
   it('remembers a chosen tier and rejects an unknown one', async () => {
     const ok = run(['install', '--tier=lite']);
     expect(await ok.code).toBe(0);
@@ -130,6 +151,12 @@ describe('rh fast-lane enable and disable', () => {
     expect(await off.code).toBe(0);
     expect(readFastLaneConfig(home, {}).enabled).toBe(false);
     expect(text(off.out)).toContain('straight to the agent');
+  });
+
+  it('tells you when RH_FAST_LANE overrides the setting you just changed', async () => {
+    const r = run(['enable'], { status: ready, env: { RH_FAST_LANE: '0' } });
+    expect(await r.code).toBe(0);
+    expect(text(r.out)).toContain('RH_FAST_LANE');
   });
 
   it('can always turn off, even without the model', async () => {

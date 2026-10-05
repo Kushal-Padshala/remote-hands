@@ -43,9 +43,8 @@ async function resolve(opts: { state: 'ready' | 'not-installed' | 'unsupported' 
 }
 
 describe('resolveFastLane', () => {
-  it('is quiet and absent when it is off and not installed', async () => {
+  it('is quiet when it is off and not installed', async () => {
     const r = await resolve({ state: 'not-installed' });
-    expect(r.resolved).toBeUndefined();
     expect(r.out).toEqual([]);
   });
 
@@ -55,13 +54,16 @@ describe('resolveFastLane', () => {
     expect(r.out).toEqual([]);
   });
 
-  it('says how to finish setup when it is on but not installed', async () => {
+  it('still returns a fast lane when it is on but not installed, with a hint, so installing later needs no restart', async () => {
     const r = await resolve({ state: 'not-installed', enabled: true });
-    expect(r.resolved).toBeUndefined();
+    expect(r.resolved).toBeDefined();
     expect(r.out.join('\n')).toContain('rh fast-lane install');
+    // nothing is installed yet: a request passes straight through
+    expect(await r.resolved!.fastLane.attempt({ taskId: 't', query: 'anything' })).toEqual({ kind: 'continue' });
+    expect(r.over.frontmost).not.toHaveBeenCalled();
   });
 
-  it('says why it cannot run when it is on but unsupported', async () => {
+  it('says why it cannot run when it is on but unsupported, and has no fast lane', async () => {
     const r = await resolve({ state: 'unsupported', reason: 'The fast lane needs at least 8GB of memory to run the local model.', enabled: true });
     expect(r.resolved).toBeUndefined();
     expect(r.out.join('\n')).toContain('at least 8GB');
@@ -90,6 +92,17 @@ describe('resolveFastLane', () => {
     const r = await resolve({ state: 'ready', env: { RH_FAST_LANE: '1' } });
     await r.resolved!.fastLane.attempt({ taskId: 't', query: 'anything' });
     expect(r.over.frontmost).toHaveBeenCalled();
+  });
+
+  it('writes one privacy-safe record per request to the run log', async () => {
+    const inference = fakeInference('ready');
+    const over = { ...overrides(), frontmost: vi.fn(async () => ({ app: 'Finder', isBrowser: false })) };
+    writeFastLaneConfig(home, { enabled: true });
+    const resolved = await resolveFastLane({ env: {}, fastLane: { inference: inference as never, homeDir: home } }, () => {}, over);
+    await resolved!.fastLane.attempt({ taskId: 't', query: 'a private request about hunter2' });
+    const log = fs.readFileSync(path.join(home, '.remote-hands', 'fast-lane', 'runs.jsonl'), 'utf8');
+    expect(log).toContain('"lane":"brain"');
+    expect(log).not.toContain('hunter2');
   });
 
   it('stops the model process on dispose', async () => {

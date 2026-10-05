@@ -1,6 +1,7 @@
 import os from 'node:os';
 import {
   FastLane,
+  appendRunRecord,
   FastLaneInference,
   MacOsDriver,
   SkillRegistry,
@@ -40,21 +41,19 @@ export async function resolveFastLane(
   const inference = (context.fastLane?.inference ?? new FastLaneInference({ homeDir: home, tier: config.tier })) as FastLaneInference;
 
   const status = inference.status();
-  if (status.state === 'unsupported' || status.state === 'not-installed') {
-    if (config.enabled) {
-      stdout(
-        status.state === 'unsupported'
-          ? `Fast lane is on but cannot run here: ${status.reason ?? 'unsupported machine'}`
-          : 'Fast lane is on but the local model is not installed yet. Run: rh fast-lane install',
-      );
-    }
+  if (status.state === 'unsupported') {
+    if (config.enabled) stdout(`Fast lane is on but cannot run here: ${status.reason ?? 'unsupported machine'}`);
     return undefined;
+  }
+  // Not installed yet still gets a fast lane: each request checks the install again, so installing
+  // later takes effect without restarting the HUD.
+  if (status.state === 'not-installed' && config.enabled) {
+    stdout('Fast lane is on but the local model is not installed yet. Run: rh fast-lane install');
   }
 
   // The approval gate reads the running task from a marker file; the fast lane writes it while it acts.
   const gate = createActionGate({ env: context.env });
   let session: ComputerSession | undefined;
-  let running: string | null = null;
   const macos = new MacOsDriver();
   const registry = new SkillRegistry();
   for (const skill of defaultSkills()) registry.register(skill);
@@ -69,15 +68,10 @@ export async function resolveFastLane(
       const front = await macos.getActiveWindowContext();
       return { app: front.app ?? '', isBrowser: front.isBrowser === true };
     },
-    setActiveTask: (id) => {
-      if (id !== null) {
-        writeActiveTask(id);
-        running = id;
-      } else if (running !== null) {
-        clearActiveTask(running);
-        running = null;
-      }
-    },
+    markActive: (id) => writeActiveTask(id),
+    // Removes the marker only if it still names this task (a newer task may already own it).
+    clearActive: (id) => clearActiveTask(id),
+    onRun: (record) => appendRunRecord(home, record),
     ...overrides,
   };
 
