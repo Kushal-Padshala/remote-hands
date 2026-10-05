@@ -13,6 +13,7 @@ import {
 } from './page-scripts.js';
 import { clean, findElements, normalizeSnapshot, renderDelta, renderElement, renderFull, type PageElement, type PageState } from './render.js';
 import { okSoFar, type BrowserPort, type DoStep } from './port.js';
+import type { ActionGate } from '../action-gate.js';
 
 export type BrowserTransportLike = Pick<
   AppleScriptTransport,
@@ -27,6 +28,8 @@ export interface FastBrowserEngineDeps {
   now?: () => number;
   /** Self-heal when a browser the user approved reports the setting off (see createAutoEnable). */
   autoEnable?: (browser: BrowserApp) => Promise<{ ok: boolean; message?: string }>;
+  /** Asked before every click; rejecting stops the click (see ActionGate). */
+  gate?: ActionGate;
 }
 
 interface Ctx {
@@ -249,10 +252,12 @@ export class FastBrowserEngine implements BrowserPort {
   private readonly disabled = new Map<string, { until: number; reason: string }>();
   private noteShown = false;
   private readonly autoEnable: FastBrowserEngineDeps['autoEnable'];
+  private readonly gate: FastBrowserEngineDeps['gate'];
   private readonly autoFailedAt = new Map<string, number>();
 
   constructor(deps: FastBrowserEngineDeps) {
     this.autoEnable = deps.autoEnable;
+    this.gate = deps.gate;
     this.t = deps.transport;
     this.legacy = deps.legacy;
     this.env = deps.env ?? process.env;
@@ -562,6 +567,7 @@ export class FastBrowserEngine implements BrowserPort {
 
   /** Runs one page op; throws the model-facing message on failure. */
   private async act(ctx: Ctx, op: PageOp, index: number | null): Promise<PageOpResult & { ok: true }> {
+    if (op.op === 'click') await this.gate?.(op.label);
     let text: string;
     try {
       text = await this.t.evaluate(ctx.browser, ctx.target, buildActionScript(op));

@@ -58,7 +58,7 @@ describe('Context Attachment Types', () => {
     };
 
     expect(task.attachments?.length).toBe(1);
-    expect(task.attachments?.[0].type).toBe('browser_tab');
-    expect(hierarchy.browsers[0].profiles[0].tabs.length).toBe(1);
+    expect(task.attachments?.[0]?.type).toBe('browser_tab');
+    expect(hierarchy.browsers[0]?.profiles[0]?.tabs.length).toBe(1);
   });
 });

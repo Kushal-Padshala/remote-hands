@@ -4,6 +4,7 @@ import { BrowserDriver, ChromeManager, MacOsDriver } from '@remote-hands/daemon'
 import { browserDoctor } from './browser-doctor.js';
 import { browserSetupCommand } from './browser-setup.js';
 import type { CommandContext } from './setup.js';
+import { createActionGate, type ActionGateContext } from '../action-gate.js';
 
 export function findChromeBinary(): string {
   if (process.platform === 'darwin') {
@@ -53,7 +54,7 @@ export async function ensureChromeAutomationReady(options?: { headless?: boolean
 
 function focusChrome(_context?: CommandContext, _isHeadless?: boolean): void {}
 
-export async function browserCommand(args: string[], context: CommandContext = {}): Promise<number> {
+export async function browserCommand(args: string[], context: CommandContext & Pick<ActionGateContext, 'approve' | 'taskId'> = {}): Promise<number> {
   const stdout = context.stdout ?? console.log;
   const stderr = context.stderr ?? console.error;
   const isHeadless = args.includes('--headless') || process.env.REMOTE_HANDS_HEADLESS === '1';
@@ -111,7 +112,7 @@ export async function browserCommand(args: string[], context: CommandContext = {
     }
     const index = parseInt(indexArg.replace(/^e/i, ''), 10);
     try {
-      const driver = new BrowserDriver({ cdpUrl });
+      const driver = new BrowserDriver({ cdpUrl, gate: createActionGate(context) });
       const res = await driver.clickIndex(index);
       stdout(`Clicked [${indexArg}] ${res.label}`);
       return 0;

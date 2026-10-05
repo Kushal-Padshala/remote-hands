@@ -1,4 +1,5 @@
 import type { CommandContext } from './setup.js';
+import { createActionGate, type ActionGateContext } from '../action-gate.js';
 import {
   MacOsDriver,
   AxWalker,
@@ -8,7 +9,7 @@ import {
   performAxAction,
 } from '@remote-hands/daemon';
 
-export interface DesktopCommandContext extends CommandContext {
+export interface DesktopCommandContext extends CommandContext, Pick<ActionGateContext, 'approve' | 'taskId'> {
   desktopDriver?: MacOsDriver | any;
   walker?: AxWalker | any;
   actEngine?: DesktopActEngine | any;
@@ -29,6 +30,7 @@ export async function desktopCommand(
   const searchMenuFn = context.searchAndTriggerMenu ?? searchAndTriggerMenu;
   const crawlMenuFn = context.crawlAppMenu ?? crawlAppMenu;
   const axActionFn = context.performAxAction ?? performAxAction;
+  const gate = createActionGate(context);
 
   const sub = args[0];
   if (!sub) {
@@ -201,6 +203,7 @@ export async function desktopCommand(
           stderr(`Element [${targetIndex}] not found`);
           return 1;
         }
+        await gate(el?.label ?? '');
         await (appArg
           ? engine.executeDecision({ action: isRight ? 'RIGHT_CLICK' : 'CLICK', targetIndex }, elements, appArg)
           : engine.executeDecision({ action: isRight ? 'RIGHT_CLICK' : 'CLICK', targetIndex }, elements));
@@ -214,6 +217,7 @@ export async function desktopCommand(
         elements.find((e) => e.label.toLowerCase() === lower) ||
         elements.find((e) => e.label && (e.label.toLowerCase().includes(lower) || lower.includes(e.label.toLowerCase())));
       if (matched) {
+        await gate(matched.label);
         await engine.executeDecision({ action: isRight ? 'RIGHT_CLICK' : 'CLICK', targetIndex: matched.index }, elements);
         stdout(`${isRight ? 'Right-clicked' : 'Clicked'} "${matched.label}" [${matched.index}]`);
         return 0;
@@ -264,6 +268,7 @@ export async function desktopCommand(
         return 1;
       }
       const menuPath = args.slice(2);
+      await gate(menuPath[menuPath.length - 1] ?? '');
       await driver.triggerMenu(app, menuPath);
       stdout(`Triggered menu "${menuPath.join(' > ')}" in ${app}`);
       return 0;
@@ -276,7 +281,7 @@ export async function desktopCommand(
         stderr('Usage: rh desktop menu-search <app> <query>');
         return 1;
       }
-      const res = await searchMenuFn(app, query, driver.exec);
+      const res = await searchMenuFn(app, query, driver.exec, gate);
       if (res.success) {
         stdout(`Triggered menu: ${(res.triggeredPath || [query]).join(' > ')}`);
         return 0;
@@ -319,6 +324,7 @@ export async function desktopCommand(
           target = { index: matched.index, bounds: matched.bounds, role: matched.role, label: matched.label };
         }
       } catch {}
+      await gate(typeof target === 'object' ? target.label ?? '' : '');
       const success = await axActionFn(app, target, action, driver.exec);
       if (success) {
         stdout(`Executed ${action} on element [${cleanIdx}] in ${app}`);
@@ -345,17 +351,19 @@ export async function desktopCommand(
         } catch {}
       }
       const elements = await walker.walkActiveApp(targetApp, { allowOcr: false });
-      const decision = typeof engine.act === 'function'
-        ? await (targetApp ? engine.act(goal, elements, targetApp) : engine.act(goal, elements))
-        : await (async () => {
-            const d = engine.matchHeuristic(goal, elements);
-            await (targetApp ? engine.executeDecision(d, elements, targetApp) : engine.executeDecision(d, elements));
-            return d;
-          })();
+      const decision = engine.matchHeuristic(goal, elements);
       if ((decision.action === 'CLICK' || decision.action === 'RIGHT_CLICK') && decision.targetIndex === undefined) {
         stderr(`No matching element found for goal: "${goal}"`);
         return 1;
       }
+      // TYPE_TEXT also presses its target to focus it before typing.
+      if (decision.targetIndex !== undefined) {
+        const target = elements.find((e) => e.index === decision.targetIndex);
+        await gate(target?.label ?? '');
+      } else {
+        await gate(goal, { goal: true });
+      }
+      await (targetApp ? engine.executeDecision(decision, elements, targetApp) : engine.executeDecision(decision, elements));
       stdout(`Executed: ${decision.action}`);
       return 0;
     }

@@ -1,6 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SpotlightHudRunner } from './spotlight-hud.js';
 
+// Parse prompt responses without compiling Swift or opening a real native HUD.
+vi.mock('node:child_process', async (original) => ({
+  ...await original<typeof import('node:child_process')>(),
+  spawnSync: vi.fn(() => ({ status: 1, stdout: '', stderr: 'native helper unavailable in unit tests' })),
+  spawn: vi.fn(() => ({
+    on: vi.fn(), stdout: { on: vi.fn() }, stdin: { writable: false }, killed: false,
+    kill: vi.fn(), unref: vi.fn(),
+  })),
+}));
+
 describe('SpotlightHudRunner', () => {
   let mockExec: any;
   let runner: SpotlightHudRunner;

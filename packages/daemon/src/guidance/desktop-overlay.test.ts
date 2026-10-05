@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DesktopOverlayController } from './desktop-overlay.js';
 
+// Rendering tests stop at the native process boundary; no overlay is launched.
+vi.mock('node:child_process', async (original) => ({
+  ...await original<typeof import('node:child_process')>(),
+  spawn: vi.fn(() => ({ unref: vi.fn() })),
+}));
+
 describe('DesktopOverlayController', () => {
   let mockDriver: any;
   let mockAxWalker: any;

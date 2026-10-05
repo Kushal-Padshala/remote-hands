@@ -232,6 +232,31 @@ describe('snapshot and actions', () => {
     ]);
   });
 
+  it('asks the gate with the label before clicking, and a rejection stops the click', async () => {
+    const asked: string[] = [];
+    const gated = new FastBrowserEngine({
+      transport: t,
+      legacy,
+      env: {},
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+      gate: async (label) => {
+        asked.push(label);
+        throw new Error('Approval rejected by user: not yet.');
+      },
+    });
+    await gated.snapshot();
+    await expect(gated.click(12)).rejects.toThrow('Approval rejected by user: not yet.');
+    await expect(gated.do([{ op: 'type', index: 7, text: 'a' }, { op: 'click', index: 12 }])).rejects.toThrow(
+      /step 2 click failed: Approval rejected/,
+    );
+    expect(asked).toEqual(['Next', 'Next']);
+    // Only the type step reached the page.
+    expect(t.actionEvals().map((js) => opOf(js).op)).toEqual(['type']);
+  });
+
   it('a non-navigating action costs one action evaluate + one combined snapshot evaluate, no environment read (I3)', async () => {
     await engine.snapshot();
     t.evals = [];
