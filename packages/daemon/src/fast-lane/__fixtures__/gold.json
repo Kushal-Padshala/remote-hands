@@ -1,0 +1,1549 @@
+[
+ {
+  "id": "router-open_app-0",
+  "set": "router",
+  "state": "User request: \"open spotify\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "open_app"
+ },
+ {
+  "id": "router-open_app-1",
+  "set": "router",
+  "state": "User request: \"launch the notes app\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "open_app"
+ },
+ {
+  "id": "router-open_app-2",
+  "set": "router",
+  "state": "User request: \"switch to chrome\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "open_app"
+ },
+ {
+  "id": "router-open_app-3",
+  "set": "router",
+  "state": "User request: \"can you open Finder for me\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "open_app"
+ },
+ {
+  "id": "router-open_app-4",
+  "set": "router",
+  "state": "User request: \"start brave browser\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "open_app"
+ },
+ {
+  "id": "router-open_app-5",
+  "set": "router",
+  "state": "User request: \"bring up the calculator\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "open_app"
+ },
+ {
+  "id": "router-open_app-6",
+  "set": "router",
+  "state": "User request: \"open system settings\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "open_app"
+ },
+ {
+  "id": "router-media-0",
+  "set": "router",
+  "state": "User request: \"play my liked songs on shuffle\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "media"
+ },
+ {
+  "id": "router-media-1",
+  "set": "router",
+  "state": "User request: \"pause the music\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "media"
+ },
+ {
+  "id": "router-media-2",
+  "set": "router",
+  "state": "User request: \"skip to the next song\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "media"
+ },
+ {
+  "id": "router-media-3",
+  "set": "router",
+  "state": "User request: \"turn the volume down a bit\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "media"
+ },
+ {
+  "id": "router-media-4",
+  "set": "router",
+  "state": "User request: \"play some lofi beats\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "media"
+ },
+ {
+  "id": "router-media-5",
+  "set": "router",
+  "state": "User request: \"resume playback\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "media"
+ },
+ {
+  "id": "router-media-6",
+  "set": "router",
+  "state": "User request: \"play the album I was listening to yesterday\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "media"
+ },
+ {
+  "id": "router-note-0",
+  "set": "router",
+  "state": "User request: \"make a note called groceries with milk, eggs and bread\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "note"
+ },
+ {
+  "id": "router-note-1",
+  "set": "router",
+  "state": "User request: \"add this to my notes: call dentist tomorrow 9am\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "note"
+ },
+ {
+  "id": "router-note-2",
+  "set": "router",
+  "state": "User request: \"create a new note with the survey questions and answers\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "note"
+ },
+ {
+  "id": "router-note-3",
+  "set": "router",
+  "state": "User request: \"jot down that the meeting moved to friday\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "note"
+ },
+ {
+  "id": "router-note-4",
+  "set": "router",
+  "state": "User request: \"save these three bullet points in a new note\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "note"
+ },
+ {
+  "id": "router-note-5",
+  "set": "router",
+  "state": "User request: \"new note titled ideas: build a decision router\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "note"
+ },
+ {
+  "id": "router-note-6",
+  "set": "router",
+  "state": "User request: \"append buy charger to my shopping note\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "note"
+ },
+ {
+  "id": "router-browser_flow-0",
+  "set": "router",
+  "state": "User request: \"complete this survey for me\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "browser_flow"
+ },
+ {
+  "id": "router-browser_flow-1",
+  "set": "router",
+  "state": "User request: \"search flights from Zurich to London next friday\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "browser_flow"
+ },
+ {
+  "id": "router-browser_flow-2",
+  "set": "router",
+  "state": "User request: \"log in to my dashboard and open the billing page\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "browser_flow"
+ },
+ {
+  "id": "router-browser_flow-3",
+  "set": "router",
+  "state": "User request: \"fill out the contact form on this page\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "browser_flow"
+ },
+ {
+  "id": "router-browser_flow-4",
+  "set": "router",
+  "state": "User request: \"add the cheapest laptop to the cart\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "browser_flow"
+ },
+ {
+  "id": "router-browser_flow-5",
+  "set": "router",
+  "state": "User request: \"click next until the form is submitted\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "browser_flow"
+ },
+ {
+  "id": "router-browser_flow-6",
+  "set": "router",
+  "state": "User request: \"find the wikipedia article about godel and open it\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "browser_flow"
+ },
+ {
+  "id": "router-write-0",
+  "set": "router",
+  "state": "User request: \"write a short story about a lighthouse keeper\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "write"
+ },
+ {
+  "id": "router-write-1",
+  "set": "router",
+  "state": "User request: \"draft a polite reply declining this meeting\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "write"
+ },
+ {
+  "id": "router-write-2",
+  "set": "router",
+  "state": "User request: \"summarize this article in three sentences\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "write"
+ },
+ {
+  "id": "router-write-3",
+  "set": "router",
+  "state": "User request: \"write a cover letter for a data analyst job\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "write"
+ },
+ {
+  "id": "router-write-4",
+  "set": "router",
+  "state": "User request: \"compose a birthday message for my sister\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "write"
+ },
+ {
+  "id": "router-write-5",
+  "set": "router",
+  "state": "User request: \"rewrite this paragraph to sound more formal\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "write"
+ },
+ {
+  "id": "router-write-6",
+  "set": "router",
+  "state": "User request: \"write a product description for a steel water bottle\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "write"
+ },
+ {
+  "id": "router-reason-0",
+  "set": "router",
+  "state": "User request: \"fix the failing unit test in my repo\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "reason"
+ },
+ {
+  "id": "router-reason-1",
+  "set": "router",
+  "state": "User request: \"research the best rental marketing strategy for a small flat\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "reason"
+ },
+ {
+  "id": "router-reason-2",
+  "set": "router",
+  "state": "User request: \"why is my node server using so much memory\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "reason"
+ },
+ {
+  "id": "router-reason-3",
+  "set": "router",
+  "state": "User request: \"compare these two pricing plans and tell me which is cheaper over 3 years\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "reason"
+ },
+ {
+  "id": "router-reason-4",
+  "set": "router",
+  "state": "User request: \"refactor this function to be faster\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "reason"
+ },
+ {
+  "id": "router-reason-5",
+  "set": "router",
+  "state": "User request: \"figure out why the build breaks only on CI\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "reason"
+ },
+ {
+  "id": "router-reason-6",
+  "set": "router",
+  "state": "User request: \"plan a three step migration from sqlite to postgres\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "reason"
+ },
+ {
+  "id": "router-guide-0",
+  "set": "router",
+  "state": "User request: \"where is the export button\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "guide"
+ },
+ {
+  "id": "router-guide-1",
+  "set": "router",
+  "state": "User request: \"how do i upload a file here\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "guide"
+ },
+ {
+  "id": "router-guide-2",
+  "set": "router",
+  "state": "User request: \"show me where to change the font\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "guide"
+ },
+ {
+  "id": "router-guide-3",
+  "set": "router",
+  "state": "User request: \"which button turns on dark mode\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "guide"
+ },
+ {
+  "id": "router-guide-4",
+  "set": "router",
+  "state": "User request: \"point to the share option\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "guide"
+ },
+ {
+  "id": "router-guide-5",
+  "set": "router",
+  "state": "User request: \"where do i click to rename this\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "guide"
+ },
+ {
+  "id": "router-guide-6",
+  "set": "router",
+  "state": "User request: \"how do i find the print settings\"",
+  "question": "What should the assistant do with this request?",
+  "options": {
+   "open_app": "Open or switch to a desktop application",
+   "media": "Control music or media playback",
+   "note": "Create or edit a note with given content",
+   "browser_flow": "Operate a website: click, fill forms, search, multi-step flows",
+   "write": "Write original text such as stories, emails or summaries",
+   "reason": "Research, coding, debugging or analysis that needs deep reasoning",
+   "guide": "Point at or explain where something is in the interface"
+  },
+  "gold": "guide"
+ },
+ {
+  "set": "element",
+  "state": "Goal: search for 'wireless mouse'\nElements:\n[1] button \"Menu\"\n[2] textbox \"Search products\"\n[3] link \"Orders\"\n[4] button \"Cart\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "button \"Menu\"",
+   "e2": "textbox \"Search products\"",
+   "e3": "link \"Orders\"",
+   "e4": "button \"Cart\""
+  },
+  "gold": "e2",
+  "id": "element-0"
+ },
+ {
+  "set": "element",
+  "state": "Goal: open the shopping cart\nElements:\n[1] textbox \"Search\"\n[2] link \"Deals\"\n[3] button \"Cart (2)\"\n[4] link \"Sign in\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "textbox \"Search\"",
+   "e2": "link \"Deals\"",
+   "e3": "button \"Cart (2)\"",
+   "e4": "link \"Sign in\""
+  },
+  "gold": "e3",
+  "id": "element-1"
+ },
+ {
+  "set": "element",
+  "state": "Goal: sign in to the account\nElements:\n[1] link \"Help\"\n[2] button \"Sign in\"\n[3] link \"Create account\"\n[4] button \"Language\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "link \"Help\"",
+   "e2": "button \"Sign in\"",
+   "e3": "link \"Create account\"",
+   "e4": "button \"Language\""
+  },
+  "gold": "e2",
+  "id": "element-2"
+ },
+ {
+  "set": "element",
+  "state": "Goal: enter the email address me@x.com\nElements:\n[1] textbox \"Full name\"\n[2] textbox \"Email address\"\n[3] textbox \"Phone\"\n[4] button \"Submit\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "textbox \"Full name\"",
+   "e2": "textbox \"Email address\"",
+   "e3": "textbox \"Phone\"",
+   "e4": "button \"Submit\""
+  },
+  "gold": "e2",
+  "id": "element-3"
+ },
+ {
+  "set": "element",
+  "state": "Goal: accept the cookie banner\nElements:\n[1] button \"Reject all\"\n[2] button \"Accept all cookies\"\n[3] link \"Privacy policy\"\n[4] button \"Settings\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "button \"Reject all\"",
+   "e2": "button \"Accept all cookies\"",
+   "e3": "link \"Privacy policy\"",
+   "e4": "button \"Settings\""
+  },
+  "gold": "e2",
+  "id": "element-4"
+ },
+ {
+  "set": "element",
+  "state": "Goal: go to the next page of the form\nElements:\n[1] button \"Back\"\n[2] button \"Save draft\"\n[3] button \"Next\"\n[4] button \"Cancel\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "button \"Back\"",
+   "e2": "button \"Save draft\"",
+   "e3": "button \"Next\"",
+   "e4": "button \"Cancel\""
+  },
+  "gold": "e3",
+  "id": "element-5"
+ },
+ {
+  "set": "element",
+  "state": "Goal: submit the finished form\nElements:\n[1] button \"Cancel\"\n[2] button \"Submit application\"\n[3] link \"Terms\"\n[4] button \"Back\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "button \"Cancel\"",
+   "e2": "button \"Submit application\"",
+   "e3": "link \"Terms\"",
+   "e4": "button \"Back\""
+  },
+  "gold": "e2",
+  "id": "element-6"
+ },
+ {
+  "set": "element",
+  "state": "Goal: close the popup dialog\nElements:\n[1] button \"Subscribe now\"\n[2] button \"Close dialog\"\n[3] textbox \"Email\"\n[4] link \"Learn more\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "button \"Subscribe now\"",
+   "e2": "button \"Close dialog\"",
+   "e3": "textbox \"Email\"",
+   "e4": "link \"Learn more\""
+  },
+  "gold": "e2",
+  "id": "element-7"
+ },
+ {
+  "set": "element",
+  "state": "Goal: choose the economy cabin\nElements:\n[1] radio \"First class\"\n[2] radio \"Business\"\n[3] radio \"Economy\"\n[4] radio \"Premium economy\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "radio \"First class\"",
+   "e2": "radio \"Business\"",
+   "e3": "radio \"Economy\"",
+   "e4": "radio \"Premium economy\""
+  },
+  "gold": "e3",
+  "id": "element-8"
+ },
+ {
+  "set": "element",
+  "state": "Goal: pick the cheapest delivery option\nElements:\n[1] radio \"Express - $15\"\n[2] radio \"Standard - $5\"\n[3] radio \"Same day - $25\"\n[4] radio \"Pickup - $0\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "radio \"Express - $15\"",
+   "e2": "radio \"Standard - $5\"",
+   "e3": "radio \"Same day - $25\"",
+   "e4": "radio \"Pickup - $0\""
+  },
+  "gold": "e4",
+  "id": "element-9"
+ },
+ {
+  "set": "element",
+  "state": "Goal: type the departure city\nElements:\n[1] combobox \"Where from?\"\n[2] combobox \"Where to?\"\n[3] textbox \"Departure date\"\n[4] button \"Search\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "combobox \"Where from?\"",
+   "e2": "combobox \"Where to?\"",
+   "e3": "textbox \"Departure date\"",
+   "e4": "button \"Search\""
+  },
+  "gold": "e1",
+  "id": "element-10"
+ },
+ {
+  "set": "element",
+  "state": "Goal: type the destination city\nElements:\n[1] combobox \"Where from?\"\n[2] combobox \"Where to?\"\n[3] textbox \"Departure date\"\n[4] button \"Search\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "combobox \"Where from?\"",
+   "e2": "combobox \"Where to?\"",
+   "e3": "textbox \"Departure date\"",
+   "e4": "button \"Search\""
+  },
+  "gold": "e2",
+  "id": "element-11"
+ },
+ {
+  "set": "element",
+  "state": "Goal: start the search\nElements:\n[1] combobox \"Where from?\"\n[2] combobox \"Where to?\"\n[3] textbox \"Departure date\"\n[4] button \"Search\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "combobox \"Where from?\"",
+   "e2": "combobox \"Where to?\"",
+   "e3": "textbox \"Departure date\"",
+   "e4": "button \"Search\""
+  },
+  "gold": "e4",
+  "id": "element-12"
+ },
+ {
+  "set": "element",
+  "state": "Goal: open the settings page\nElements:\n[1] link \"Profile\"\n[2] link \"Settings\"\n[3] link \"Notifications\"\n[4] link \"Log out\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "link \"Profile\"",
+   "e2": "link \"Settings\"",
+   "e3": "link \"Notifications\"",
+   "e4": "link \"Log out\""
+  },
+  "gold": "e2",
+  "id": "element-13"
+ },
+ {
+  "set": "element",
+  "state": "Goal: log out of the account\nElements:\n[1] link \"Profile\"\n[2] link \"Settings\"\n[3] link \"Notifications\"\n[4] link \"Log out\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "link \"Profile\"",
+   "e2": "link \"Settings\"",
+   "e3": "link \"Notifications\"",
+   "e4": "link \"Log out\""
+  },
+  "gold": "e4",
+  "id": "element-14"
+ },
+ {
+  "set": "element",
+  "state": "Goal: tick the box agreeing to the terms\nElements:\n[1] checkbox \"Subscribe to newsletter\"\n[2] checkbox \"I agree to the Terms of Service\"\n[3] checkbox \"Remember me\"\n[4] button \"Continue\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "checkbox \"Subscribe to newsletter\"",
+   "e2": "checkbox \"I agree to the Terms of Service\"",
+   "e3": "checkbox \"Remember me\"",
+   "e4": "button \"Continue\""
+  },
+  "gold": "e2",
+  "id": "element-15"
+ },
+ {
+  "set": "element",
+  "state": "Goal: select the 'Last 30 days' range\nElements:\n[1] option \"Today\"\n[2] option \"Last 7 days\"\n[3] option \"Last 30 days\"\n[4] option \"All time\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "option \"Today\"",
+   "e2": "option \"Last 7 days\"",
+   "e3": "option \"Last 30 days\"",
+   "e4": "option \"All time\""
+  },
+  "gold": "e3",
+  "id": "element-16"
+ },
+ {
+  "set": "element",
+  "state": "Goal: download the invoice PDF\nElements:\n[1] button \"Print\"\n[2] link \"Download invoice (PDF)\"\n[3] button \"Email invoice\"\n[4] link \"Back to orders\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "button \"Print\"",
+   "e2": "link \"Download invoice (PDF)\"",
+   "e3": "button \"Email invoice\"",
+   "e4": "link \"Back to orders\""
+  },
+  "gold": "e2",
+  "id": "element-17"
+ },
+ {
+  "set": "element",
+  "state": "Goal: scroll to the comments section\nElements:\n[1] link \"Share\"\n[2] link \"Comments (14)\"\n[3] button \"Like\"\n[4] link \"Related posts\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "link \"Share\"",
+   "e2": "link \"Comments (14)\"",
+   "e3": "button \"Like\"",
+   "e4": "link \"Related posts\""
+  },
+  "gold": "e2",
+  "id": "element-18"
+ },
+ {
+  "set": "element",
+  "state": "Goal: play the video\nElements:\n[1] button \"Pause\"\n[2] button \"Play\"\n[3] button \"Mute\"\n[4] button \"Fullscreen\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "button \"Pause\"",
+   "e2": "button \"Play\"",
+   "e3": "button \"Mute\"",
+   "e4": "button \"Fullscreen\""
+  },
+  "gold": "e2",
+  "id": "element-19"
+ },
+ {
+  "set": "element",
+  "state": "Goal: open the Liked Songs playlist\nElements:\n[1] link \"Home\"\n[2] link \"Search\"\n[3] link \"Liked Songs\"\n[4] link \"Create playlist\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "link \"Home\"",
+   "e2": "link \"Search\"",
+   "e3": "link \"Liked Songs\"",
+   "e4": "link \"Create playlist\""
+  },
+  "gold": "e3",
+  "id": "element-20"
+ },
+ {
+  "set": "element",
+  "state": "Goal: turn on shuffle\nElements:\n[1] button \"Previous\"\n[2] button \"Enable shuffle\"\n[3] button \"Next\"\n[4] button \"Enable repeat\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "button \"Previous\"",
+   "e2": "button \"Enable shuffle\"",
+   "e3": "button \"Next\"",
+   "e4": "button \"Enable repeat\""
+  },
+  "gold": "e2",
+  "id": "element-21"
+ },
+ {
+  "set": "element",
+  "state": "Goal: write the message text\nElements:\n[1] textbox \"To\"\n[2] textbox \"Subject\"\n[3] textbox \"Message body\"\n[4] button \"Send\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "textbox \"To\"",
+   "e2": "textbox \"Subject\"",
+   "e3": "textbox \"Message body\"",
+   "e4": "button \"Send\""
+  },
+  "gold": "e3",
+  "id": "element-22"
+ },
+ {
+  "set": "element",
+  "state": "Goal: enter the subject line\nElements:\n[1] textbox \"To\"\n[2] textbox \"Subject\"\n[3] textbox \"Message body\"\n[4] button \"Send\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "textbox \"To\"",
+   "e2": "textbox \"Subject\"",
+   "e3": "textbox \"Message body\"",
+   "e4": "button \"Send\""
+  },
+  "gold": "e2",
+  "id": "element-23"
+ },
+ {
+  "set": "element",
+  "state": "Goal: dismiss the notification without opening it\nElements:\n[1] button \"Open\"\n[2] button \"Dismiss\"\n[3] link \"Settings\"\n[4] button \"Snooze\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "button \"Open\"",
+   "e2": "button \"Dismiss\"",
+   "e3": "link \"Settings\"",
+   "e4": "button \"Snooze\""
+  },
+  "gold": "e2",
+  "id": "element-24"
+ },
+ {
+  "set": "element",
+  "state": "Goal: add the item to the wishlist\nElements:\n[1] button \"Add to cart\"\n[2] button \"Buy now\"\n[3] button \"Add to wishlist\"\n[4] link \"Reviews\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "button \"Add to cart\"",
+   "e2": "button \"Buy now\"",
+   "e3": "button \"Add to wishlist\"",
+   "e4": "link \"Reviews\""
+  },
+  "gold": "e3",
+  "id": "element-25"
+ },
+ {
+  "set": "element",
+  "state": "Goal: expand the FAQ answer about refunds\nElements:\n[1] button \"How do I track my order?\"\n[2] button \"What is your refund policy?\"\n[3] button \"Do you ship abroad?\"\n[4] button \"How do I reset my password?\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "button \"How do I track my order?\"",
+   "e2": "button \"What is your refund policy?\"",
+   "e3": "button \"Do you ship abroad?\"",
+   "e4": "button \"How do I reset my password?\""
+  },
+  "gold": "e2",
+  "id": "element-26"
+ },
+ {
+  "set": "element",
+  "state": "Goal: open the second search result\nElements:\n[1] link \"Result 1: Intro to routers\"\n[2] link \"Result 2: Decision models explained\"\n[3] link \"Result 3: Pricing\"\n[4] link \"Next page\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "link \"Result 1: Intro to routers\"",
+   "e2": "link \"Result 2: Decision models explained\"",
+   "e3": "link \"Result 3: Pricing\"",
+   "e4": "link \"Next page\""
+  },
+  "gold": "e2",
+  "id": "element-27"
+ },
+ {
+  "set": "element",
+  "state": "Goal: go back to the previous page\nElements:\n[1] button \"Back\"\n[2] button \"Forward\"\n[3] button \"Reload\"\n[4] button \"Home\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "button \"Back\"",
+   "e2": "button \"Forward\"",
+   "e3": "button \"Reload\"",
+   "e4": "button \"Home\""
+  },
+  "gold": "e1",
+  "id": "element-28"
+ },
+ {
+  "set": "element",
+  "state": "Goal: rate the product five stars\nElements:\n[1] radio \"1 star\"\n[2] radio \"3 stars\"\n[3] radio \"5 stars\"\n[4] button \"Submit review\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "radio \"1 star\"",
+   "e2": "radio \"3 stars\"",
+   "e3": "radio \"5 stars\"",
+   "e4": "button \"Submit review\""
+  },
+  "gold": "e3",
+  "id": "element-29"
+ },
+ {
+  "set": "element",
+  "state": "Goal: pick the blue colour\nElements:\n[1] radio \"Red\"\n[2] radio \"Green\"\n[3] radio \"Blue\"\n[4] radio \"Black\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "radio \"Red\"",
+   "e2": "radio \"Green\"",
+   "e3": "radio \"Blue\"",
+   "e4": "radio \"Black\""
+  },
+  "gold": "e3",
+  "id": "element-30"
+ },
+ {
+  "set": "element",
+  "state": "Goal: choose size medium\nElements:\n[1] radio \"Small\"\n[2] radio \"Medium\"\n[3] radio \"Large\"\n[4] radio \"XL\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "radio \"Small\"",
+   "e2": "radio \"Medium\"",
+   "e3": "radio \"Large\"",
+   "e4": "radio \"XL\""
+  },
+  "gold": "e2",
+  "id": "element-31"
+ },
+ {
+  "set": "element",
+  "state": "Goal: confirm the deletion\nElements:\n[1] button \"Keep it\"\n[2] button \"Yes, delete\"\n[3] link \"Learn about deleting\"\n[4] button \"Cancel\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "button \"Keep it\"",
+   "e2": "button \"Yes, delete\"",
+   "e3": "link \"Learn about deleting\"",
+   "e4": "button \"Cancel\""
+  },
+  "gold": "e2",
+  "id": "element-32"
+ },
+ {
+  "set": "element",
+  "state": "Goal: upload a profile photo\nElements:\n[1] textbox \"Display name\"\n[2] button \"Choose file\"\n[3] button \"Save\"\n[4] link \"Skip\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "textbox \"Display name\"",
+   "e2": "button \"Choose file\"",
+   "e3": "button \"Save\"",
+   "e4": "link \"Skip\""
+  },
+  "gold": "e2",
+  "id": "element-33"
+ },
+ {
+  "set": "element",
+  "state": "Goal: skip the onboarding tour\nElements:\n[1] button \"Next\"\n[2] button \"Skip tour\"\n[3] button \"Back\"\n[4] link \"Help\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "button \"Next\"",
+   "e2": "button \"Skip tour\"",
+   "e3": "button \"Back\"",
+   "e4": "link \"Help\""
+  },
+  "gold": "e2",
+  "id": "element-34"
+ },
+ {
+  "set": "element",
+  "state": "Goal: set the quantity to 3\nElements:\n[1] textbox \"Quantity\"\n[2] button \"Add to cart\"\n[3] link \"Size guide\"\n[4] button \"Wishlist\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "textbox \"Quantity\"",
+   "e2": "button \"Add to cart\"",
+   "e3": "link \"Size guide\"",
+   "e4": "button \"Wishlist\""
+  },
+  "gold": "e1",
+  "id": "element-35"
+ },
+ {
+  "set": "element",
+  "state": "Goal: open the date picker for check-in\nElements:\n[1] textbox \"Destination\"\n[2] textbox \"Check-in date\"\n[3] textbox \"Check-out date\"\n[4] button \"Search\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "textbox \"Destination\"",
+   "e2": "textbox \"Check-in date\"",
+   "e3": "textbox \"Check-out date\"",
+   "e4": "button \"Search\""
+  },
+  "gold": "e2",
+  "id": "element-36"
+ },
+ {
+  "set": "element",
+  "state": "Goal: apply the discount code\nElements:\n[1] textbox \"Discount code\"\n[2] button \"Apply\"\n[3] button \"Checkout\"\n[4] link \"Continue shopping\"",
+  "question": "Which element should be acted on next to move toward the goal?",
+  "options": {
+   "e1": "textbox \"Discount code\"",
+   "e2": "button \"Apply\"",
+   "e3": "button \"Checkout\"",
+   "e4": "link \"Continue shopping\""
+  },
+  "gold": "e1",
+  "id": "element-37"
+ },
+ {
+  "id": "policy-real-0",
+  "set": "policy",
+  "state": "Brief: you are an international student; answer survey questions moderately and honestly; when unsure choose the most reasonable middle answer.\nSurvey page options (question text not shown).",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o1": "Very confident",
+   "o2": "Somewhat confident",
+   "o3": "Neither confident nor worried",
+   "o4": "Somewhat worried",
+   "o5": "Very worried"
+  },
+  "gold": "o2",
+  "real": true
+ },
+ {
+  "id": "policy-real-1",
+  "set": "policy",
+  "state": "Brief: you are an international student; answer survey questions moderately and honestly; when unsure choose the most reasonable middle answer.\nSurvey page options (question text not shown).",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o7": "Very concerned",
+   "o8": "Somewhat concerned",
+   "o9": "Not very concerned",
+   "o10": "Not at all concerned",
+   "o11": "I'm not sure what field I'm entering yet"
+  },
+  "gold": "o8",
+  "real": true
+ },
+ {
+  "id": "policy-real-2",
+  "set": "policy",
+  "state": "Brief: you are an international student; answer survey questions moderately and honestly; when unsure choose the most reasonable middle answer.\nSurvey page options (question text not shown).",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o27": "Very well \u2014 I feel genuinely ready",
+   "o28": "Somewhat well \u2014 there are gaps but I'm mostly prepared",
+   "o29": "Not very well \u2014 the preparation has been surface-level",
+   "o30": "Not at all \u2014 my school hasn't really addressed this",
+   "o31": "I'm not sure / haven't looked into it"
+  },
+  "gold": "o28",
+  "real": true
+ },
+ {
+  "id": "policy-real-3",
+  "set": "policy",
+  "state": "Brief: you are an international student; answer survey questions moderately and honestly; when unsure choose the most reasonable middle answer.\nSurvey page options (question text not shown).",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o33": "Take a lower-paying job outside my field to stay afloat",
+   "o34": "Freelance, consult, or do gig work",
+   "o35": "Take a gap year and reassess",
+   "o36": "Apply to graduate or professional school",
+   "o37": "Pursue a trade, apprenticeship, or vocational program",
+   "o38": "Move abroad or explore international opportunities",
+   "o39": "Other (please specify)"
+  },
+  "gold": "o36",
+  "real": true
+ },
+ {
+  "id": "policy-0",
+  "set": "policy",
+  "state": "Brief: always pick the cheapest option.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "Plan A - $20/mo",
+   "o1": "Plan B - $9/mo",
+   "o2": "Plan C - $15/mo"
+  },
+  "gold": "o1"
+ },
+ {
+  "id": "policy-1",
+  "set": "policy",
+  "state": "Brief: always pick the fastest delivery.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "Standard 5-7 days",
+   "o1": "Express 2 days",
+   "o2": "Next day",
+   "o3": "Economy 10 days"
+  },
+  "gold": "o2"
+ },
+ {
+  "id": "policy-2",
+  "set": "policy",
+  "state": "Brief: prefer vegetarian food.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "Beef burger",
+   "o1": "Mushroom risotto",
+   "o2": "Chicken wings",
+   "o3": "Fish tacos"
+  },
+  "gold": "o1"
+ },
+ {
+  "id": "policy-3",
+  "set": "policy",
+  "state": "Brief: you are cautious about privacy; share as little as possible.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "Share contacts and location",
+   "o1": "Share nothing",
+   "o2": "Share location only",
+   "o3": "Share contacts only"
+  },
+  "gold": "o1"
+ },
+ {
+  "id": "policy-4",
+  "set": "policy",
+  "state": "Brief: the user wants the most accessible, large-text layout.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "Compact",
+   "o1": "Default",
+   "o2": "Large text",
+   "o3": "Small"
+  },
+  "gold": "o2"
+ },
+ {
+  "id": "policy-5",
+  "set": "policy",
+  "state": "Brief: decline marketing emails.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "Yes, send me offers",
+   "o1": "No thanks",
+   "o2": "Weekly digest only",
+   "o3": "Ask me later"
+  },
+  "gold": "o1"
+ },
+ {
+  "id": "policy-6",
+  "set": "policy",
+  "state": "Brief: pick the earliest available appointment.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "Fri 3pm",
+   "o1": "Mon 9am",
+   "o2": "Wed 11am",
+   "o3": "Tue 2pm"
+  },
+  "gold": "o1"
+ },
+ {
+  "id": "policy-7",
+  "set": "policy",
+  "state": "Brief: you are strongly satisfied with the service.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "Very dissatisfied",
+   "o1": "Neutral",
+   "o2": "Satisfied",
+   "o3": "Very satisfied"
+  },
+  "gold": "o3"
+ },
+ {
+  "id": "policy-8",
+  "set": "policy",
+  "state": "Brief: you never travel for work.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "Weekly",
+   "o1": "Monthly",
+   "o2": "A few times a year",
+   "o3": "Never"
+  },
+  "gold": "o3"
+ },
+ {
+  "id": "policy-9",
+  "set": "policy",
+  "state": "Brief: prefer paying with a card.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "Cash on delivery",
+   "o1": "Credit card",
+   "o2": "Bank transfer",
+   "o3": "Gift voucher"
+  },
+  "gold": "o1"
+ },
+ {
+  "id": "policy-10",
+  "set": "policy",
+  "state": "Brief: you are a beginner.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "Expert",
+   "o1": "Intermediate",
+   "o2": "Beginner",
+   "o3": "Advanced"
+  },
+  "gold": "o2"
+ },
+ {
+  "id": "policy-11",
+  "set": "policy",
+  "state": "Brief: you are 24 years old.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "Under 18",
+   "o1": "18-22",
+   "o2": "23-27",
+   "o3": "28+"
+  },
+  "gold": "o2"
+ },
+ {
+  "id": "policy-12",
+  "set": "policy",
+  "state": "Brief: you want to stay logged out of everything on this shared computer.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "Remember me for 30 days",
+   "o1": "Do not remember me",
+   "o2": "Stay signed in",
+   "o3": "Keep me signed in on this device"
+  },
+  "gold": "o1"
+ },
+ {
+  "id": "policy-13",
+  "set": "policy",
+  "state": "Brief: choose the option that does not cost anything.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "Premium $12",
+   "o1": "Free",
+   "o2": "Pro $30",
+   "o3": "Team $50"
+  },
+  "gold": "o1"
+ },
+ {
+  "id": "policy-14",
+  "set": "policy",
+  "state": "Brief: you live in Switzerland.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "United States",
+   "o1": "Germany",
+   "o2": "Switzerland",
+   "o3": "India"
+  },
+  "gold": "o2"
+ },
+ {
+  "id": "policy-15",
+  "set": "policy",
+  "state": "Brief: you graduate in 2027.",
+  "question": "Which option should be selected to follow the brief?",
+  "options": {
+   "o0": "2025",
+   "o1": "2026",
+   "o2": "2027",
+   "o3": "2028"
+  },
+  "gold": "o2"
+ }
+]
