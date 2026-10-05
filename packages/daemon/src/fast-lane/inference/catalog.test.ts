@@ -41,6 +41,7 @@ describe('catalog integrity', () => {
       expect(m.commit).toMatch(/^[0-9a-f]{40}$/);
       expect(m.bytes).toBeGreaterThan(1_000_000_000);
       expect(m.license).toBe('apache-2.0');
+      expect(m.label.length).toBeGreaterThan(3);
       expect(modelUrl(m)).toBe(`https://huggingface.co/${m.repo}/resolve/${m.commit}/${m.file}`);
       expect(modelUrl(m)).not.toContain('/main/');
     }

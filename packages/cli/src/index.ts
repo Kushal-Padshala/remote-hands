@@ -15,6 +15,7 @@ import { guideCommand, executeGuideCommand } from './commands/guide.js';
 import { permissionsCommand } from './commands/permissions.js';
 import { contextCommand } from './commands/context.js';
 import { mcpCommand } from './commands/mcp.js';
+import { fastLaneCommand } from './commands/fast-lane.js';
 
 export {
   setupCommand,
@@ -33,6 +34,7 @@ export {
   executeGuideCommand,
   contextCommand,
   mcpCommand,
+  fastLaneCommand,
   type CommandContext,
 };
 
@@ -59,6 +61,7 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
     stdout('  profiles    List detected Chrome browser profiles and launch commands');
     stdout('  context     List running apps, browser tabs, profiles, and local files');
     stdout('  mcp         Run or register the warm computer-use MCP server for agy');
+    stdout('  fast-lane   Local model for instant simple requests (status, install, enable, disable)');
     stdout('  setup       Guided setup: Desktop HUD (this computer) or Remote use (phone)');
     stdout('  deploy      Deploy backend Worker and phone PWA to Cloudflare');
     stdout('  doctor      Check system prerequisites and connectivity');
@@ -68,6 +71,10 @@ export async function main(argv: string[], context: CommandContext = {}): Promis
 
   if (command === 'start') {
     return await startCommand(args, context);
+  }
+
+  if (command === 'fast-lane') {
+    return await fastLaneCommand(args, context);
   }
 
   if (command === 'pair') {

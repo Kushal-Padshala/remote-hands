@@ -9,6 +9,8 @@ export type ModelTier = 'standard' | 'lite';
 
 export interface ModelEntry {
   id: string;
+  /** Plain-language name for people. */
+  label: string;
   tier: ModelTier;
   repo: string;
   commit: string;
@@ -37,6 +39,7 @@ const GB = 2 ** 30;
 export const MODELS: readonly ModelEntry[] = [
   {
     id: 'qwen3-4b-instruct-2507-q4km',
+    label: 'Qwen3 4B Instruct',
     tier: 'standard',
     repo: 'unsloth/Qwen3-4B-Instruct-2507-GGUF',
     commit: 'a06e946bb6b655725eafa393f4a9745d460374c9',
@@ -50,6 +53,7 @@ export const MODELS: readonly ModelEntry[] = [
   },
   {
     id: 'qwen3.5-2b-q4km',
+    label: 'Qwen3.5 2B',
     tier: 'lite',
     repo: 'unsloth/Qwen3.5-2B-GGUF',
     commit: 'f6d5376be1edb4d416d56da11e5397a961aca8ae',

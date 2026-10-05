@@ -82,6 +82,12 @@ export interface CommandContext {
   frameSource?: any;
   localStore?: any;
   hudServiceManager?: any | undefined;
+  /** Injected pieces of `rh fast-lane` and the HUD's fast lane (tests): the local model service, home folder and memory. */
+  fastLane?: {
+    inference?: Pick<import('@remote-hands/daemon').FastLaneInference, 'status' | 'install'> | undefined;
+    homeDir?: string | undefined;
+    totalRamBytes?: number | undefined;
+  } | undefined;
   /** Builds the Shift+Cmd+Space helper during HUD setup (tests replace it; mocked runs skip the real build). */
   prepareHotkeyHelper?: (() => { ok: true; path: string } | { ok: false; error: string }) | undefined;
   /** Injected AppleScript transport for `rh browser doctor` (tests). */
