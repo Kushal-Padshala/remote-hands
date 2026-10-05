@@ -71,9 +71,24 @@ export function buildOptions(view: PilotView, ctx: OptionContext): PilotOption[]
   const recent = ctx.history.slice(-6);
   const used = (id: string) => recent.filter((h) => h.elementId === id).length;
 
+  // A group of radios is a run of consecutive radio elements. Once one is chosen the rest are not
+  // offered: choosing another would change the answer, and a model that keeps trying to is stuck.
+  const answeredRadio = new Set<number>();
+  let run: number[] = [];
+  const closeRun = () => {
+    if (run.some((i) => view.elements[i]!.checked === true)) for (const i of run) answeredRadio.add(i);
+    run = [];
+  };
+  view.elements.forEach((e, i) => {
+    if (e.role === 'radio') run.push(i);
+    else closeRun();
+  });
+  closeRun();
+
   const scored: Scored[] = [];
   view.elements.forEach((el, index) => {
     if (INERT_ROLES.has(el.role)) return;
+    if (answeredRadio.has(index)) return;
     const tokens = words(el.label);
     let score = overlap(tokens, wanted) * 10 - index * 0.001;
     const uses = used(el.id);

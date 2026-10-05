@@ -98,11 +98,35 @@ describe('buildOptions: what is offered', () => {
     expect(all.filter((t) => t.startsWith('click'))).toEqual(['click [4] button "Go"']);
   });
 
-  it('does not re-offer a checked radio or checkbox', () => {
-    const v = view([el(1, 'radio', 'A', { checked: true }), el(2, 'radio', 'B'), el(3, 'checkbox', 'C', { checked: true })]);
+  it('does not re-offer a checked radio or checkbox, nor the unchosen radios of the same group', () => {
+    const v = view([el(1, 'radio', 'A', { checked: true }), el(2, 'radio', 'B'), el(3, 'checkbox', 'C', { checked: true }), el(4, 'checkbox', 'D')]);
     const all = texts(v, ctx());
-    expect(all).toContain('select [2] radio "B"');
-    expect(all.some((t) => t.includes('[1]') || t.includes('[3]'))).toBe(false);
+    expect(all.some((t) => t.includes('[1]') || t.includes('[2]') || t.includes('[3]'))).toBe(false);
+    expect(all).toContain('tick [4] checkbox "D"');
+  });
+
+  it('stops offering the other radios of a group once one is chosen', () => {
+    const v = view([el(7, 'radio', 'Very concerned'), el(8, 'radio', 'Somewhat concerned', { checked: true }), el(9, 'radio', 'Not very concerned'), el(12, 'button', 'Next')]);
+    const all = texts(v, ctx());
+    expect(all.some((t) => t.includes('[7]') || t.includes('[9]') || t.includes('[8]'))).toBe(false);
+    expect(all).toContain('click [12] button "Next"');
+  });
+
+  it('keeps offering a second radio group that has no answer yet when something separates the groups', () => {
+    const v = view([
+      el(1, 'radio', 'Yes', { checked: true }), el(2, 'radio', 'No'),
+      el(3, 'button', 'Help'),
+      el(4, 'radio', 'Monthly'), el(5, 'radio', 'Yearly'),
+    ]);
+    const all = texts(v, ctx());
+    expect(all).toContain('select [4] radio "Monthly"');
+    expect(all).toContain('select [5] radio "Yearly"');
+    expect(all.some((t) => t.includes('[2]'))).toBe(false);
+  });
+
+  it('keeps unchecked checkboxes next to a checked one (more than one can be ticked)', () => {
+    const v = view([el(1, 'checkbox', 'A', { checked: true }), el(2, 'checkbox', 'B')]);
+    expect(texts(v, ctx())).toContain('tick [2] checkbox "B"');
   });
 
   it('offers scroll only when the page has a scroll action', () => {

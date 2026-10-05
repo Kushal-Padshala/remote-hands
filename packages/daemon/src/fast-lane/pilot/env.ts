@@ -47,6 +47,15 @@ export class BrowserPilotEnv implements PilotEnv {
     const step = toStep(action); // validates ids before anything touches the browser
     const text = await this.browser.browserDo([step]);
     this.last = parseRendered(text, this.last);
+    if (!this.last.sameDocument && this.last.text === undefined && !this.last.stateUnavailable) {
+      // The engine leaves the page text out of a navigation response, but the text (the question on
+      // a form page, say) is what makes the right choice possible: look again, with text.
+      try {
+        return await this.observe();
+      } catch {
+        // keep the view we already have
+      }
+    }
     return this.last;
   }
 }

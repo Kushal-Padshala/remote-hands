@@ -51,6 +51,55 @@ describe('BrowserPilotEnv', () => {
     expect(doCalls).toEqual([[step]]);
   });
 
+  it('looks again with page text after the page navigated, because the engine omits text on navigation', async () => {
+    const withText = [
+      'browser: Google Chrome · page: Survey 2 — https://x.test/s2',
+      'text: How concerned are you? ⏎ pick one',
+      '[7] radio "Very concerned"',
+      '[12] button "Next"',
+    ].join('\n');
+    const navigated = 'did: click\nchanged: page navigated or re-rendered\nbrowser: Google Chrome · page: Survey 2 — https://x.test/s2\n[7] radio "Very concerned"\n[12] button "Next"';
+    const calls: Array<{ text?: boolean } | undefined> = [];
+    const browser: PilotBrowser = {
+      browserSnapshot: vi.fn(async (opts?: { text?: boolean }) => {
+        calls.push(opts);
+        return calls.length === 1 ? FULL : withText;
+      }),
+      browserDo: vi.fn(async () => navigated),
+    };
+    const env = new BrowserPilotEnv(browser);
+    await env.observe();
+    const view = await env.act({ op: 'click', id: '3' });
+    expect(calls).toEqual([{ text: true }, { text: true }]);
+    expect(view.text).toBe('How concerned are you?\npick one');
+    expect(view.elements.map((e) => e.id)).toEqual(['7', '12']);
+  });
+
+  it('does not look again after a same-page delta', async () => {
+    const { browser } = fakeBrowser(['page: Survey — https://x.test/s (same page)\n~ [1] radio "Yes" [checked]']);
+    const env = new BrowserPilotEnv(browser);
+    await env.observe();
+    await env.act({ op: 'check', id: '1', checked: true });
+    expect(browser.browserSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the navigated view if the second look fails', async () => {
+    const navigated = 'changed: page navigated or re-rendered\nbrowser: Google Chrome · page: P2 — https://x.test/p2\n[1] button "Go"';
+    let n = 0;
+    const browser: PilotBrowser = {
+      browserSnapshot: vi.fn(async () => {
+        if (n++ === 0) return FULL;
+        throw new Error('tab closed');
+      }),
+      browserDo: vi.fn(async () => navigated),
+    };
+    const env = new BrowserPilotEnv(browser);
+    await env.observe();
+    const view = await env.act({ op: 'click', id: '3' });
+    expect(view.title).toBe('P2');
+    expect(view.elements.map((e) => e.id)).toEqual(['1']);
+  });
+
   it('rejects a non-numeric element id before calling the browser', async () => {
     const { browser, doCalls } = fakeBrowser();
     const env = new BrowserPilotEnv(browser);

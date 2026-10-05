@@ -98,6 +98,15 @@ describe('runPilot: finishing and handing off', () => {
     expect(await runPilot({ ...base, env, engine })).toMatchObject({ status: 'handoff', reason: 'low_margin' });
   });
 
+  it('does not accept "done" before anything was done: that is a guess, not a result', async () => {
+    const { engine } = scripted(['done']);
+    const { env, actions } = fakeEnv(page('unrelated', [el(1, 'link', 'Careers'), el(2, 'link', 'Press')]));
+    const r = await runPilot({ ...base, env, engine });
+    expect(r).toMatchObject({ status: 'handoff', reason: 'model_requested' });
+    expect((r as { detail: string }).detail).toContain('before doing anything');
+    expect(actions).toEqual([]);
+  });
+
   it('hands off with no_decision when the local model is unavailable', async () => {
     const { engine } = scripted([{ throws: 'ECONNREFUSED' }]);
     const { env } = fakeEnv(page('p', [el(1, 'button', 'Next')]));
@@ -116,10 +125,10 @@ describe('runPilot: finishing and handing off', () => {
   it('waits for a loading page (only the wait pseudo action) and then continues', async () => {
     const loading = page('loading', [el('wait', 'wait', 'Wait for the page to update', { pseudo: true })]);
     const ready = page('ready', [el(1, 'button', 'Start')]);
-    const { engine } = scripted(['done']);
-    const { env, actions } = fakeEnv(loading, [ready]);
+    const { engine } = scripted([{ includes: '[1] button "Start"' }, 'done']);
+    const { env, actions } = fakeEnv(loading, [ready, page('started', [el(2, 'link', 'Next steps')])]);
     const r = await runPilot({ ...base, env, engine });
-    expect(actions).toEqual([{ op: 'wait', ms: 300 }]);
+    expect(actions).toEqual([{ op: 'wait', ms: 300 }, { op: 'click', id: '1' }]);
     expect(r.status).toBe('done');
   });
 });
@@ -166,12 +175,39 @@ describe('runPilot: typing and picking', () => {
 describe('runPilot: safety nets', () => {
   const same = () => page('same', [el(1, 'button', 'Next'), el(2, 'link', 'Help')]);
 
-  it('stops a loop: the same action on the same page state a third time', async () => {
+  it('stops a loop: the same action on the same page a second time', async () => {
     const { engine } = scripted([{ includes: '[1]' }, { includes: '[1]' }, { includes: '[1]' }, { includes: '[1]' }]);
     const { env, actions } = fakeEnv(same(), [same(), same(), same()]);
     const r = await runPilot({ ...base, env, engine, maxSteps: 10 });
     expect(r).toMatchObject({ status: 'handoff', reason: 'loop' });
-    expect(actions).toHaveLength(2);
+    expect(actions).toHaveLength(1);
+  });
+
+  it('stops repeating an action even when something on the page changes every time (a cart counter)', async () => {
+    const counter = (n: number) => page('results', [el(1, 'button', 'Add mouse to cart'), el(2, 'link', `Cart (${n})`)]);
+    const { engine } = scripted(Array.from({ length: 6 }, () => ({ includes: 'Add mouse to cart' })));
+    const { env, actions } = fakeEnv(counter(0), [counter(1), counter(2), counter(3), counter(4)]);
+    const r = await runPilot({ ...base, env, engine, maxSteps: 10 });
+    expect(r).toMatchObject({ status: 'handoff', reason: 'loop' });
+    expect(actions).toHaveLength(1); // never a second add
+  });
+
+  it('allows a few repeated scrolls on one page but not an endless scroll', async () => {
+    const tall = (n: number) => page('long', [el(1, 'link', `Item ${n}`), el('scroll_down', 'scroll_down', 'Scroll down', { pseudo: true })]);
+    const { engine } = scripted(Array.from({ length: 8 }, () => ({ includes: 'scroll down' })));
+    const { env, actions } = fakeEnv(tall(0), [tall(1), tall(2), tall(3), tall(4), tall(5), tall(6)]);
+    const r = await runPilot({ ...base, env, engine, maxSteps: 12 });
+    expect(r).toMatchObject({ status: 'handoff', reason: 'loop' });
+    expect(actions.filter((a) => a.op === 'scroll')).toHaveLength(5);
+  });
+
+  it('does not call a single-page wizard a loop when the same button id sits on pages with different content', async () => {
+    const step = (heading: string) => page('Setup', [el(1, 'heading', heading), el(3, 'button', 'Next')]);
+    const { engine } = scripted([{ includes: '[3]' }, { includes: '[3]' }, { includes: '[3]' }, 'done']);
+    const { env, actions } = fakeEnv(step('Your name'), [step('Your address'), step('Your phone'), step('Review')]);
+    const r = await runPilot({ ...base, env, engine });
+    expect(r.status).toBe('done');
+    expect(actions).toHaveLength(3);
   });
 
   it('does not call a wizard that reuses the same id on every page a loop', async () => {
@@ -292,6 +328,17 @@ describe('runPilot: what the model is shown', () => {
     expect(asked[1]!.state).toContain('1. click [1] button "Next"');
   });
 
+  it('tells the model what each recent action did and not to repeat a step that worked', async () => {
+    const p1 = page('one', [el(1, 'button', 'Add to cart'), el(2, 'link', 'Cart (0)')]);
+    const quiet = page('one', [el(1, 'button', 'Add to cart'), el(2, 'link', 'Cart (0)')], { changed: false });
+    const { engine, asked } = scripted([{ includes: '[1]' }, { includes: '[2]' }, 'done']);
+    const { env } = fakeEnv(p1, [quiet, page('two', [el(5, 'button', 'Checkout')])]);
+    await runPilot({ ...base, env, engine });
+    expect(asked[1]!.state).toContain('1. click [1] button "Add to cart" [nothing changed]');
+    expect(asked[2]!.state).toContain('2. click [2] link "Cart (0)" [page changed]');
+    expect(asked[0]!.system).toContain('Do not repeat a step that already worked');
+  });
+
   it('records engine and action timings on each step', async () => {
     let t = 0;
     const p1 = page('one', [el(1, 'button', 'Next')]);
@@ -313,5 +360,64 @@ describe('runPilot: what the model is shown', () => {
     await runPilot({ ...base, env, engine, onStep });
     expect(onStep).toHaveBeenCalledTimes(1);
     expect(onStep.mock.calls[0]![0].description).toBe('click [1] button "Next"');
+  });
+});
+
+describe('runPilot: discretion', () => {
+  const boxes = () => page('multi', [el(13, 'checkbox', 'Internships'), el(14, 'checkbox', 'Certificate'), el(19, 'button', 'Next')]);
+
+  it('proceeds with the best pick on a subjective checkbox or radio when the brain delegated the choice', async () => {
+    const { engine } = scripted([{ includes: 'tick [13]', gap: 0.6 }, 'done']);
+    const { env, actions } = fakeEnv(boxes(), [page('multi', [el(13, 'checkbox', 'Internships', { checked: true }), el(14, 'checkbox', 'Certificate'), el(19, 'button', 'Next')])]);
+    const r = await runPilot({ ...base, env, engine, discretion: true });
+    expect(actions).toEqual([{ op: 'check', id: '13', checked: true }]);
+    expect(r.status).toBe('done');
+  });
+
+  it('still hands off a close call on a click when discretion is on', async () => {
+    const { engine } = scripted([{ includes: '[20] button "Save changes"', gap: 0.6 }]);
+    const { env, actions } = fakeEnv(page('multi', [el(13, 'checkbox', 'Internships'), el(20, 'button', 'Save changes')]));
+    const r = await runPilot({ ...base, env, engine, discretion: true });
+    expect(r).toMatchObject({ status: 'handoff', reason: 'low_margin' });
+    expect(actions).toEqual([]);
+  });
+
+  it('lets a close call on Next or Continue proceed with discretion, but never Submit', async () => {
+    const next = page('form', [el(1, 'checkbox', 'A'), el(2, 'button', 'Next')]);
+    const e1 = scripted([{ includes: '[2] button "Next"', gap: 0.5 }, 'done']);
+    const a = fakeEnv(next, [page('form2', [el(3, 'button', 'Finish')])]);
+    const r1 = await runPilot({ ...base, env: a.env, engine: e1.engine, discretion: true });
+    expect(a.actions).toEqual([{ op: 'click', id: '2' }]);
+    expect(r1.status).toBe('done');
+
+    const submit = page('form', [el(1, 'checkbox', 'A'), el(2, 'button', 'Submit application')]);
+    const e2 = scripted([{ includes: '[2] button "Submit application"', gap: 0.5 }]);
+    const b = fakeEnv(submit);
+    expect(await runPilot({ ...base, env: b.env, engine: e2.engine, discretion: true })).toMatchObject({ status: 'handoff', reason: 'low_margin' });
+    expect(b.actions).toEqual([]);
+  });
+
+  it('never treats answering a second radio question as delegated once another radio is chosen', async () => {
+    const answered = page('q', [el(8, 'radio', 'Somewhat concerned', { checked: true }), el(3, 'button', 'Help'), el(9, 'radio', 'Monthly'), el(12, 'button', 'Next')]);
+    const { engine } = scripted([{ includes: 'select [9]', gap: 0.7 }]);
+    const { env, actions } = fakeEnv(answered);
+    const r = await runPilot({ ...base, env, engine, discretion: true });
+    expect(r).toMatchObject({ status: 'handoff', reason: 'low_margin' });
+    expect(actions).toEqual([]);
+  });
+
+  it('still delegates the first radio answer on a page', async () => {
+    const fresh = page('q', [el(8, 'radio', 'Somewhat concerned'), el(9, 'radio', 'Not very concerned'), el(12, 'button', 'Next')]);
+    const { engine } = scripted([{ includes: 'select [8]', gap: 0.7 }, 'done']);
+    const { env, actions } = fakeEnv(fresh, [page('q', [el(8, 'radio', 'Somewhat concerned', { checked: true }), el(9, 'radio', 'Not very concerned'), el(12, 'button', 'Next')])]);
+    await runPilot({ ...base, env, engine, discretion: true });
+    expect(actions).toEqual([{ op: 'check', id: '8', checked: true }]);
+  });
+
+  it('hands off the same subjective pick when discretion is off', async () => {
+    const { engine } = scripted([{ includes: 'tick [13]', gap: 0.6 }]);
+    const { env, actions } = fakeEnv(boxes());
+    expect(await runPilot({ ...base, env, engine })).toMatchObject({ status: 'handoff', reason: 'low_margin' });
+    expect(actions).toEqual([]);
   });
 });
