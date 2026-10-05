@@ -18,8 +18,10 @@ export interface RouteInput {
   handoffGapNats: number;
 }
 
-const PILOT_TEXT = 'Operate the web page in front of me: click, fill in forms, move through pages.';
-const BRAIN_TEXT = 'Something else: write text, research, run code, answer a question, or use another app.';
+// Phrased as a yes/no about the page the user is looking at: the earlier "pilot or something else"
+// wording sent 10 of 12 ordinary page tasks to the brain (measured), this one sends 11 of 12 to the pilot.
+const PILOT_TEXT = 'Yes: it is about clicking, filling in or moving through the web page that is open.';
+const BRAIN_TEXT = 'No: it is about writing, researching, coding, answering a question or another app.';
 
 /**
  * Decides who handles a request. Instant skills are matched first by strict patterns (no model
@@ -34,8 +36,8 @@ export async function routeRequest(input: RouteInput): Promise<Route> {
 
   try {
     const answer = await input.engine.decide({
-      state: `User request: "${input.query.trim()}"\nFrontmost application: ${input.frontApp} (a web browser)`,
-      question: 'What should be done with this request?',
+      state: `User request: "${input.query.trim()}"\nThe user is looking at a web page in ${input.frontApp} right now.`,
+      question: 'Is this request about doing things on the web page the user is looking at?',
       options: [
         { id: 'pilot', text: PILOT_TEXT },
         { id: 'brain', text: BRAIN_TEXT },

@@ -34,7 +34,7 @@ const base = { query: 'fill in this form', frontApp: 'Google Chrome', frontIsBro
 
 describe('routeRequest', () => {
   it('routes a request a skill recognises to that skill without asking the model', async () => {
-    const { engine } = engineChoosing(/Operate/);
+    const { engine } = engineChoosing(/^Yes/);
     const route = await routeRequest({ ...base, query: 'open spotify', registry: registry(), engine });
     expect(route).toMatchObject({ lane: 'skill', slots: { q: 'open spotify' } });
     expect((route as { skill: Skill }).skill.id).toBe('open_app');
@@ -42,14 +42,14 @@ describe('routeRequest', () => {
   });
 
   it('sends everything to the brain when the front app is not a browser, without asking the model', async () => {
-    const { engine } = engineChoosing(/Operate/);
+    const { engine } = engineChoosing(/^Yes/);
     const route = await routeRequest({ ...base, frontApp: 'Finder', frontIsBrowser: false, registry: registry(), engine });
     expect(route).toMatchObject({ lane: 'brain' });
     expect(engine.decide).not.toHaveBeenCalled();
   });
 
   it('routes a web-page request to the pilot when the model is clear', async () => {
-    const { engine, asked } = engineChoosing(/Operate the web page/, 7.5);
+    const { engine, asked } = engineChoosing(/^Yes/, 7.5);
     const route = await routeRequest({ ...base, registry: registry(), engine });
     expect(route).toEqual({ lane: 'pilot', gapNats: 7.5 });
     expect(asked[0]!.state).toContain('fill in this form');
@@ -58,12 +58,12 @@ describe('routeRequest', () => {
   });
 
   it('routes to the brain when the model picks the other option', async () => {
-    const { engine } = engineChoosing(/Something else/, 9);
+    const { engine } = engineChoosing(/^No/, 9);
     expect(await routeRequest({ ...base, query: 'write a poem', registry: registry(), engine })).toMatchObject({ lane: 'brain' });
   });
 
   it('routes to the brain when the model is unsure', async () => {
-    const { engine } = engineChoosing(/Operate/, 1.2);
+    const { engine } = engineChoosing(/^Yes/, 1.2);
     const route = await routeRequest({ ...base, registry: registry(), engine });
     expect(route).toMatchObject({ lane: 'brain' });
     expect((route as { reason: string }).reason).toContain('not sure');
