@@ -10,6 +10,7 @@ import { createAutoEnable } from '../browser/auto-enable.js';
 import { LegacyBrowserPort } from '../browser/legacy-port.js';
 import type { BrowserPort, DoStep } from '../browser/port.js';
 import { compactDesktopElements } from './compact.js';
+import type { ActionGate } from '../action-gate.js';
 
 export interface ComputerSessionDeps {
   desktop: Pick<
@@ -22,6 +23,8 @@ export interface ComputerSessionDeps {
   browser: BrowserPort;
   settleMs?: number;
   sleep?: (ms: number) => Promise<void>;
+  /** Asked before desktop clicks and menu items; rejecting stops the action (see ActionGate). */
+  gate?: ActionGate;
 }
 
 const MODIFIER_NAMES: Record<string, string> = {
@@ -92,6 +95,7 @@ export class ComputerSession {
     if (!element) throw new Error(`Index ${index} not in last snapshot. Call desktop_snapshot again.`);
     const targetApp = cachedApp || app || '';
     const described = `[${element.index}] ${element.role.replace(/^AX/, '')} "${element.label}"`;
+    await this.deps.gate?.(element.label);
     const result = await this.deps.axAction(
       targetApp,
       // Strict matching ignores the label, so none is sent (keeps it out of the Swift script/cache key).
@@ -142,7 +146,7 @@ export class ComputerSession {
   }
 
   async desktopMenu(app: string, query: string): Promise<string> {
-    const res = await this.deps.menuSearch(app, query);
+    const res = await this.deps.menuSearch(app, query, undefined, this.deps.gate);
     if (!res.success) throw new Error(res.error ?? `No menu item matching "${query}" in ${app}`);
     return `menu ${(res.triggeredPath ?? []).join(' > ')}\n${await this.safeState(app)}`;
   }
@@ -189,7 +193,7 @@ export class ComputerSession {
   }
 }
 
-export function createDefaultComputerSession(): ComputerSession {
+export function createDefaultComputerSession(gate?: ActionGate): ComputerSession {
   const desktop = new MacOsDriver();
   const transport = new AppleScriptTransport();
   return new ComputerSession({
@@ -200,9 +204,11 @@ export function createDefaultComputerSession(): ComputerSession {
     browser: new FastBrowserEngine({
       transport,
       legacy: new LegacyBrowserPort({
-        driver: new BrowserDriver({ cdpUrl: process.env.BU_CDP_URL || 'http://127.0.0.1:9222' }),
+        driver: new BrowserDriver({ cdpUrl: process.env.BU_CDP_URL || 'http://127.0.0.1:9222', gate }),
       }),
       autoEnable: createAutoEnable({ transport }),
+      ...(gate ? { gate } : {}),
     }),
+    ...(gate ? { gate } : {}),
   });
 }

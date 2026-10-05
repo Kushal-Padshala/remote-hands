@@ -26,7 +26,9 @@ export async function authenticateRequest(
   const authHeader = request.headers.get('Authorization');
   if (authHeader && authHeader.startsWith('Bearer ')) {
     rawToken = authHeader.slice(7).trim();
-  } else {
+  } else if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
+    // Browsers cannot set headers on a WebSocket handshake, so only upgrades may carry the
+    // token in the URL; everywhere else it would leak into logs and Referer headers.
     try {
       const url = new URL(request.url);
       rawToken = url.searchParams.get('token');

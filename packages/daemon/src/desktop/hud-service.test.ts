@@ -1,18 +1,33 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { HudServiceManager, generateHudPlistXml } from './hud-service.js';
 
 describe('HudServiceManager', () => {
+  const originalPlatform = process.platform;
   let tmpDir: string;
   let testPlist: string;
   let mockExec: any;
 
   beforeEach(() => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-service-test-'));
     testPlist = path.join(tmpDir, 'test.plist');
     mockExec = vi.fn().mockReturnValue({ stdout: '', stderr: '', status: 0 });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform });
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('rejects LaunchAgent installation on Linux without creating a plist or running launchctl', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    const manager = new HudServiceManager({ exec: mockExec, plistPath: testPlist });
+    expect(manager.install('/custom/path/to/rh').success).toBe(false);
+    expect(fs.existsSync(testPlist)).toBe(false);
+    expect(mockExec).not.toHaveBeenCalled();
   });
 
   it('generates valid plist xml with node, cli path, and log directory', () => {

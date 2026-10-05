@@ -34,6 +34,7 @@ describe('SLIM_COMPUTER_PROMPT', () => {
     expect(rule7).toContain('rh approve');
     expect(rule7).toContain('--task=');
     expect(rule7).toMatch(/--task=<Task id from the turn>/);
+    expect(rule7).toContain('do not run `rh approve` for them');
   });
 
   it('keeps zero-screenshot and zero-mouse rules', () => {

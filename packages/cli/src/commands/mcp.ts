@@ -5,6 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { createDefaultComputerSession, serveComputerMcp } from '@remote-hands/daemon';
 import type { CommandContext } from './setup.js';
+import { createActionGate } from '../action-gate.js';
 import { agyMcpRule, ensureAgyMcpPermission, removeAgyMcpPermission } from '../system/agy-permissions.js';
 
 export const AGY_MCP_NAME = 'rh-computer';
@@ -66,7 +67,7 @@ export async function mcpCommand(args: string[], context: McpCommandContext = {}
   const sub = args[0] ?? 'serve';
 
   if (sub === 'serve') {
-    const serve = context.serve ?? (() => serveComputerMcp(createDefaultComputerSession()));
+    const serve = context.serve ?? (() => serveComputerMcp(createDefaultComputerSession(createActionGate({ env: context.env }))));
     await serve();
     return 0;
   }

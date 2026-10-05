@@ -11,11 +11,14 @@ import {
 import { AxWalker } from './desktop/ax-walker.js';
 import { performAxAction, setAxElementValue } from './desktop/ax-actions.js';
 import { MacOsDriver } from './desktop/macos-driver.js';
+import type { ActionGate } from './action-gate.js';
 
 export interface BrowserDriverOptions {
   cdpUrl?: string | undefined;
   forceWebSocket?: boolean | undefined;
   socketPath?: string | undefined;
+  /** Asked before every click; rejecting stops the click (see ActionGate). */
+  gate?: ActionGate | undefined;
 }
 
 export interface BrowserTab {
@@ -34,12 +37,14 @@ export class BrowserDriver {
   private readonly cdpUrl: string;
   private readonly forceWebSocket: boolean;
   private readonly customSocketPath?: string | undefined;
+  private readonly gate?: ActionGate | undefined;
   private messageSeq = 0;
 
   constructor(options?: BrowserDriverOptions) {
     this.cdpUrl = (options?.cdpUrl || 'http://127.0.0.1:9222').replace(/\/+$/, '');
     this.forceWebSocket = Boolean(options?.forceWebSocket);
     this.customSocketPath = options?.socketPath;
+    this.gate = options?.gate;
   }
 
   private getHarnessSocketPath(): string | null {
@@ -687,6 +692,7 @@ print("\\(url)\\t\\(cleanTitle)")
     if (!target) {
       throw new Error(`Index ${index} not found. Run snapshot to view current indexed elements.`);
     }
+    await this.gate?.(target.label || '');
 
     if (process.platform === 'darwin' && (target.role.startsWith('AX') || (process.env.VITEST !== 'true' && target.node === undefined && !target.tag))) {
       spawnSync('osascript', ['-e', 'tell application "Google Chrome" to activate'], { timeout: 1000 });

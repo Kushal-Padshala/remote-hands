@@ -1,5 +1,6 @@
 import { fastExec } from './fast-exec.js';
 import type { ExecFunction } from './macos-driver.js';
+import type { ActionGate } from '../action-gate.js';
 
 export interface MenuItemNode {
   title: string;
@@ -108,23 +109,59 @@ if let data = try? JSONSerialization.data(withJSONObject: topMenus), let s = Str
   }
 }
 
+interface MenuActionResult {
+  success: boolean;
+  triggeredPath?: string[];
+  appPid?: number;
+  error?: string;
+}
+
+/** Resolve first, then approve the actual title and press only that path in that process. */
 export async function searchAndTriggerMenu(
   appName: string,
   query: string,
   execFunc: ExecFunction = defaultExec,
-): Promise<{ success: boolean; triggeredPath?: string[]; error?: string }> {
+  gate?: ActionGate,
+): Promise<MenuActionResult> {
+  if (!gate) return runMenuAction(appName, query, execFunc);
+  const resolved = runMenuAction(appName, query, execFunc, true);
+  if (!resolved.success) return resolved;
+  const path = resolved.triggeredPath;
+  if (!Array.isArray(path) || path.length === 0 || path.some((title) => typeof title !== 'string' || !title.trim()) ||
+      !Number.isSafeInteger(resolved.appPid) || (resolved.appPid ?? 0) <= 0) {
+    return { success: false, error: 'Cannot verify the resolved menu item; nothing was pressed.' };
+  }
+  await gate(path[path.length - 1]!);
+  return runMenuAction(appName, query, execFunc, false, path, resolved.appPid);
+}
+
+function runMenuAction(
+  appName: string,
+  query: string,
+  execFunc: ExecFunction,
+  resolveOnly = false,
+  approvedPath: string[] = [],
+  approvedPid = 0,
+): MenuActionResult {
   const escapedApp = appName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const escapedQuery = query.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const escapedPath = JSON.stringify(approvedPath).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const swiftScript = `
 import Cocoa
 import ApplicationServices
 
 let appQuery = "${escapedApp}"
 let itemQuery = "${escapedQuery}".lowercased()
+let resolveOnly = ${resolveOnly}
+let approvedPid = ${approvedPid}
+let approvedPathJson = "${escapedPath}"
+let approvedPath = (try? JSONSerialization.jsonObject(with: Data(approvedPathJson.utf8))) as? [String] ?? []
 
 let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
 let targetApp: NSRunningApplication?
-if !appQuery.isEmpty {
+if approvedPid > 0 {
+    targetApp = apps.first(where: { Int($0.processIdentifier) == approvedPid })
+} else if !appQuery.isEmpty {
     targetApp = apps.first(where: {
         ($0.localizedName ?? "").caseInsensitiveCompare(appQuery) == .orderedSame ||
         ($0.bundleIdentifier ?? "").caseInsensitiveCompare(appQuery) == .orderedSame
@@ -168,7 +205,10 @@ func searchMenu(_ el: AXUIElement, path: [String], depth: Int) {
         }
     } else if !title.isEmpty {
         let lower = title.lowercased()
-        if lower == itemQuery || lower.contains(itemQuery) || itemQuery.contains(lower) {
+        let matches = approvedPath.isEmpty
+            ? (lower == itemQuery || lower.contains(itemQuery) || itemQuery.contains(lower))
+            : currentPath == approvedPath
+        if matches {
             matchedEl = el
             matchedPath = currentPath
             return
@@ -190,12 +230,18 @@ guard let target = matchedEl else {
     exit(0)
 }
 
-let pressRes = AXUIElementPerformAction(target, kAXPressAction as CFString)
-if let data = try? JSONSerialization.data(withJSONObject: ["success": pressRes == .success, "triggeredPath": matchedPath]),
+// The lookup phase must have no side effect. The press phase matches the approved path exactly.
+let success: Bool
+if resolveOnly {
+    success = true
+} else {
+    success = AXUIElementPerformAction(target, kAXPressAction as CFString) == .success
+}
+if let data = try? JSONSerialization.data(withJSONObject: ["success": success, "triggeredPath": matchedPath, "appPid": Int(app.processIdentifier)]),
    let s = String(data: data, encoding: .utf8) {
     print(s)
 } else {
-    print("{\\"success\\":\\(pressRes == .success)}")
+    print("{\\"success\\":\\(success)}")
 }
 `;
 

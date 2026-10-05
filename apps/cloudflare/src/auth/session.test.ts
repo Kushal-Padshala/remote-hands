@@ -61,4 +61,28 @@ describe('session authentication middleware', () => {
     expect(session).not.toBeNull();
     expect(session?.owner_id).toBe('owner-1');
   });
+
+  it('accepts a query-string token only on WebSocket upgrades', async () => {
+    const token = createSessionToken();
+    const fakeSession = {
+      id: 'sess-1',
+      owner_id: 'owner-1',
+      machine_id: null,
+      kind: 'phone' as const,
+      token_hash: await hashSessionToken(token),
+      expires_at: new Date(Date.now() + 60000).toISOString(),
+      created_at: new Date().toISOString(),
+    };
+    const fakeDb = {
+      prepare: () => ({ bind: () => ({ first: async () => fakeSession }) }),
+    } as unknown as D1Database;
+
+    const plain = new Request(`https://example.com/api/tasks?token=${token}`);
+    expect(await authenticateRequest(plain, fakeDb)).toBeNull();
+
+    const upgrade = new Request(`https://example.com/ws/tasks/t1?token=${token}`, {
+      headers: { Upgrade: 'websocket' },
+    });
+    expect((await authenticateRequest(upgrade, fakeDb))?.owner_id).toBe('owner-1');
+  });
 });

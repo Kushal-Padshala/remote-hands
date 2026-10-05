@@ -387,7 +387,7 @@ describe('HudCoordinator', () => {
     });
   });
 
-  it('focuses window on browser task start once and does not steal focus on tool call events', async () => {
+  it('focuses the browser once on macOS and never steals focus on tool call events', async () => {
     mockMacOsDriver.focusWindow = vi.fn().mockResolvedValue(undefined);
     const mockRunner = {
       run: vi.fn().mockImplementation(async (_task: any, onEvent: any) => {
@@ -414,8 +414,10 @@ describe('HudCoordinator', () => {
     });
 
     await testCoordinator.executeTaskStandalone({ id: 'task-1', kind: 'browser' } as any);
-    expect(mockMacOsDriver.focusWindow).toHaveBeenCalledTimes(1);
-    expect(mockMacOsDriver.focusWindow).toHaveBeenCalledWith('Google Chrome');
+    expect(mockMacOsDriver.focusWindow).toHaveBeenCalledTimes(process.platform === 'darwin' ? 1 : 0);
+    if (process.platform === 'darwin') {
+      expect(mockMacOsDriver.focusWindow).toHaveBeenCalledWith('Google Chrome');
+    }
     expect(mockMacOsDriver.focusWindow).not.toHaveBeenCalledWith('Notes');
   });
 
