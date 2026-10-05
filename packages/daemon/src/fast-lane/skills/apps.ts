@@ -9,6 +9,9 @@ export interface AppCatalogOptions {
 }
 
 const MAX_CANDIDATES = 8;
+// Words people say about things that are not apps. They may sit inside an app's name ("System
+// Settings", "Bluetooth File Exchange") but must not open it on their own; the exact name still works.
+const GENERIC = new Set(['settings', 'setting', 'file', 'files', 'folder', 'folders', 'document', 'documents', 'window', 'windows', 'page', 'pages', 'tab', 'tabs', 'menu', 'app', 'apps', 'program', 'photo', 'picture', 'pictures', 'video', 'videos', 'text', 'code', 'mail', 'message', 'messages', 'music', 'site', 'website', 'web']);
 
 function normalize(spoken: string): string {
   return spoken.toLowerCase().replace(/\s+/g, ' ').trim().replace(/^the /, '');
@@ -49,6 +52,7 @@ export function createAppCatalog(opts: AppCatalogOptions = {}): AppCatalog {
       const all = names();
       const exact = all.find((n) => n.toLowerCase() === wanted);
       if (exact !== undefined) return { name: exact };
+      if (wanted.length < 3 || GENERIC.has(wanted)) return null;
       const matches = all.filter((n) => n.toLowerCase().startsWith(wanted) || n.toLowerCase().includes(wanted));
       if (matches.length === 0) return null;
       if (matches.length === 1) return { name: matches[0]! };

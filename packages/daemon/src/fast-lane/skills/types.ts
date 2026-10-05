@@ -25,11 +25,19 @@ export interface SkillContext {
   gate?: ActionGate | undefined;
   /** Used to choose among a few candidates (which of several apps was meant). */
   decide?: DecisionEngine | undefined;
+  /** True once the user has stopped the task: a skill must not start an irreversible step after that. */
+  cancelled?: (() => boolean) | undefined;
 }
 
 export type Slots = Record<string, string>;
 
-export type SkillResult = { ok: true; summary: string } | { ok: false; reason: string; declined?: boolean };
+export type SkillResult =
+  | { ok: true; summary: string }
+  /**
+   * `declined`: the user said no (or did not answer) to an approval. `uncertain`: the action timed out,
+   * so it may already have happened and must not simply be repeated.
+   */
+  | { ok: false; reason: string; declined?: boolean; uncertain?: boolean };
 
 export interface Skill {
   id: string;

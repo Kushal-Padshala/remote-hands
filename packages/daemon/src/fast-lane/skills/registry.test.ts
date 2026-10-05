@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SkillRegistry } from './registry.js';
 import type { Skill, SkillContext } from './types.js';
 
@@ -32,6 +32,15 @@ describe('SkillRegistry', () => {
     reg.register({ id: 'boom', description: '', extract: async () => { throw new Error('bad'); }, run: async () => ({ ok: true, summary: '' }) });
     reg.register(skill('ok', () => ({ k: 'v' })));
     expect((await reg.match('q', ctx))?.skill.id).toBe('ok');
+  });
+
+  it('does not even try the extractors on a very long request (pattern matching stays cheap)', async () => {
+    const reg = new SkillRegistry();
+    const extract = vi.fn(async () => ({ q: 'x' }));
+    reg.register({ id: 'a', description: 'a', extract, run: async () => ({ ok: true, summary: '' }) });
+    expect(await reg.match('open '.padEnd(600, 'x'), ctx)).toBeNull();
+    expect(extract).not.toHaveBeenCalled();
+    expect(await reg.match('open it', ctx)).not.toBeNull();
   });
 
   it('rejects duplicate ids', () => {

@@ -13,15 +13,21 @@ const AMBIGUOUS_GAP_NATS = 2;
 const firstLine = (text: string, fallback: string): string => text.split('\n').map((l) => l.trim()).find(Boolean) ?? fallback;
 const fail = (result: CommandResult, fallback: string): SkillResult => ({ ok: false, reason: firstLine(result.stderr, fallback) });
 
-/** Removes ONE matching pair of straight or curly quotes around the whole text, nothing else. */
+/** Removes the quotes around the WHOLE text when it is one quoted string; text with quotes inside is left alone. */
 function unquote(text: string): string {
   const s = text.trim();
-  const pairs: Array<[string, string]> = [['"', '"'], ['“', '”'], ["'", "'"]];
-  for (const [open, close] of pairs) {
-    if (s.length >= 2 && s.startsWith(open) && s.endsWith(close)) return s.slice(1, -1).trim();
+  const pairs: Array<[string, string, RegExp]> = [['"', '"', /"/], ['“', '”', /[“”]/], ["'", "'", /'/]];
+  for (const [open, close, quote] of pairs) {
+    if (s.length >= 2 && s.startsWith(open) && s.endsWith(close)) {
+      const inner = s.slice(1, -1);
+      if (!quote.test(inner)) return inner.trim();
+    }
   }
   return s;
 }
+
+const timedOut = (r: CommandResult): boolean => r.code === -1 && /timed out/i.test(r.stderr);
+const SLOW_MS = 30_000; // Notes and Messages can take a while to wake up
 
 /** An osascript invocation whose script is a constant and whose data arrives only as argv. */
 function osascriptWithArgs(script: string[], data: string[]): string[] {
@@ -65,7 +71,10 @@ export const openApp: Skill = {
 // ---------------------------------------------------------------------------------------------
 
 const OPEN_URL = /^(?:please\s+)?(?:open|go to|visit|navigate to|take me to|load)\s+(\S+)\s*[.!?]?$/i;
-const BARE_DOMAIN = /^(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[/:?#]\S*)?$/i;
+// A bare domain must look like one: a well-known ending or a www. prefix. Otherwise file names such as
+// README.md or report.pdf would open as websites.
+const TLDS = 'com|org|net|io|ai|dev|app|co|edu|gov|ch|de|uk|fr|us|eu|info|me|tv|xyz|nl|ca|au|jp';
+const BARE_DOMAIN = new RegExp(`^(?:www\\.(?:[a-z0-9-]+\\.)+[a-z]{2,}|(?:[a-z0-9-]+\\.)+(?:${TLDS}))(?:[/:?#]\\S*)?$`, 'i');
 
 function toHttpUrl(token: string): URL | null {
   const candidate = /^https?:\/\//i.test(token) ? token : BARE_DOMAIN.test(token) ? `https://${token}` : null;
@@ -102,7 +111,7 @@ export const openUrl: Skill = {
 const NOTE_REQUEST = /^(?:please\s+)?(?:create|make|add|write|start|take|new)\s+(?:a\s+|an\s+)?(?:new\s+)?note\b(.*)$/is;
 const NOTE_TITLE = /\b(?:called|titled|named)\s+(.+?)(?=\s+(?:saying|that says|containing|with)\b|\s*:|$)/is;
 const NOTE_BODY_AFTER_TITLE = /^\s*(?:(?:saying|that says|containing|with(?:\s+the\s+text)?)\s+|:\s*)(.+)$/is;
-const NOTE_BODY_PLAIN = /(?:\b(?:saying|that says|containing)\s+|:\s*)(.+)$/is;
+const NOTE_BODY_PLAIN = /^\s*(?:(?:saying|that says|containing)\s+|:\s*)(.+)$/is;
 
 function parseNote(rest: string): Slots | null {
   const titleMatch = NOTE_TITLE.exec(rest);
@@ -138,8 +147,9 @@ export const notesCreate: Skill = {
   async run(slots, ctx) {
     const title = slots.title ?? 'Quick note';
     const body = `<div><h1>${escapeHtml(title)}</h1></div><div>${escapeHtml(slots.body ?? '').replace(/\r?\n/g, '<br>')}</div>`;
-    const r = await ctx.runner.run('osascript', osascriptWithArgs(NOTES_SCRIPT, [title, body]));
-    return r.code === 0 ? { ok: true, summary: `Created the note "${title}"` } : fail(r, 'Could not create the note');
+    const r = await ctx.runner.run('osascript', osascriptWithArgs(NOTES_SCRIPT, [title, body]), { timeoutMs: SLOW_MS });
+    if (r.code === 0) return { ok: true, summary: `Created the note "${title}"` };
+    return timedOut(r) ? { ok: false, uncertain: true, reason: 'Notes did not answer in time, so the note may already exist.' } : fail(r, 'Could not create the note');
   },
 };
 
@@ -152,6 +162,13 @@ const MSG_QUOTED = /^(?:please\s+)?(?:send|text)\s+(["“])(.+?)["”]\s+to\s+(.
 const MSG_SAYING = new RegExp(`^${MSG_VERB}(?:to\\s+)?(.+?)\\s+(?:saying|that says|with the message)\\s+(.+)$`, 'is');
 const MSG_COLON = new RegExp(`^${MSG_VERB}(?:to\\s+)?(.+?)\\s*:\\s*(.+)$`, 'is');
 const CONTACT = /^[\p{L}\p{N} .'@+\-_]{1,60}$/u;
+// A real contact is a short name. "an email to bob", "the report to alice" or "Bob on Slack" are other requests.
+const NOT_A_CONTACT = /\b(?:email|e-?mail|report|file|attachment|document|invoice|letter|package|slack|whatsapp|telegram|discord|linkedin|signal|teams|zoom|sms|on|via|using|through|in)\b/i;
+const BAD_FIRST_WORD = /^(?:a|an|the|some|your|this|that)\s/i;
+// Extra instructions tacked on after the message ("... hi. then delete all my files") are not part of it.
+const TACKED_ON = /\.\s+(?:then|also|and)\b|\bthen\s+(?:delete|open|send|click|go|run|remove|email|call)\b/i;
+const MAX_MESSAGE_CHARS = 200;
+const DECLINED_BY_GATE = /^Approval (?:rejected by user|request timed out)/;
 
 const MESSAGES_SCRIPT = [
   'on run argv',
@@ -185,7 +202,8 @@ export const messagesSend: Skill = {
     }
     contact = contact.trim();
     text = text.trim();
-    if (!CONTACT.test(contact) || text === '') return null;
+    if (!CONTACT.test(contact) || NOT_A_CONTACT.test(contact) || BAD_FIRST_WORD.test(contact) || contact.split(/\s+/).length > 4) return null;
+    if (text === '' || TACKED_ON.test(text)) return null;
     return { contact, text };
   },
   async run(slots, ctx) {
@@ -193,14 +211,20 @@ export const messagesSend: Skill = {
     const text = slots.text ?? '';
     // Sending is irreversible: never without an approval channel, and a refusal ends the skill.
     if (ctx.gate === undefined) return { ok: false, reason: 'Sending a message needs your approval, but no approval channel is available.' };
-    const label = `Send message to ${contact}: ${text.replace(/\s+/g, ' ').slice(0, 60)}`;
+    // The approver must see the whole message, so a message too long to show is not a quick shortcut.
+    if (text.length > MAX_MESSAGE_CHARS) return { ok: false, reason: 'The message is too long to send as a quick shortcut.' };
+    const label = `Send message to ${contact}: ${text.replace(/\s+/g, ' ')}`;
     try {
       await ctx.gate(label);
     } catch (err) {
-      return { ok: false, declined: true, reason: err instanceof Error ? err.message : String(err) };
+      const message = err instanceof Error ? err.message : String(err);
+      // Only a "no" (or no answer) is a decline; a broken approval system is just a failure.
+      return DECLINED_BY_GATE.test(message) ? { ok: false, declined: true, reason: message } : { ok: false, reason: message };
     }
-    const r = await ctx.runner.run('osascript', osascriptWithArgs(MESSAGES_SCRIPT, [text, contact]));
-    return r.code === 0 ? { ok: true, summary: `Sent your message to ${contact}` } : fail(r, `Messages could not send to ${contact}`);
+    if (ctx.cancelled?.() === true) return { ok: false, reason: 'Stopped before sending.' };
+    const r = await ctx.runner.run('osascript', osascriptWithArgs(MESSAGES_SCRIPT, [text, contact]), { timeoutMs: SLOW_MS });
+    if (r.code === 0) return { ok: true, summary: `Sent your message to ${contact}` };
+    return timedOut(r) ? { ok: false, uncertain: true, reason: 'Messages did not answer in time, so the message may have been sent.' } : fail(r, `Messages could not send to ${contact}`);
   },
 };
 
@@ -260,8 +284,9 @@ export const setVolume: Skill = {
 // media
 // ---------------------------------------------------------------------------------------------
 
-const MEDIA = /^(?:please\s+)?(play|pause|resume|skip|next|previous|go back)(?:\s+(?:this\s+|the\s+)?(music|song|track|playback|spotify|apple music))?\s*[.!]?$/i;
-const MEDIA_VERBS: Record<string, string> = { play: 'play', resume: 'play', pause: 'pause', skip: 'next track', next: 'next track', previous: 'previous track', 'go back': 'previous track' };
+const MEDIA = /^(?:please\s+)?(play|pause|resume|skip|next|previous)(?:\s+(?:this\s+|the\s+)?(music|song|track|playback|spotify|apple music))?\s*[.!]?$/i;
+const MEDIA_BACK = /^(?:please\s+)?go back(?:\s+(?:a|one))?\s+(?:song|track)\s*[.!]?$/i;
+const MEDIA_VERBS: Record<string, string> = { play: 'play', resume: 'play', pause: 'pause', skip: 'next track', next: 'next track', previous: 'previous track' };
 const ALLOWED_VERBS = new Set(['play', 'pause', 'next track', 'previous track']);
 const PLAYERS = ['Spotify', 'Music'] as const;
 
@@ -269,12 +294,15 @@ export const mediaControl: Skill = {
   id: 'media',
   description: 'Play, pause or skip music in Spotify or Music.',
   async extract(query) {
-    const m = MEDIA.exec(query.trim());
+    const q = query.trim();
+    if (MEDIA_BACK.test(q)) return { verb: 'previous track', explicit: 'yes' };
+    const m = MEDIA.exec(q);
     if (m === null) return null;
     const slots: Slots = { verb: MEDIA_VERBS[m[1]!.toLowerCase()]! };
     const target = m[2]?.toLowerCase();
     if (target === 'spotify') slots.app = 'Spotify';
     else if (target === 'apple music') slots.app = 'Music';
+    else if (target !== undefined) slots.explicit = 'yes'; // the user said "music", "song"...: they mean a music player
     return slots;
   },
   async run(slots, ctx) {
@@ -294,7 +322,9 @@ export const mediaControl: Skill = {
         }
       }
       if (app === undefined) {
-        if (verb !== 'play') return { ok: false, reason: 'No music player is running.' };
+        // A bare "play" or "pause" with no player running is probably about a video in the browser:
+        // leave it alone. Only a user who said music or a player name gets one launched.
+        if (verb !== 'play' || slots.explicit !== 'yes') return { ok: false, reason: 'No music player is running.' };
         app = candidates[0];
         if (app === undefined) return { ok: false, reason: 'No music player found.' };
       }

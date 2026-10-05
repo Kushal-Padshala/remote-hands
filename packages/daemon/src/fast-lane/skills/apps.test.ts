@@ -43,6 +43,21 @@ describe('createAppCatalog', () => {
     expect(catalog.resolve('   ')).toBeNull();
   });
 
+  it('does not turn a generic word into an app that merely contains it', () => {
+    const c = createAppCatalog({
+      dirs: ['/A'],
+      fs: fsWith({ '/A': ['System Settings.app', 'Bluetooth File Exchange.app', 'Photos.app', 'Google Chrome.app', 'Visual Studio Code.app'] }) as never,
+    });
+    expect(c.resolve('settings')).toBeNull();
+    expect(c.resolve('the file')).toBeNull();
+    expect(c.resolve('bluetooth')).toEqual({ name: 'Bluetooth File Exchange' });
+    expect(c.resolve('photos')).toEqual({ name: 'Photos' }); // exact names always work
+    expect(c.resolve('system settings')).toEqual({ name: 'System Settings' });
+    expect(c.resolve('chrome')).toEqual({ name: 'Google Chrome' });
+    expect(c.resolve('code')).toBeNull(); // too generic as a fragment of a longer name
+    expect(c.resolve('vi')).toBeNull(); // too short to be a fragment
+  });
+
   it('caps candidates at 8', () => {
     const many = createAppCatalog({ dirs: ['/A'], fs: fsWith({ '/A': Array.from({ length: 20 }, (_, i) => `Tool ${i}.app`) }) as never });
     const r = many.resolve('tool') as { candidates: string[] };

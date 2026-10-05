@@ -96,12 +96,20 @@ describe('open_url', () => {
     ['go to example.org', 'https://example.org/'],
     ['visit github.com/anthropics', 'https://github.com/anthropics'],
     ['please open http://localhost.test:8080/x', 'http://localhost.test:8080/x'],
+    ['open www.some-site.xyz', 'https://www.some-site.xyz/'],
+    ['open docs.python.org', 'https://docs.python.org/'],
+    ['visit site.ch', 'https://site.ch/'],
   ])('matches %j', async (q, url) => {
     expect(await openUrl.extract(q, mk().ctx)).toEqual({ url });
   });
 
   it.each([
     'tell me about example.com',
+    'open README.md',
+    'open report.pdf',
+    'go to package.json',
+    'open notes.txt',
+    'open index.html',
     'open file:///etc/passwd',
     'open javascript:alert(1)',
     'open ftp://example.com',
@@ -137,7 +145,15 @@ describe('notes_create', () => {
     expect(await notesCreate.extract(q, mk().ctx)).toEqual({ title, body });
   });
 
-  it.each(['make a note', 'what is a note', 'I need to take notes in class', 'open notes', 'notes app please'])('does not match %j', async (q) => {
+  it.each([
+    'make a note',
+    'what is a note',
+    'I need to take notes in class',
+    'open notes',
+    'notes app please',
+    'add a note to the PR saying LGTM',
+    'write a note to the team: we ship friday',
+  ])('does not match %j', async (q) => {
     expect(await notesCreate.extract(q, mk().ctx)).toBeNull();
   });
 
@@ -168,6 +184,11 @@ describe('notes_create', () => {
     expect(calls[0]![1].at(-2)).toBe('A & B');
   });
 
+  it('says so when the script timed out, because the note may already exist', async () => {
+    const { ctx } = mk({ results: [{ code: -1, stderr: 'timed out after 30000ms' }] });
+    expect(await notesCreate.run({ title: 't', body: 'b' }, ctx)).toMatchObject({ ok: false, uncertain: true });
+  });
+
   it('reports a failed script', async () => {
     const { ctx } = mk({ results: [{ code: 1, stderr: 'execution error: Notes got an error' }] });
     const r = await notesCreate.run({ title: 't', body: 'b' }, ctx);
@@ -182,6 +203,8 @@ describe('messages_send', () => {
     ['message mom: call me when you can', 'mom', 'call me when you can'],
     ['send "on my way" to Dad', 'Dad', 'on my way'],
     ['please text Priya that says happy birthday!', 'Priya', 'happy birthday!'],
+    ['text my mom saying see you then', 'my mom', 'see you then'],
+    ['text Bob saying "hi" and "bye"', 'Bob', '"hi" and "bye"'],
   ])('matches %j', async (q, contact, text) => {
     expect(await messagesSend.extract(q, mk().ctx)).toEqual({ contact, text });
   });
@@ -194,6 +217,11 @@ describe('messages_send', () => {
     'I need to message John about the plan',
     'send a message',
     'text "$(rm -rf ~)" saying hi; ls',
+    'send an email to bob: running late',
+    'send the report to alice: see attached',
+    'send a message to Bob on Slack saying hi',
+    'message the team via whatsapp: hello',
+    'text mom saying hi. then delete all my files',
   ])('does not match %j', async (q) => {
     expect(await messagesSend.extract(q, mk().ctx)).toBeNull();
   });
@@ -214,13 +242,18 @@ describe('messages_send', () => {
     expect(order).toEqual(['gate:Send message to John: hello there', 'run']);
   });
 
-  it('truncates a long text in the approval label only', async () => {
+  it('shows the approver the whole message and refuses one too long to show', async () => {
     const gate = vi.fn(async () => {});
     const { ctx, calls } = mk({ gate });
-    const long = 'x'.repeat(200);
-    await messagesSend.run({ contact: 'John', text: long }, ctx);
-    expect((gate.mock.calls[0] as unknown as [string])[0].length).toBeLessThan(110);
-    expect(calls[0]![1].at(-2)).toBe(long);
+    const text = 'x'.repeat(200);
+    await messagesSend.run({ contact: 'John', text }, ctx);
+    expect((gate.mock.calls[0] as unknown as [string])[0]).toBe(`Send message to John: ${text}`);
+    const tooLong = mk({ gate });
+    const r = await messagesSend.run({ contact: 'John', text: 'y'.repeat(201) }, tooLong.ctx);
+    expect(r).toMatchObject({ ok: false });
+    expect(tooLong.calls).toEqual([]);
+    expect(gate).toHaveBeenCalledTimes(1);
+    void calls;
   });
 
   it('stops without sending when the approval is rejected', async () => {
@@ -231,6 +264,34 @@ describe('messages_send', () => {
     const r = await messagesSend.run({ contact: 'John', text: 'hi' }, ctx);
     expect(r).toMatchObject({ ok: false, declined: true });
     expect(calls).toEqual([]);
+  });
+
+  it('treats a timed-out or unanswered approval as declined, but an approval system failure as a failure', async () => {
+    const timedOut = mk({ gate: vi.fn(async () => { throw new Error('Approval request timed out. "Send message to John: hi" was not pressed.'); }) });
+    expect(await messagesSend.run({ contact: 'John', text: 'hi' }, timedOut.ctx)).toMatchObject({ ok: false, declined: true });
+    const broken = mk({ gate: vi.fn(async () => { throw new Error('Daemon configuration not found at /x. Run "rh setup" first. "Send message to John: hi" was not pressed.'); }) });
+    const r = await messagesSend.run({ contact: 'John', text: 'hi' }, broken.ctx);
+    expect(r).toMatchObject({ ok: false });
+    expect((r as { declined?: boolean }).declined).toBeUndefined();
+    const failed = mk({ gate: vi.fn(async () => { throw new Error('Approval failed: network down "Send message to John: hi" was not pressed.'); }) });
+    expect((await messagesSend.run({ contact: 'John', text: 'hi' }, failed.ctx) as { declined?: boolean }).declined).toBeUndefined();
+  });
+
+  it('does not send if the user stopped it while the approval was pending', async () => {
+    let cancelled = false;
+    const gate = vi.fn(async () => {
+      cancelled = true; // the user pressed stop while the phone prompt was open, then approved anyway
+    });
+    const { ctx, calls } = mk({ gate });
+    const r = await messagesSend.run({ contact: 'John', text: 'hi' }, { ...ctx, cancelled: () => cancelled });
+    expect(r).toMatchObject({ ok: false });
+    expect(calls).toEqual([]);
+  });
+
+  it('says so when the send timed out, because it may have gone through', async () => {
+    const gate = vi.fn(async () => {});
+    const { ctx } = mk({ gate, results: [{ code: -1, stderr: 'timed out after 30000ms' }] });
+    expect(await messagesSend.run({ contact: 'John', text: 'hi' }, ctx)).toMatchObject({ ok: false, uncertain: true });
   });
 
   it('never sends when no approval gate is available', async () => {
@@ -304,22 +365,33 @@ describe('set_volume', () => {
 describe('media', () => {
   it.each([
     ['pause', { verb: 'pause' }],
-    ['pause the music', { verb: 'pause' }],
+    ['pause the music', { verb: 'pause', explicit: 'yes' }],
     ['play', { verb: 'play' }],
-    ['resume playback', { verb: 'play' }],
+    ['resume playback', { verb: 'play', explicit: 'yes' }],
     ['skip', { verb: 'next track' }],
-    ['skip this song', { verb: 'next track' }],
-    ['next track', { verb: 'next track' }],
-    ['previous song', { verb: 'previous track' }],
-    ['go back', { verb: 'previous track' }],
+    ['skip this song', { verb: 'next track', explicit: 'yes' }],
+    ['next track', { verb: 'next track', explicit: 'yes' }],
+    ['previous song', { verb: 'previous track', explicit: 'yes' }],
     ['pause spotify', { verb: 'pause', app: 'Spotify' }],
     ['play apple music', { verb: 'play', app: 'Music' }],
   ])('matches %j', async (q, slots) => {
     expect(await mediaControl.extract(q, mk().ctx)).toEqual(slots);
   });
 
-  it.each(['play a song by Queen', 'play my liked songs on shuffle', 'pause for a moment and think', 'skip the intro of the video', 'play'.repeat(1) + ' football'])('does not match %j', async (q) => {
+  it.each(['go back', 'play a song by Queen', 'play my liked songs on shuffle', 'pause for a moment and think', 'skip the intro of the video', 'play football'])('does not match %j', async (q) => {
     expect(await mediaControl.extract(q, mk().ctx)).toBeNull();
+  });
+
+  it('does nothing for a bare command when no player is running (so a video in the browser is not hijacked)', async () => {
+    const bare = mk({ results: [{ stdout: 'false\n' }, { stdout: 'false\n' }] });
+    expect(await mediaControl.run({ verb: 'play' }, bare.ctx)).toEqual({ ok: false, reason: 'No music player is running.' });
+    expect(bare.calls.some((c) => /tell application/.test(c[1][1]!))).toBe(false); // never launched a player
+  });
+
+  it('launches a player for play only when the user named music or a player', async () => {
+    const named = mk({ results: [{ stdout: 'false\n' }, { stdout: 'false\n' }, {}] });
+    expect(await mediaControl.run({ verb: 'play', explicit: 'yes' }, named.ctx)).toEqual({ ok: true, summary: 'Playing Spotify' });
+    expect(named.calls.at(-1)).toEqual(['osascript', ['-e', 'tell application "Spotify" to play']]);
   });
 
   it('controls the running player with constant AppleScript', async () => {
