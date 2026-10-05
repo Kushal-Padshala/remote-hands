@@ -1,5 +1,8 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LlamaSidecar } from './server.js';
 
 function fakeChild() {
@@ -17,7 +20,7 @@ function fakeChild() {
 const ok = () => new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
 const loading = () => new Response(JSON.stringify({ error: { message: 'Loading model' } }), { status: 503 });
 
-function harness(opts: { health?: Array<() => Response | Promise<Response>>; idleMs?: number; healthTimeoutMs?: number } = {}) {
+function harness(opts: { health?: Array<() => Response | Promise<Response>>; idleMs?: number; healthTimeoutMs?: number; pidFile?: string; processes?: any } = {}) {
   const children: any[] = [];
   const spawn = vi.fn((..._args: any[]) => {
     const c = fakeChild();
@@ -41,6 +44,8 @@ function harness(opts: { health?: Array<() => Response | Promise<Response>>; idl
     randomPort: async () => 51234,
     randomKey: () => 'sekret-key-123',
     healthTimeoutMs: opts.healthTimeoutMs ?? 1000,
+    ...(opts.pidFile ? { pidFile: opts.pidFile } : {}),
+    ...(opts.processes ? { processes: opts.processes } : {}),
     healthPollMs: 100,
     idleMs: opts.idleMs ?? 600_000,
     now: () => clock,
@@ -68,15 +73,15 @@ function harness(opts: { health?: Array<() => Response | Promise<Response>>; idl
 }
 
 describe('LlamaSidecar', () => {
-  it('spawns llama-server bound to localhost with a port, key and the model', async () => {
+  it('spawns llama-server bound to localhost with a port and the model, passing the key through the environment', async () => {
     const { sidecar, spawn } = harness();
     await sidecar.start();
-    const [bin, args] = spawn.mock.calls[0]!;
+    const [bin, args, options] = spawn.mock.calls[0]!;
     expect(bin).toBe('/rt/llama-server');
-    expect(args).toEqual([
-      '-m', '/models/m.gguf', '--host', '127.0.0.1', '--port', '51234', '-c', '4096', '-ngl', '99', '-np', '1', '--no-webui',
-      '--api-key', 'sekret-key-123',
-    ]);
+    expect(args).toEqual(['-m', '/models/m.gguf', '--host', '127.0.0.1', '--port', '51234', '-c', '4096', '-ngl', '99', '-np', '1', '--no-webui']);
+    // The key must not be visible in the process list (`ps`), so it travels in the environment.
+    expect(JSON.stringify(args)).not.toContain('sekret-key-123');
+    expect((options as any).env.LLAMA_API_KEY).toBe('sekret-key-123');
     expect(sidecar.baseUrl()).toBe('http://127.0.0.1:51234');
     expect(sidecar.apiKey()).toBe('sekret-key-123');
     expect(sidecar.isRunning()).toBe(true);
@@ -163,5 +168,74 @@ describe('LlamaSidecar', () => {
     await sidecar.stop();
     expect(children[0].kill).toHaveBeenCalledTimes(1);
     expect(sidecar.isRunning()).toBe(false);
+  });
+});
+
+describe('LlamaSidecar orphan handling (pid file)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rh-pid-'));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const pidFile = () => path.join(dir, 'sidecar.json');
+
+  function fakeProcesses(opts: { alive: boolean; command: string | null }) {
+    let alive = opts.alive;
+    return {
+      isAlive: vi.fn(() => alive),
+      commandOf: vi.fn(() => opts.command),
+      kill: vi.fn(() => {
+        alive = false;
+      }),
+    };
+  }
+
+  it('kills a leftover llama-server from a previous daemon that is still running our binary', async () => {
+    fs.writeFileSync(pidFile(), JSON.stringify({ pid: 9999, serverPath: '/rt/llama-server' }));
+    const processes = fakeProcesses({ alive: true, command: '/rt/llama-server -m /models/m.gguf --port 4000' });
+    const { sidecar } = harness({ pidFile: pidFile(), processes });
+    await sidecar.start();
+    expect(processes.kill).toHaveBeenCalledWith(9999, 'SIGTERM');
+    expect(JSON.parse(fs.readFileSync(pidFile(), 'utf8')).pid).toBe(4242); // replaced by the new child
+  });
+
+  it('never kills a process that merely reuses the old pid', async () => {
+    fs.writeFileSync(pidFile(), JSON.stringify({ pid: 9999, serverPath: '/rt/llama-server' }));
+    const processes = fakeProcesses({ alive: true, command: '/usr/bin/some-other-program' });
+    const { sidecar } = harness({ pidFile: pidFile(), processes });
+    await sidecar.start();
+    expect(processes.kill).not.toHaveBeenCalled();
+  });
+
+  it('does nothing for a dead pid or a corrupt pid file', async () => {
+    fs.writeFileSync(pidFile(), JSON.stringify({ pid: 9999, serverPath: '/rt/llama-server' }));
+    const dead = fakeProcesses({ alive: false, command: null });
+    await harness({ pidFile: pidFile(), processes: dead }).sidecar.start();
+    expect(dead.kill).not.toHaveBeenCalled();
+    fs.writeFileSync(pidFile(), '{not json');
+    const other = fakeProcesses({ alive: true, command: '/rt/llama-server' });
+    await harness({ pidFile: pidFile(), processes: other }).sidecar.start();
+    expect(other.kill).not.toHaveBeenCalled();
+  });
+
+  it('records the child pid after spawn and removes the file when the child exits', async () => {
+    const processes = fakeProcesses({ alive: false, command: null });
+    const { sidecar, children } = harness({ pidFile: pidFile(), processes });
+    await sidecar.start();
+    expect(JSON.parse(fs.readFileSync(pidFile(), 'utf8'))).toEqual({ pid: 4242, serverPath: '/rt/llama-server' });
+    children[0].emit('exit', 0, null);
+    expect(fs.existsSync(pidFile())).toBe(false);
+  });
+
+  it('escalates to SIGKILL when the leftover ignores SIGTERM', async () => {
+    fs.writeFileSync(pidFile(), JSON.stringify({ pid: 9999, serverPath: '/rt/llama-server' }));
+    const kill = vi.fn();
+    const processes = { isAlive: vi.fn(() => true), commandOf: vi.fn(() => '/rt/llama-server'), kill };
+    const { sidecar } = harness({ pidFile: pidFile(), processes });
+    await sidecar.start();
+    expect(kill).toHaveBeenCalledWith(9999, 'SIGTERM');
+    expect(kill).toHaveBeenCalledWith(9999, 'SIGKILL');
   });
 });

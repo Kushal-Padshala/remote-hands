@@ -1,11 +1,45 @@
-import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import fs from 'node:fs';
 import net from 'node:net';
+import path from 'node:path';
+
+/** What the sidecar needs to know about other processes, so tests never touch real ones. */
+export interface ProcessTable {
+  isAlive(pid: number): boolean;
+  /** The command line of a running process, or null when unknown. */
+  commandOf(pid: number): string | null;
+  kill(pid: number, signal: NodeJS.Signals): void;
+}
+
+const systemProcesses: ProcessTable = {
+  isAlive(pid) {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === 'EPERM';
+    }
+  },
+  commandOf(pid) {
+    try {
+      return execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).trim() || null;
+    } catch {
+      return null;
+    }
+  },
+  kill(pid, signal) {
+    process.kill(pid, signal);
+  },
+};
 
 export interface SidecarOptions {
   serverPath: string;
   modelPath: string;
   contextTokens: number;
+  /** Where to record the child's pid so a crashed daemon's orphan can be reaped on the next start. */
+  pidFile?: string | undefined;
+  processes?: ProcessTable | undefined;
   spawn?: typeof nodeSpawn | undefined;
   fetch?: typeof fetch | undefined;
   randomPort?: (() => Promise<number>) | undefined;
@@ -118,6 +152,51 @@ export class LlamaSidecar {
     });
   }
 
+  /** Kills a llama-server left behind by a daemon that crashed, but only if the pid still runs our binary. */
+  private async reapStale(): Promise<void> {
+    const file = this.o.pidFile;
+    if (!file) return;
+    const processes = this.o.processes ?? systemProcesses;
+    const sleep = this.o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    let record: { pid?: unknown } | undefined;
+    try {
+      record = JSON.parse(fs.readFileSync(file, 'utf8')) as { pid?: unknown };
+    } catch {
+      // missing or corrupt: nothing to reap
+    }
+    fs.rmSync(file, { force: true });
+    const pid = record?.pid;
+    if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 1) return;
+    if (!processes.isAlive(pid)) return;
+    const command = processes.commandOf(pid);
+    if (command === null || !command.includes(this.o.serverPath)) return; // pid reused by something else
+    processes.kill(pid, 'SIGTERM');
+    for (let i = 0; i < 20 && processes.isAlive(pid); i++) await sleep(100);
+    if (processes.isAlive(pid)) processes.kill(pid, 'SIGKILL');
+  }
+
+  private writePid(pid: number | undefined): void {
+    const file = this.o.pidFile;
+    if (!file || pid === undefined) return;
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ pid, serverPath: this.o.serverPath }));
+    } catch {
+      // best effort: without it a crash could leave an orphan, but starting must not fail for this
+    }
+  }
+
+  private removePid(pid: number | undefined): void {
+    const file = this.o.pidFile;
+    if (!file || pid === undefined) return;
+    try {
+      const record = JSON.parse(fs.readFileSync(file, 'utf8')) as { pid?: unknown };
+      if (record.pid === pid) fs.rmSync(file, { force: true });
+    } catch {
+      // already gone
+    }
+  }
+
   private async doStart(): Promise<void> {
     const doSpawn = this.o.spawn ?? nodeSpawn;
     const doFetch = this.o.fetch ?? fetch;
@@ -126,6 +205,7 @@ export class LlamaSidecar {
     const timeoutMs = this.o.healthTimeoutMs ?? 60_000;
     const pollMs = this.o.healthPollMs ?? 100;
 
+    await this.reapStale();
     const port = await (this.o.randomPort ?? freePort)();
     const key = (this.o.randomKey ?? (() => randomBytes(24).toString('hex')))();
     this.port = port;
@@ -133,10 +213,15 @@ export class LlamaSidecar {
 
     const args = [
       '-m', this.o.modelPath, '--host', '127.0.0.1', '--port', String(port), '-c', String(this.o.contextTokens),
-      '-ngl', '99', '-np', '1', '--no-webui', '--api-key', key,
+      '-ngl', '99', '-np', '1', '--no-webui',
     ];
-    const child = doSpawn(this.o.serverPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    // The key goes in the environment, not argv: `ps` shows every local user a process's arguments.
+    const child = doSpawn(this.o.serverPath, args, {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      env: { ...process.env, LLAMA_API_KEY: key },
+    });
     this.child = child;
+    this.writePid(child.pid);
 
     let stderrTail = '';
     let early: { code: number | null; signal: string | null; error?: string } | undefined;
@@ -146,11 +231,13 @@ export class LlamaSidecar {
     child.on('error', (err: Error) => {
       early = { code: null, signal: null, error: err.message };
       this.exited.add(child);
+      this.removePid(child.pid);
       if (this.child === child) this.child = undefined;
     });
     child.on('exit', (code: number | null, signal: string | null) => {
       early = { code, signal };
       this.exited.add(child);
+      this.removePid(child.pid);
       if (this.child === child) {
         this.child = undefined;
         this.clearIdle();

@@ -27,7 +27,7 @@ export interface FastLaneInferenceOptions {
   deps?: Partial<{
     download: typeof downloadVerified;
     ensureRuntime: typeof ensureRuntime;
-    createSidecar: (o: { serverPath: string; modelPath: string; contextTokens: number }) => SidecarHandle;
+    createSidecar: (o: { serverPath: string; modelPath: string; contextTokens: number; pidFile: string }) => SidecarHandle;
     fetch: typeof fetch;
   }> | undefined;
 }
@@ -121,7 +121,12 @@ export class FastLaneInference implements DecisionEngine {
     if (this.sidecar) return this.sidecar;
     const installed = this.installedPaths();
     if (installed === null) return null;
-    const options = { serverPath: installed.serverPath, modelPath: installed.modelPath, contextTokens: installed.model.contextTokens };
+    const options = {
+      serverPath: installed.serverPath,
+      modelPath: installed.modelPath,
+      contextTokens: installed.model.contextTokens,
+      pidFile: this.dir('sidecar.json'),
+    };
     this.sidecar = this.deps.createSidecar ? this.deps.createSidecar(options) : new LlamaSidecar(options);
     return this.sidecar;
   }
