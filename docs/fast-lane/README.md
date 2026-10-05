@@ -6,10 +6,12 @@ A small decision model that runs on your Mac and handles simple requests in abou
 
 ```bash
 rh fast-lane install    # downloads the model once (free); `--tier=standard|lite` to choose its size
-rh fast-lane enable     # on; takes effect for the next request, no restart needed
+rh fast-lane enable     # on; takes effect for the next request
 rh fast-lane status
 rh fast-lane disable    # off: requests go straight to the agent, as before
 ```
+
+If the HUD was already running, it checks the install again on every request, so installing or turning it on needs no restart. Choosing a different model size (`--tier`) does need a HUD restart.
 
 Requirements: macOS, 8GB of memory or more (16GB gets the stronger model). The model is Apache-2.0 licensed and stays on your machine. Setting `RH_FAST_LANE=1` or `0` overrides the setting for one run.
 
@@ -27,13 +29,15 @@ When you type a request in the HUD, the fast lane looks at it first:
 | a web page is open and you ask to click through, fill in or move through it | the pilot reads the page, picks the next click one step at a time | 2-3s for a few steps |
 | anything else (write, research, code, questions, other apps) | goes to the agent, untouched | unchanged |
 
+Times in this table are estimates. Only the page pilot has been measured (against simulated pages, below); the instant skills were tested with a fake command runner, not yet on a real Mac, and opening Notes or Messages cold can take several seconds. Typed values (an email, a phone number, text in quotes) come only from your own request.
+
 If the fast lane is unsure, loops, gets blocked, or runs out of its time budget, it stops and hands the request to the agent with a note of the steps it already did, so nothing is repeated.
 
 ## Safety
 
 - The local model only **chooses** among a fixed list of options. It never writes commands, scripts or text to type.
 - Anything irreversible (sending a message, buying, deleting, posting) goes through the same approval as the agent, and a rejection stops the fast lane.
-- Page content is treated as untrusted data: it cannot give the model new orders, and a link that says "ignore your instructions" is just a link.
+- Page content is treated as untrusted data by the local model: it cannot give it new orders, and a link that says "ignore your instructions" is just a link. When the fast lane hands over, the note it gives the agent about the page is fenced and labelled as data, and the stored summary of a finished request lists only the kinds of action, never page text.
 - User text reaches the Mac only as data (never inside a script or shell command).
 - Nothing is sent anywhere: the model runs locally and the fast lane makes no network calls other than the one-time download.
 
@@ -42,7 +46,7 @@ If the fast lane is unsure, loops, gets blocked, or runs out of its time budget,
 Model choice came from a bake-off (`docs/fast-lane/bake-off-2026-10-04.md`). End to end, against simulated websites rendered by the real engine, with the real model:
 
 - 16GB tier (Qwen3 4B Instruct): login 3 steps in about 2.2s, a 5-page wizard in about 2.5s, "download my invoice" next to a page that tries to give orders: done in 0.9s and the page's instructions ignored. About 0.4-0.7s per decision.
-- It stops and hands over instead of guessing on pages it does not understand (an unrelated page, a ranking widget in a survey), and never places an order without approval.
+- It stops and hands over instead of guessing on pages it does not understand (an unrelated page, a ranking widget in a survey), and in the simulated shop it stopped at the approval for "Place order" and never placed it (the approval itself is the same gate the agent uses, not tested here against a real phone).
 - 8GB tier (Qwen3.5 2B): simple flows work (the wizard), but it hands over more often than the 16GB model. People with 8GB can choose the stronger model with `rh fast-lane install --tier=standard`, at the cost of memory.
 - Not measured: Intel Macs, real browsers (only simulated pages), heavy multitasking, battery.
 
