@@ -2,6 +2,7 @@
  * Live acceptance: the real local model drives the simulated sites. Skipped unless RH_FASTLANE_LIVE=1.
  *   FAST_LANE_SERVER_PATH, FAST_LANE_MODEL_PATH, FAST_LANE_TIER ('standard' | 'lite'),
  *   FAST_LANE_REPORT (optional path: writes the metrics as JSON)
+ *   FAST_LANE_FORMAT / FAST_LANE_GAP (optional: override the prompt format and handoff gap, to compare other models)
  */
 import fs from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -45,7 +46,7 @@ describe.skipIf(!live)('pilot with the real local model (live)', () => {
       contextTokens: model.contextTokens,
     });
     await sidecar.start();
-    engine = new LlamaDecisionEngine(sidecar, model.promptFormat);
+    engine = new LlamaDecisionEngine(sidecar, process.env.FAST_LANE_FORMAT === 'qwen3-instruct' ? 'qwen3-instruct' : process.env.FAST_LANE_FORMAT === 'qwen3.5' ? 'qwen3.5' : model.promptFormat);
   }, 120_000);
 
   afterAll(async () => {
@@ -58,7 +59,7 @@ describe.skipIf(!live)('pilot with the real local model (live)', () => {
 
   async function run(scenario: string, site: SimSite, input: Pick<RunPilotInput, 'goal' | 'brief' | 'facts' | 'discretion'>) {
     const browser = new SimBrowser(site, rejectRisky);
-    const result: PilotResult = await runPilot({ ...input, env: new BrowserPilotEnv(browser), engine, handoffGapNats: model.handoffGapNats });
+    const result: PilotResult = await runPilot({ ...input, env: new BrowserPilotEnv(browser), engine, handoffGapNats: Number(process.env.FAST_LANE_GAP ?? model.handoffGapNats) });
     reports.push({
       scenario,
       status: result.status,
