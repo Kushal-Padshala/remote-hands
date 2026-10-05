@@ -62,3 +62,7 @@ export * from './computer/tools.js';
 export * from './computer/mcp-server.js';
 export * from './browser/setup.js';
 export * from './browser/auto-enable.js';
+export * from './fast-lane/types.js';
+export * from './fast-lane/inference/catalog.js';
+export * from './fast-lane/inference/hardware.js';
+export * from './fast-lane/inference/service.js';
