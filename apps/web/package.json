@@ -14,14 +14,14 @@
     "@base-ui/react": "^1.8.0",
     "@remote-hands/shared": "0.0.0",
     "clsx": "^2.1.1",
-    "marked": "^18.0.13",
+    "marked": "^18.0.14",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "thinking-orbs": "^0.3.1"
+    "thinking-orbs": "^0.3.2"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.54.11",
+    "@cloudflare/vite-plugin": "^1.62.5",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.2.0",
     "@types/qrcode": "^1.5.6",
