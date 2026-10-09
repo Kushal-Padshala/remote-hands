@@ -20,6 +20,13 @@ export interface IndexedElement {
   bounds: [number, number, number, number];
 }
 
+export interface PointControl {
+  role: string;
+  label: string;
+  bounds: [number, number, number, number];
+  pid: number;
+}
+
 export interface AxWalkerOptions {
   driver?: MacOsDriver;
   exec?: ExecFunction;
@@ -49,6 +56,81 @@ export class AxWalker {
       }
     } else {
       this.exec = fastExec;
+    }
+  }
+
+  /** Hit-test the screen, then climb from a child/icon to its nearest actionable control.
+   * Unlike a snapshot, this preserves unlabelled controls and never substitutes a container.
+   */
+  async controlAtPoint(x: number, y: number): Promise<PointControl | null> {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const script = `
+import Cocoa
+import ApplicationServices
+import Foundation
+
+let pointX = ${x}
+let pointY = ${y}
+let system = AXUIElementCreateSystemWide()
+var hit: AXUIElement?
+guard AXUIElementCopyElementAtPosition(system, Float(pointX), Float(pointY), &hit) == .success,
+      let first = hit else { print("null"); exit(0) }
+
+func attr(_ el: AXUIElement, _ name: String) -> AnyObject? {
+    var value: AnyObject?
+    guard AXUIElementCopyAttributeValue(el, name as CFString, &value) == .success else { return nil }
+    return value
+}
+func text(_ el: AXUIElement, _ name: String) -> String {
+    (attr(el, name) as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+}
+let controlRoles: Set<String> = ["AXButton", "AXMenuItem", "AXLink", "AXCheckBox", "AXRadioButton",
+    "AXPopUpButton", "AXComboBox", "AXTextField", "AXTextArea", "AXSlider", "AXIncrementor"]
+var current = first
+for _ in 0..<64 {
+    let role = text(current, kAXRoleAttribute)
+    var names: CFArray?
+    _ = AXUIElementCopyActionNames(current, &names)
+    let canPress = (names as? [String] ?? []).contains(kAXPressAction)
+    if controlRoles.contains(role) || canPress {
+        // Stop at an unknown control too: a parent's label cannot identify its action.
+        let title = text(current, kAXTitleAttribute)
+        let desc = text(current, kAXDescriptionAttribute)
+        let label = title.isEmpty ? desc : title
+        guard let pos = attr(current, kAXPositionAttribute), CFGetTypeID(pos) == AXValueGetTypeID(),
+              let size = attr(current, kAXSizeAttribute), CFGetTypeID(size) == AXValueGetTypeID() else {
+            print("null"); exit(0)
+        }
+        var pt = CGPoint.zero
+        var sz = CGSize.zero
+        guard AXValueGetValue(pos as! AXValue, .cgPoint, &pt),
+              AXValueGetValue(size as! AXValue, .cgSize, &sz) else { print("null"); exit(0) }
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(current, &pid) == .success else { print("null"); exit(0) }
+        let output: [String: Any] = ["role": role, "label": label,
+            "bounds": [pt.x, pt.y, sz.width, sz.height], "pid": Int(pid)]
+        guard let data = try? JSONSerialization.data(withJSONObject: output),
+              let json = String(data: data, encoding: .utf8) else { print("null"); exit(0) }
+        print(json)
+        exit(0)
+    }
+    if role == "AXWindow" || role == "AXApplication" { break }
+    guard let parent = attr(current, kAXParentAttribute), CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
+    current = parent as! AXUIElement
+}
+print("null")
+`;
+    try {
+      const result = this.exec('swift', ['-e', script]);
+      if (result.status !== 0) return null;
+      const control = JSON.parse(result.stdout.trim()) as PointControl | null;
+      if (!control || typeof control.role !== 'string' || typeof control.label !== 'string' ||
+          !Number.isInteger(control.pid) || control.pid <= 0 || !Array.isArray(control.bounds) ||
+          control.bounds.length !== 4 || !control.bounds.every(Number.isFinite) ||
+          control.bounds[2] <= 0 || control.bounds[3] <= 0) return null;
+      return control;
+    } catch {
+      return null;
     }
   }
 

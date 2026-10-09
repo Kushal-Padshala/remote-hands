@@ -3,6 +3,41 @@ import { desktopCommand } from './desktop.js';
 import { DesktopActEngine, searchAndTriggerMenu } from '@remote-hands/daemon';
 
 describe('desktopCommand', () => {
+  it.each(['Press Cmd+Enter', 'Press Cmd+Shift+D'])('gates resolved send shortcuts in act goals: %s', async (goal) => {
+    const sendKeyCombo = vi.fn();
+    const approve = vi.fn().mockResolvedValue(1);
+    const code = await desktopCommand(['act', goal], {
+      env: {}, taskId: 'task-1', approve, stdout: () => {}, stderr: () => {},
+      desktopDriver: { sendKeyCombo }, walker: { walkActiveApp: async () => [] },
+    });
+    expect(code).toBe(1);
+    expect(approve.mock.calls[0]?.[0]).toContain('--action=send');
+    expect(sendKeyCombo).not.toHaveBeenCalled();
+  });
+
+  it.each(['hint', 'unlabelled'])('uses the native control under a coordinate instead of a %s snapshot node', async (mode) => {
+    const walker = {
+      walkActiveApp: async () => [
+        { index: 1, role: 'AXGroup', label: 'Compose', bounds: [0, 0, 800, 600] },
+        ...(mode === 'hint' ? [
+          { index: 2, role: 'AXButton', label: 'Send', bounds: [100, 100, 60, 30] },
+          { index: 3, role: 'AXStaticText', label: '⌘↩', bounds: [110, 105, 30, 15] },
+        ] : []),
+      ],
+      controlAtPoint: vi.fn().mockResolvedValue({ role: 'AXButton', label: mode === 'hint' ? 'Send' : '', bounds: [100, 100, 60, 30] }),
+    };
+    const clickAt = vi.fn();
+    const approve = vi.fn().mockResolvedValue(1);
+    const code = await desktopCommand(['click', '120,110'], {
+      env: {}, taskId: 'task-1', approve, stdout: () => {}, stderr: () => {},
+      desktopDriver: { clickAt }, walker,
+    });
+    expect(code).toBe(1);
+    expect(clickAt).not.toHaveBeenCalled();
+    if (mode === 'hint') expect(approve.mock.calls[0]?.[0]).toContain('--action=send');
+    else expect(approve).not.toHaveBeenCalled();
+  });
+
   it.each(['click 3', 'type "hello" into Sen'])('requires approval before an act goal presses Send: %s', async (goal) => {
     const elements = [{ index: 3, role: 'AXButton', label: 'Send', bounds: [0, 0, 10, 10] as [number, number, number, number] }];
     const engine = new DesktopActEngine();
@@ -301,10 +336,7 @@ describe('desktopCommand', () => {
 
   it('gates a coordinate click on the element under the point during a task', async () => {
     const walkerMock = {
-      walkActiveApp: vi.fn().mockResolvedValue([
-        { index: 1, role: 'AXWindow', label: 'Mail', bounds: [0, 0, 800, 600] },
-        { index: 2, role: 'AXButton', label: 'Send', bounds: [100, 100, 60, 30] },
-      ]),
+      controlAtPoint: vi.fn().mockResolvedValue({ role: 'AXButton', label: 'Send', bounds: [100, 100, 60, 30], pid: 123 }),
     };
     const driverMock = { clickAt: vi.fn().mockResolvedValue(undefined) };
     const approve = vi.fn().mockResolvedValue(1);
@@ -322,7 +354,7 @@ describe('desktopCommand', () => {
   });
 
   it('does not walk the UI for a coordinate click outside a task', async () => {
-    const walkerMock = { walkActiveApp: vi.fn() };
+    const walkerMock = { walkActiveApp: vi.fn(), controlAtPoint: vi.fn() };
     const driverMock = { clickAt: vi.fn().mockResolvedValue(undefined) };
     const code = await desktopCommand(['click', '120,110'], {
       stdout: vi.fn(),
@@ -332,7 +364,53 @@ describe('desktopCommand', () => {
     });
     expect(code).toBe(0);
     expect(walkerMock.walkActiveApp).not.toHaveBeenCalled();
+    expect(walkerMock.controlAtPoint).not.toHaveBeenCalled();
     expect(driverMock.clickAt).toHaveBeenCalledWith(120, 110);
+  });
+
+  it('executes an approved coordinate click when the native target is unchanged', async () => {
+    const hit = { role: 'AXButton', label: 'Send', bounds: [100, 100, 60, 30], pid: 123 };
+    const controlAtPoint = vi.fn().mockResolvedValue(hit);
+    const clickAt = vi.fn();
+    const approve = vi.fn().mockResolvedValue(0);
+    expect(await desktopCommand(['click', '120,110'], {
+      env: {}, taskId: 'task-1', approve, stdout: () => {}, stderr: () => {},
+      desktopDriver: { clickAt }, walker: { controlAtPoint },
+    })).toBe(0);
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(controlAtPoint).toHaveBeenCalledTimes(2);
+    expect(clickAt).toHaveBeenCalledWith(120, 110);
+  });
+
+  it.each([
+    { role: 'AXButton', label: 'Delete', bounds: [100, 100, 60, 30], pid: 123 },
+    { role: 'AXButton', label: 'Send', bounds: [100, 100, 60, 30], pid: 456 },
+    { role: 'AXMenuItem', label: 'Send', bounds: [100, 100, 60, 30], pid: 123 },
+    { role: 'AXButton', label: 'Send', bounds: [101, 100, 60, 30], pid: 123 },
+    null,
+  ])('refuses an approved coordinate click if the target changes while approval is pending: %j', async (fresh) => {
+    const controlAtPoint = vi.fn()
+      .mockResolvedValueOnce({ role: 'AXButton', label: 'Send', bounds: [100, 100, 60, 30], pid: 123 })
+      .mockResolvedValueOnce(fresh);
+    const clickAt = vi.fn();
+    const stderr = vi.fn();
+    expect(await desktopCommand(['click', '120,110'], {
+      env: {}, taskId: 'task-1', approve: async () => 0, stdout: () => {}, stderr,
+      desktopDriver: { clickAt }, walker: { controlAtPoint },
+    })).toBe(1);
+    expect(clickAt).not.toHaveBeenCalled();
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('changed'));
+  });
+
+  it('refuses a coordinate click when native hit testing cannot identify a control', async () => {
+    const clickAt = vi.fn();
+    const approve = vi.fn();
+    expect(await desktopCommand(['click', '120,110'], {
+      env: {}, taskId: 'task-1', approve, stdout: () => {}, stderr: () => {},
+      desktopDriver: { clickAt }, walker: { controlAtPoint: async () => null },
+    })).toBe(1);
+    expect(approve).not.toHaveBeenCalled();
+    expect(clickAt).not.toHaveBeenCalled();
   });
 
   it('asks the phone before a send shortcut during a task', async () => {

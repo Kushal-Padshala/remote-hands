@@ -61,12 +61,15 @@ function makeDeps(overrides: Partial<ComputerSessionDeps> = {}) {
 }
 
 describe('ComputerSession desktop', () => {
-  it('asks the gate before a send or delete shortcut and leaves other keys alone', async () => {
+  it.each([
+    ['cmd+enter', 'send'],
+    ['cmd+delete', 'delete'],
+  ])('asks the gate before %s and leaves other keys alone', async (combo, kind) => {
     const gate = vi.fn().mockRejectedValue(new Error('Approval rejected by user.'));
     const deps = makeDeps({ gate });
     const s = new ComputerSession(deps);
-    await expect(s.desktopKey('cmd+enter')).rejects.toThrow('Approval rejected by user.');
-    expect(gate).toHaveBeenCalledWith('cmd+enter', { kind: 'send' });
+    await expect(s.desktopKey(combo)).rejects.toThrow('Approval rejected by user.');
+    expect(gate).toHaveBeenCalledWith(combo, { kind });
     expect(deps.desktop.sendKeyCombo).not.toHaveBeenCalled();
     await s.desktopKey('cmd+s');
     expect(gate).toHaveBeenCalledTimes(1);

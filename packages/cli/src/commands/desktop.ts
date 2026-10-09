@@ -181,15 +181,14 @@ export async function desktopCommand(
         const x = parseInt(coordMatch[1], 10);
         const y = parseInt(coordMatch[2], 10);
         if (activeTaskId(context)) {
-          // A coordinate has no label: gate on the smallest element under the point.
-          const elements = await walker.walkActiveApp(undefined, { allowOcr: false });
-          const hit = elements
-            .filter((e) => {
-              const [ex, ey, w, h] = e.bounds;
-              return x >= ex && x <= ex + w && y >= ey && y <= ey + h;
-            })
-            .sort((a, b) => a.bounds[2] * a.bounds[3] - b.bounds[2] * b.bounds[3])[0];
+          const hit = await walker.controlAtPoint(x, y);
           await gate(hit?.label ?? '');
+          // Approval can take a while; do not click a different control after the UI changes.
+          const fresh = await walker.controlAtPoint(x, y);
+          if (!hit || !fresh || hit.pid !== fresh.pid || hit.role !== fresh.role ||
+              hit.label !== fresh.label || hit.bounds.some((n, i) => n !== fresh.bounds[i])) {
+            throw new Error('Control under the coordinate changed; action was not pressed. Take a fresh snapshot and retry.');
+          }
         }
         if (typeof (driver as any).clickAt === 'function') {
           if (isRight) {
@@ -371,9 +370,12 @@ export async function desktopCommand(
         return 1;
       }
       // TYPE_TEXT also presses its target to focus it before typing.
+      const keyKind = decision.action === 'KEY' && decision.key ? classifyRiskyKey(decision.key) : null;
       if (decision.targetIndex !== undefined) {
         const target = elements.find((e) => e.index === decision.targetIndex);
         await gate(target?.label ?? '');
+      } else if (keyKind) {
+        await gate(decision.key!, { kind: keyKind });
       } else {
         await gate(goal, { goal: true });
       }
