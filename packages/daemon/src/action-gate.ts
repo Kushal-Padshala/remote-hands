@@ -2,13 +2,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import type { ActionKind } from '@remote-hands/shared';
 
 /**
  * Called with a control's label right before it is pressed. Resolves to let the action
  * run, rejects (with the user's reason) to stop it. The CLI builds the real one on top of
- * `rh approve`; without a gate every action runs, as before.
+ * `rh approve`; without a gate every action runs, as before. `kind` skips label
+ * classification for actions already known to be risky (send/delete shortcuts, raw scripts).
  */
-export type ActionGate = (label: string, opts?: { goal?: boolean }) => Promise<void>;
+export type ActionGate = (label: string, opts?: { goal?: boolean; kind?: ActionKind }) => Promise<void>;
 
 /**
  * The warm agy process and the MCP server it starts are spawned once, so the running task

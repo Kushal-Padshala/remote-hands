@@ -1,5 +1,6 @@
 import type { CommandContext } from './setup.js';
-import { createActionGate, type ActionGateContext } from '../action-gate.js';
+import { activeTaskId, createActionGate, type ActionGateContext } from '../action-gate.js';
+import { classifyRiskyKey } from '@remote-hands/shared';
 import {
   MacOsDriver,
   AxWalker,
@@ -179,6 +180,17 @@ export async function desktopCommand(
       if (coordMatch && coordMatch[1] && coordMatch[2]) {
         const x = parseInt(coordMatch[1], 10);
         const y = parseInt(coordMatch[2], 10);
+        if (activeTaskId(context)) {
+          // A coordinate has no label: gate on the smallest element under the point.
+          const elements = await walker.walkActiveApp(undefined, { allowOcr: false });
+          const hit = elements
+            .filter((e) => {
+              const [ex, ey, w, h] = e.bounds;
+              return x >= ex && x <= ex + w && y >= ey && y <= ey + h;
+            })
+            .sort((a, b) => a.bounds[2] * a.bounds[3] - b.bounds[2] * b.bounds[3])[0];
+          await gate(hit?.label ?? '');
+        }
         if (typeof (driver as any).clickAt === 'function') {
           if (isRight) {
             await (driver as any).clickAt(x, y, 'right');
@@ -250,6 +262,8 @@ export async function desktopCommand(
         stderr('Missing key combo. Usage: rh desktop key <combo>');
         return 1;
       }
+      const keyKind = classifyRiskyKey(combo);
+      if (keyKind) await gate(combo, { kind: keyKind });
       if (typeof (driver as any).pressKey === 'function') {
         await (driver as any).pressKey(combo);
       } else {

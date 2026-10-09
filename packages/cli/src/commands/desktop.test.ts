@@ -299,6 +299,62 @@ describe('desktopCommand', () => {
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining('"Send" was not pressed'));
   });
 
+  it('gates a coordinate click on the element under the point during a task', async () => {
+    const walkerMock = {
+      walkActiveApp: vi.fn().mockResolvedValue([
+        { index: 1, role: 'AXWindow', label: 'Mail', bounds: [0, 0, 800, 600] },
+        { index: 2, role: 'AXButton', label: 'Send', bounds: [100, 100, 60, 30] },
+      ]),
+    };
+    const driverMock = { clickAt: vi.fn().mockResolvedValue(undefined) };
+    const approve = vi.fn().mockResolvedValue(1);
+    const code = await desktopCommand(['click', '120,110'], {
+      stderr: vi.fn(),
+      desktopDriver: driverMock as any,
+      walker: walkerMock as any,
+      env: {},
+      taskId: 'task-1',
+      approve,
+    });
+    expect(code).toBe(1);
+    expect(approve.mock.calls[0]![0][0]).toBe('Press "Send"');
+    expect(driverMock.clickAt).not.toHaveBeenCalled();
+  });
+
+  it('does not walk the UI for a coordinate click outside a task', async () => {
+    const walkerMock = { walkActiveApp: vi.fn() };
+    const driverMock = { clickAt: vi.fn().mockResolvedValue(undefined) };
+    const code = await desktopCommand(['click', '120,110'], {
+      stdout: vi.fn(),
+      desktopDriver: driverMock as any,
+      walker: walkerMock as any,
+      env: {},
+    });
+    expect(code).toBe(0);
+    expect(walkerMock.walkActiveApp).not.toHaveBeenCalled();
+    expect(driverMock.clickAt).toHaveBeenCalledWith(120, 110);
+  });
+
+  it('asks the phone before a send shortcut during a task', async () => {
+    const driverMock = { pressKey: vi.fn().mockResolvedValue(undefined) };
+    const approve = vi.fn().mockResolvedValue(1);
+    const code = await desktopCommand(['key', 'cmd+enter'], {
+      stderr: vi.fn(),
+      desktopDriver: driverMock as any,
+      env: {},
+      taskId: 'task-1',
+      approve,
+    });
+    expect(code).toBe(1);
+    expect(approve.mock.calls[0]![0]).toEqual(['Press "cmd+enter"', '--action=send', '--risk=high', '--task=task-1']);
+    expect(driverMock.pressKey).not.toHaveBeenCalled();
+
+    const plain = vi.fn().mockResolvedValue(0);
+    await desktopCommand(['key', 'cmd+s'], { stdout: vi.fn(), desktopDriver: driverMock as any, env: {}, taskId: 'task-1', approve: plain });
+    expect(plain).not.toHaveBeenCalled();
+    expect(driverMock.pressKey).toHaveBeenCalledWith('cmd+s');
+  });
+
   it('handles click by element index', async () => {
     const mockElements = [
       { index: 1, role: 'AXButton', label: 'Cancel', bounds: [10, 10, 50, 20] },

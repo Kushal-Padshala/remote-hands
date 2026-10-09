@@ -1,3 +1,4 @@
+import { classifyRiskyKey } from '@remote-hands/shared';
 import type { IndexedElement } from '../desktop/ax-walker.js';
 import { AxWalker } from '../desktop/ax-walker.js';
 import { performAxActionDetailed } from '../desktop/ax-actions.js';
@@ -135,6 +136,8 @@ export class ComputerSession {
       if (!mapped) throw new Error(`Unknown modifier "${p}" in "${combo}"`);
       return mapped;
     });
+    const kind = classifyRiskyKey(combo);
+    if (kind) await this.deps.gate?.(combo, { kind });
     await this.deps.desktop.sendKeyCombo([key], modifiers);
     return `pressed ${combo}\n${await this.safeState(app ?? (this.cache?.app || undefined))}`;
   }
