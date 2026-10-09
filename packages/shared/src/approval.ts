@@ -72,3 +72,24 @@ export function classifyRiskyAction(label: string, opts: { goal?: boolean } = {}
   }
   return null;
 }
+
+const COMMAND_MODIFIERS = new Set(['cmd', 'command', 'meta', 'ctrl', 'control']);
+
+/**
+ * Keyboard shortcuts that send or delete without a button press: Cmd/Ctrl+Enter sends in
+ * Mail, Slack, Gmail, Outlook and Teams; Cmd+Shift+D sends in Mail; Cmd+Delete deletes in
+ * Finder, Mail and Photos. Plain Enter is left alone (it would gate every search box).
+ */
+export function classifyRiskyKey(combo: string): ActionKind | null {
+  const parts = (combo ?? '')
+    .toLowerCase()
+    .split(/[+\s]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const key = parts.pop();
+  if (!key || !parts.some((p) => COMMAND_MODIFIERS.has(p))) return null;
+  if (key === 'enter' || key === 'return') return 'send';
+  if (key === 'd' && parts.includes('shift') && (parts.includes('cmd') || parts.includes('command'))) return 'send';
+  if (key === 'delete' || key === 'backspace' || key === 'forwarddelete') return 'delete';
+  return null;
+}

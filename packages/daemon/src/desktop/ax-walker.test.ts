@@ -2,6 +2,23 @@ import { describe, it, expect, vi } from 'vitest';
 import { AxWalker, type RawAxNode } from './ax-walker.js';
 
 describe('AxWalker', () => {
+  it('returns the native point control without pruning an unlabelled button', async () => {
+    const control = { role: 'AXButton', label: '', bounds: [100, 100, 60, 30], pid: 123 };
+    const exec = vi.fn().mockReturnValue({ status: 0, stdout: JSON.stringify(control), stderr: '' });
+    const walker = new AxWalker({ exec });
+    expect(await walker.controlAtPoint(120, 110)).toEqual(control);
+  });
+
+  it.each([
+    { status: 1, stdout: '{"label":"Send"}', stderr: 'AX failed' },
+    { status: 0, stdout: 'null', stderr: '' },
+    { status: 0, stdout: 'not JSON', stderr: '' },
+    { status: 0, stdout: '{"role":"AXButton","label":"Send","bounds":[1,2],"pid":123}', stderr: '' },
+  ])('fails closed when native point lookup is unavailable or malformed: %j', async (result) => {
+    const walker = new AxWalker({ exec: vi.fn().mockReturnValue(result) });
+    expect(await walker.controlAtPoint(120, 110)).toBeNull();
+  });
+
   it('instantiates with default options', () => {
     const walker = new AxWalker();
     expect(walker).toBeDefined();

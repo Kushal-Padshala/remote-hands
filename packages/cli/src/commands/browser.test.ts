@@ -16,6 +16,7 @@ vi.mock('@remote-hands/daemon', async () => ({
   // Real registry, error class and picker (pure modules): the doctor uses them; the rest stays faked.
   ...(await import('../../../daemon/src/browser/browsers.js')),
   ...(await import('../../../daemon/src/browser/applescript.js')),
+  readActiveTask: () => null,
   BrowserDriver: class {
     constructor(options?: unknown) {
       driverOptions.push(options);
@@ -508,6 +509,18 @@ describe('browserCommand', () => {
   });
 
   describe('fallback to browser-harness', () => {
+    it('asks the phone before running a raw harness script during a task', async () => {
+      const approve = vi.fn(async (_args: string[], ctx: any) => {
+        ctx.stderr('Approval rejected by user.');
+        return 1;
+      });
+      const code = await browserCommand(['-c', 'click(1)'], { ...getCtx(), env: {}, taskId: 'task-1', approve });
+      expect(code).toBe(1);
+      expect(approve.mock.calls[0]![0]).toEqual(['Run "browser-harness -c click(1)"', '--action=shell', '--risk=high', '--task=task-1']);
+      expect(mockSpawn).not.toHaveBeenCalled();
+      expect(stderrMessages.join('\n')).toContain('was not run');
+    });
+
     it('spawns browser-harness when no subcommand is provided', async () => {
       const mockChild = new EventEmitter();
       mockSpawn.mockReturnValueOnce(mockChild);
