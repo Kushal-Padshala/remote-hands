@@ -1,11 +1,25 @@
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { defineConfig } from 'vitest/config';
 
 // Keep compiled Swift helper binaries (fastExec) out of ~/.remote-hands during tests. The
 // directory is stable across runs (entries are keyed by template hash, so stale ones are
 // harmless) so a full run does not recompile every template or leak a temp dir per run.
 process.env.RH_SWIFT_CACHE_DIR ??= join(tmpdir(), 'rh-swift-cache-vitest');
+
+// Tests must never drive the real desktop: some code paths call `osascript` (activate Chrome,
+// click menus) and `open` (System Settings panes), which pops windows on the developer's
+// screen. Put no-op stand-ins first on PATH so those calls do nothing; tests that matter mock
+// the exec layer themselves.
+const noUiBin = join(tmpdir(), 'rh-no-ui-bin');
+mkdirSync(noUiBin, { recursive: true });
+for (const name of ['osascript', 'open']) {
+  const file = join(noUiBin, name);
+  writeFileSync(file, '#!/bin/sh\nexit 0\n');
+  chmodSync(file, 0o755);
+}
+process.env.PATH = `${noUiBin}${delimiter}${process.env.PATH ?? ''}`;
 
 // Local dev keeps Supabase keys in a git-ignored .env at the repo root; CI exports
 // them as real environment variables instead, so a missing file here is expected.
