@@ -10,7 +10,6 @@ import * as fs from 'node:fs';
 import type { CommandContext } from './setup.js';
 import { c } from '../output/ui.js';
 import { ensureAgyPermissions } from '../system/agy-permissions.js';
-import { offerForContext } from './browser-setup.js';
 import { resolveFastLane } from '../system/fast-lane.js';
 import {
   ensureMacPermissions,
@@ -48,7 +47,6 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
   if (subcommand === 'install') {
     stdout('Configuring system permissions for desktop overlay assistant...');
     await ensureAgyPermissions(context.fs);
-    await offerForContext(context);
     stdout('Installing Remote Hands Desktop Overlay background service...');
     const res = serviceManager.install();
     if (res.success) {
@@ -122,7 +120,6 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
 
   if (subcommand === 'listen') {
     await ensureAgyPermissions(context.fs);
-    await offerForContext(context);
     if (process.platform === 'darwin' && !context.runner && !args.includes('--skip-permissions') && !checkMacScreenCapture()) {
       await ensureMacPermissions(stdout);
     }

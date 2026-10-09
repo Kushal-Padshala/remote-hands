@@ -63,7 +63,7 @@ import {
 } from '../output/ui.js';
 
 import { HudServiceManager, SpotlightHudRunner, type ChromeManager, type DynamicPowerManager } from '@remote-hands/daemon';
-import { browserSetupCommand, defaultAsk } from './browser-setup.js';
+import { defaultAsk } from './browser-setup.js';
 import { mcpCommand } from './mcp.js';
 
 export interface CommandContext {
@@ -197,9 +197,9 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     stdout('Usage: rh setup [--hud | --remote] [--yes] [--local] [--skip-permissions]');
     stdout('');
     stdout('Guided setup. Without a flag it asks what to set up first:');
-    stdout('  --hud     Desktop HUD on this computer: agent, permissions, browsers, tools, background service');
+    stdout('  --hud     Desktop HUD on this computer: agent, permissions, tools, background service');
     stdout('  --remote  Remote use from your phone: Cloudflare Worker, D1 and pairing');
-    stdout('  --yes     do not ask before turning on the fast browser setting');
+    stdout('  --yes     do not ask before changing settings');
     return 0;
   }
 
@@ -511,8 +511,6 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     stdout(renderStepInfo('Desktop Overlay hotkey service is supported on macOS'));
   }
 
-  await offerBrowserSetup(context);
-
   const pairingUrl = generatePairingUrl(webUrl, activePairingCode, effectiveOwnerToken, apiUrl);
   const summary = await formatPairingSummary({
     webUrl,
@@ -548,11 +546,6 @@ async function agyNeedsSignIn(runner: CommandRunner): Promise<boolean> {
   return AUTH_HINTS.some((h) => text.includes(h));
 }
 
-async function offerBrowserSetup(context: CommandContext): Promise<void> {
-  const { offerForContext } = await import('./browser-setup.js');
-  await offerForContext(context);
-}
-
 async function askSetupMode(
   ask: (question: string) => Promise<string>,
   stdout: (msg: string) => void,
@@ -571,7 +564,7 @@ async function askSetupMode(
 
 /**
  * Everything the desktop HUD needs, in one pass and in this order: the agent and its
- * permissions, macOS permissions, browser setup (the fast browser path), the computer-use
+ * permissions, macOS permissions, the computer-use
  * tools registered with the agent, then the background HUD service. Each step explains
  * what it does and asks before changing anything that matters.
  */
@@ -584,31 +577,13 @@ async function hudSetupFlow(
   stdout: (msg: string) => void,
   stderr: (msg: string) => void,
 ): Promise<number> {
-  const TOTAL = 5;
+  const TOTAL = 4;
   stdout(renderBanner());
 
   const agyErr = await setupAgentAndPermissions(args, context, runner, fs, projectRoot, stdout, stderr, 1, TOTAL);
   if (agyErr !== null) return agyErr;
 
-  stdout(renderStepStart(2, TOTAL, 'Browsers (fast browser control)'));
-  if (process.platform === 'darwin') {
-    stdout(renderStepInfo('Checking the browsers you have open (Chrome, Brave, Arc, Edge, Safari)...'));
-    try {
-      await browserSetupCommand(args.includes('--yes') ? ['--yes'] : [], {
-        ...context.browserSetup,
-        stdout,
-        stderr,
-        isTTY: context.isTTY,
-        ask: context.ask,
-      });
-    } catch (err) {
-      stdout(renderStepInfo(`Browser setup skipped: ${err instanceof Error ? err.message : String(err)}`));
-    }
-  } else {
-    stdout(renderStepInfo('Fast browser control is macOS only for now; skipping.'));
-  }
-
-  stdout(renderStepStart(3, TOTAL, 'Computer-use tools for the agent'));
+  stdout(renderStepStart(2, TOTAL, 'Computer-use tools for the agent'));
   const mcpOpts: Parameters<typeof mcpCommand>[1] = {
     stdout: (msg) => stdout(renderStepInfo(msg)),
     stderr,
@@ -624,7 +599,7 @@ async function hudSetupFlow(
     }
   }
 
-  stdout(renderStepStart(4, TOTAL, 'Desktop HUD background service'));
+  stdout(renderStepStart(3, TOTAL, 'Desktop HUD background service'));
   const hudService =
     context.hudServiceManager ??
     (context.runner
@@ -657,7 +632,7 @@ async function hudSetupFlow(
     }
   }
 
-  stdout(renderStepStart(5, TOTAL, 'Done'));
+  stdout(renderStepStart(4, TOTAL, 'Done'));
   if (helperError) {
     stdout(renderStepInfo('Desktop HUD is installed but the hotkey will not work until the helper builds (see above).'));
     return 1;
@@ -665,7 +640,7 @@ async function hudSetupFlow(
   stdout(renderStepSuccess('Desktop HUD is ready'));
   stdout(`\n  Press ${c.bold('Shift + Cmd + Space')} anywhere and type what you want done.`);
   stdout('  The first request after logging in takes a few seconds longer while the agent starts.');
-  stdout(`  Check everything any time with "${c.cyan('rh browser doctor')}" and "${c.cyan('rh hud status')}".`);
+  stdout(`  Check that it is running any time with "${c.cyan('rh hud status')}".`);
   stdout(`  Remote (phone) use is not set up yet: run "${c.cyan('rh setup --remote')}" when you want it.\n`);
   return 0;
 }

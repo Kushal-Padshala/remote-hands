@@ -645,7 +645,8 @@ describe('Setup Command Flow', () => {
       expect(out.join('\n')).toContain('Desktop HUD is ready');
       expect(out.join('\n')).toContain('rh setup --remote');
       if (process.platform === 'darwin') {
-        expect(inspected).toEqual(['Brave Browser']);
+        expect(inspected).toEqual([]);
+        expect(out.join('\n')).not.toContain('Browsers (fast browser control)');
         expect(mockService.install).toHaveBeenCalledTimes(1);
       }
     });

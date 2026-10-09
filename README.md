@@ -189,9 +189,9 @@ Scan the generated terminal QR code with your phone camera to pair your mobile b
 
 ### 4. Desktop HUD: what `rh setup` does for you (macOS)
 
-Choosing the Desktop HUD does the whole setup in one pass: sign-in and permissions for the agent, macOS permissions, the fast browser setup below, registering the computer-use tools with the agent, and starting the HUD in the background. You only answer a few yes/no questions and click Allow on the macOS prompts. `rh setup --hud` skips the question; `rh setup --remote` is the phone/Cloudflare flow.
+Choosing the Desktop HUD does the whole setup in one pass: sign-in and permissions for the agent, macOS permissions, registering the computer-use tools with the agent, and starting the HUD in the background. You only answer a few yes/no questions and click Allow on the macOS prompts. There is no per-browser step: the HUD reads and clicks any window of any app through the one Accessibility permission. `rh setup --hud` skips the question; `rh setup --remote` is the phone/Cloudflare flow.
 
-The browser part is also available on its own: run `rh browser setup` (it is also offered automatically by `rh hud install`). It checks the browsers you have open (Chrome, Brave, Arc, Edge, Safari) and, with your permission, turns on each browser's "Allow JavaScript from Apple Events" setting so the HUD can drive your own signed-in tabs quickly. macOS asks you to allow the control once per browser; click Allow. Undo any time with `rh browser setup --disable`. Without it, browser tasks still work through a slower Chrome-only fallback. `rh browser doctor` shows what is ready.
+**Optional turbo mode for browsers:** run `rh browser setup` (it is no longer offered automatically). It checks the browsers you have open (Chrome, Brave, Arc, Edge, Safari) and, with your permission, turns on each browser's "Allow JavaScript from Apple Events" setting so the HUD can drive your own signed-in tabs quickly. macOS asks you to allow the control once per browser; click Allow. Undo any time with `rh browser setup --disable`. Without it, browser tasks still work: Chrome through a slower fallback, and other browsers through the desktop accessibility tools. `rh browser doctor` shows what is ready.
 
 ### 5. Fast lane: a small local model for instant requests (optional, macOS)
 

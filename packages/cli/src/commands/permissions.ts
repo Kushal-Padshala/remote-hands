@@ -72,7 +72,7 @@ export async function permissionsCommand(args: string[], context: CommandContext
   stdout(`  Screen & Audio Recording: ${report.screenCapture ? c.brightGreen('✔ Granted') : c.yellow('✘ Missing')}`);
   stdout(`  Full Disk Access:         ${report.fullDiskAccess ? c.brightGreen('✔ Granted') : c.yellow('✘ Missing')}`);
   stdout(`  Accessibility:            ${report.accessibility ? c.brightGreen('✔ Granted') : c.yellow('✘ Missing')}`);
-  stdout(`  Browser control:          ${c.dim('asked on first use (run "rh browser setup")')}`);
+  stdout(`  Browser control:          ${c.dim('optional (run "rh browser setup" for extra speed)')}`);
   stdout(`  Antigravity Permissions:  ${report.antigravity ? c.brightGreen('✔ Blanket Access Enabled') : c.yellow('✘ Missing')}`);
   stdout('');
 
