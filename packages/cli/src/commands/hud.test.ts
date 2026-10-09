@@ -136,9 +136,11 @@ describe('CLI hud command', () => {
       },
     });
     let listenerObj: any;
-    const code = await hudCommand(['listen'], {
+    // --skip-permissions: on macOS the real Screen Recording check would wait for the user.
+    const code = await hudCommand(['listen', '--skip-permissions'], {
       coordinator: mockCoordinator,
       stdout: (msg) => logs.push(msg),
+      browserSetupOffer: async () => {},
       onListenerReady: (l) => {
         listenerObj = l;
       },
