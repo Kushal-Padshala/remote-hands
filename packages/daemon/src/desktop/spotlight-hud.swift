@@ -1140,6 +1140,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                         transitionToProgress(query: text)
                     } else {
                         appendEntry(.goal, text)
+                        answerText = ""
                         isWorking = true
                         setStatus("Working", color: Theme.accent)
                         stopButton.isHidden = false
@@ -1249,7 +1250,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
                 let whole = NSRange(location: 0, length: answer.length)
                 for match in detector.matches(in: answer.string, options: [], range: whole) {
-                    if let url = match.url { answer.addAttribute(.link, value: url, range: match.range) }
+                    // Only web and mail links are clickable: a file: path in the agent's text must never open or launch anything.
+                    if let url = match.url, ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") {
+                        answer.addAttribute(.link, value: url, range: match.range)
+                    }
                 }
             }
             out.append(answer)
@@ -1331,7 +1335,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             isWorking = false
             setStatus("Done", color: Theme.success)
             stopButton.isHidden = true
-            appendEntry(.answer, text.isEmpty ? "Task completed successfully." : text)
+            answerText = ""
+            let finalText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            appendEntry(.answer, finalText.isEmpty ? "Task completed successfully." : finalText)
             copyButton.isHidden = answerText.isEmpty
             copyButton.attributedTitle = NSAttributedString(string: "Copy", attributes: [.foregroundColor: Theme.text, .font: NSFont.systemFont(ofSize: 12, weight: .semibold)])
             panel.makeFirstResponder(textField)
