@@ -14,6 +14,7 @@ export type LegacyBrowserDriver = Pick<
 const MAX_LINES = 120;
 const MAX_STEPS = 30;
 const MAX_TOTAL_WAIT_MS = 30_000;
+const BATCH_DEADLINE_MS = 60_000;
 const LEGACY_OPS = new Set(['click', 'type', 'wait']);
 
 function words(s: string): string[] {
@@ -43,8 +44,10 @@ export class LegacyBrowserPort implements BrowserPort {
   private readonly driver: LegacyBrowserDriver;
   private readonly settleMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly now: () => number;
 
-  constructor(deps: { driver: LegacyBrowserDriver; settleMs?: number; sleep?: (ms: number) => Promise<void> }) {
+  constructor(deps: { driver: LegacyBrowserDriver; settleMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number }) {
+    this.now = deps.now ?? Date.now;
     this.driver = deps.driver;
     this.settleMs = deps.settleMs ?? 150;
     this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -158,10 +161,12 @@ export class LegacyBrowserPort implements BrowserPort {
       }
     });
     const done: string[] = [];
+    const deadline = this.now() + BATCH_DEADLINE_MS;
     for (let i = 0; i < steps.length; i += 1) {
       const step = steps[i]!;
       const n = i + 1;
       try {
+        if (this.now() > deadline) throw new Error('this call ran out of time (60 s); remaining steps not run');
         if (step.op === 'wait') {
           await this.sleep(step.ms ?? 0);
         } else if (step.op === 'click') {

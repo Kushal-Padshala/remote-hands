@@ -212,9 +212,9 @@ describe('blocked frames', () => {
 
   it('renders one note line, singular and plural, after the element lines', () => {
     const one = renderFull(normalizeSnapshot({ ...base, frames_blocked: 1 }), { text: false }).split('\n');
-    expect(one.at(-1)).toBe('note: 1 embedded frame cannot be read here (from another website or sandboxed); use desktop_snapshot for that part');
+    expect(one.at(-1)).toBe('note: 1 embedded frame cannot be read here (other website, sandboxed or nested too deeply); use desktop_snapshot for that part');
     const two = renderFull(normalizeSnapshot({ ...base, frames_blocked: 2 }), { text: false }).split('\n');
-    expect(two.at(-1)).toBe('note: 2 embedded frames cannot be read here (from another website or sandboxed); use desktop_snapshot for that part');
+    expect(two.at(-1)).toBe('note: 2 embedded frames cannot be read here (other website, sandboxed or nested too deeply); use desktop_snapshot for that part');
     expect(renderFull(normalizeSnapshot(base), { text: false })).not.toContain('embedded frame');
   });
 
@@ -228,7 +228,7 @@ describe('blocked frames', () => {
     const after = normalizeSnapshot({ ...base, frames_blocked: 1 });
     const out = renderDelta(before, after);
     expect(out).not.toContain('no visible change');
-    expect(out.split('\n').at(-1)).toBe('note: 1 embedded frame cannot be read here (from another website or sandboxed); use desktop_snapshot for that part');
+    expect(out.split('\n').at(-1)).toBe('note: 1 embedded frame cannot be read here (other website, sandboxed or nested too deeply); use desktop_snapshot for that part');
   });
 
   it('announces a changed frame count, and stays quiet when it did not change or went away', () => {
@@ -236,7 +236,24 @@ describe('blocked frames', () => {
     const two = normalizeSnapshot({ ...base, frames_blocked: 2 });
     expect(renderDelta(one, two).split('\n').at(-1)).toContain('2 embedded frames');
     expect(renderDelta(one, one)).toMatch(/no visible change$/);
-    expect(renderDelta(two, normalizeSnapshot(base))).toMatch(/no visible change$/);
+    expect(renderDelta(two, normalizeSnapshot(base)).split('\n').at(-1)).toBe('note: the frames that could not be read are gone');
+  });
+
+  it('announces when a page becomes too large to read fully, and when it is read fully again', () => {
+    const whole = normalizeSnapshot(base);
+    const cut = normalizeSnapshot({ ...base, scan_truncated: true });
+    expect(renderDelta(whole, cut).split('\n').at(-1)).toBe('note: this page is very large; some nested content was not read');
+    expect(renderDelta(cut, cut)).toMatch(/no visible change$/);
+    expect(renderDelta(cut, whole).split('\n').at(-1)).toBe('note: the whole page is being read again');
+  });
+
+  it('carries the omitted dropdown choices into the (+N) count', () => {
+    const state = normalizeSnapshot({ ...base, actions: [
+      { node: 5, role: 'combobox', label: 'Country → Canada', kind: 'select', value: 'ca', current_value: 'US', options_omitted: 300 },
+      { node: 5, role: 'combobox', label: 'Country → Mexico', kind: 'select', value: 'mx', current_value: 'US', options_omitted: 300 },
+    ] });
+    expect(state.elements[0]!.optionsOmitted).toBe(300);
+    expect(renderElement(state.elements[0]!, 1)).toBe('[5] select "Country" = "US" options: US | …(+302)');
   });
 
   it('notes a page too large to read fully, in full renders only', () => {

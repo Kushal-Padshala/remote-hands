@@ -11,7 +11,7 @@ import {
   type PageOp,
   type PageOpResult,
 } from './page-scripts.js';
-import { clean, findElements, normalizeSnapshot, renderDelta, renderElement, renderFull, type PageElement, type PageState } from './render.js';
+import { clean, findElements, normalizeSnapshot, renderDelta, renderElement, renderFull, stateNotes, type PageElement, type PageState } from './render.js';
 import { okSoFar, type BrowserPort, type DoStep } from './port.js';
 import { resolveTarget, type TargetOp } from './targets.js';
 import type { ActionGate } from '../action-gate.js';
@@ -56,6 +56,9 @@ const PROBE_TIMEOUT_MS = 2000;
 const MAX_STEPS = 30;
 /** Total `wait` time per browser_do call: a batch must finish well inside the 90 s tool timeout. */
 const MAX_TOTAL_WAIT_MS = 30_000;
+/** A browser_do call starts no new step after this long, well before the 90 s tool timeout abandons it. */
+const BATCH_DEADLINE_MS = 60_000;
+const OUT_OF_TIME = 'this call ran out of time (60 s)';
 const INDEX_OPS = new Set<DoStep['op']>(['click', 'type', 'select', 'check', 'hover']);
 const ALL_OPS = new Set<string>(['click', 'type', 'select', 'check', 'hover', 'press', 'scroll', 'wait']);
 const STILL_LOADING = 'note: page still loading';
@@ -262,6 +265,8 @@ export class FastBrowserEngine implements BrowserPort {
   private readonly autoEnable: FastBrowserEngineDeps['autoEnable'];
   private readonly gate: FastBrowserEngineDeps['gate'];
   private readonly autoFailedAt = new Map<string, number>();
+  /** Set while a browser_do call runs: no step may start (or pass its approval gate) after it. */
+  private deadlineAt: number | null = null;
 
   constructor(deps: FastBrowserEngineDeps) {
     this.autoEnable = deps.autoEnable;
@@ -575,7 +580,10 @@ export class FastBrowserEngine implements BrowserPort {
 
   /** Runs one page op; throws the model-facing message on failure. */
   private async act(ctx: Ctx, op: PageOp, index: number | null): Promise<PageOpResult & { ok: true }> {
-    if (op.op === 'click') await this.gate?.(op.label);
+    if (op.op === 'click') {
+      await this.gate?.(op.label);
+      if (this.deadlineAt !== null && this.now() > this.deadlineAt) throw new Error(`${OUT_OF_TIME}; the click was not performed`);
+    }
     let text: string;
     try {
       text = await this.t.evaluate(ctx.browser, ctx.target, buildActionScript(op));
@@ -749,6 +757,7 @@ export class FastBrowserEngine implements BrowserPort {
           const first = state.elements.slice(0, Math.max(0, limit));
           lines.push(`no match for "${clean(query)}"; first ${first.length} of ${total} elements:`, ...first.map((e) => renderElement(e)));
         }
+        lines.push(...stateNotes(state));
         return lines.join('\n');
       },
       () => this.legacy.find(query, limit),
@@ -851,6 +860,15 @@ export class FastBrowserEngine implements BrowserPort {
   }
 
   async do(steps: DoStep[]): Promise<string> {
+    this.deadlineAt = this.now() + BATCH_DEADLINE_MS;
+    try {
+      return await this.doSteps(steps);
+    } finally {
+      this.deadlineAt = null;
+    }
+  }
+
+  private async doSteps(steps: DoStep[]): Promise<string> {
     if (this.shown?.mode === 'legacy') return this.legacy.do(steps);
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new Error('browser_do needs at least one step. No steps were run.');
@@ -860,10 +878,26 @@ export class FastBrowserEngine implements BrowserPort {
     }
     let shown = this.shown?.mode === 'fast' ? this.shown : null;
     const named = (s: DoStep | null | undefined): s is DoStep => s !== null && typeof s === 'object';
-    // Label targets need a page to resolve against, so look at the page first. Never when a step
-    // also uses a numeric id: those ids belong to a page the model saw, and a fresh snapshot of
-    // whatever tab is in front could give the same numbers to different elements.
-    if (!shown && steps.some((s) => named(s) && s.target !== undefined) && !steps.some((s) => named(s) && s.index !== undefined)) {
+    const usesTargets = steps.some((s) => named(s) && s.target !== undefined);
+    const usesIndex = steps.some((s) => named(s) && s.index !== undefined);
+    if (usesTargets && shown) {
+      // The page may have changed since the model last looked (a second "Save" can appear), so labels
+      // are matched against a fresh look at the same tab, never against the old list.
+      const tab = { browser: shown.browser, target: shown.target };
+      try {
+        await this.show(tab);
+      } catch (err) {
+        if (err instanceof BrowserAutomationError) {
+          this.transportFailed(tab, err);
+          throw new Error(`${err.message} Call browser_snapshot to continue on the slower fallback.`);
+        }
+        throw err;
+      }
+      shown = this.shown?.mode === 'fast' ? this.shown : null;
+    } else if (usesTargets && !usesIndex) {
+      // No page shown yet: look first, through the same setup and fallback as browser_snapshot. Never
+      // when a step also uses a numeric id: those ids belong to a page the model saw, and a fresh
+      // snapshot of whatever tab is in front could give the same numbers to different elements.
       const flags = { fellBack: false };
       await this.run(
         async (resolved) => {
@@ -923,6 +957,7 @@ export class FastBrowserEngine implements BrowserPort {
     for (let i = 0; i < plan.length; i += 1) {
       const p = plan[i]!;
       const n = i + 1;
+      if (this.deadlineAt !== null && this.now() > this.deadlineAt) return fail(n, p.name, new Error(`${OUT_OF_TIME}; remaining steps not run`));
       if (!p.op) {
         await this.sleep(p.ms);
         done.push(p.name);
@@ -936,9 +971,9 @@ export class FastBrowserEngine implements BrowserPort {
       }
       if (res.verified === false) unverified = true;
       if (res.opened) opened = true;
-      // A later click/type/select/check moves focus itself, so an earlier Tab's report is stale.
-      if (p.op.op === 'click' || p.op.op === 'type' || p.op.op === 'select' || p.op.op === 'check') focused = null;
-      else if (typeof res.focused === 'string') focused = res.focused;
+      // Only a Tab reports focus; any later step that could move it (click, type, hover, another key) makes the report stale.
+      if (typeof res.focused === 'string') focused = res.focused;
+      else if (p.op.op !== 'scroll') focused = null;
       done.push(p.name);
       if (p.confirm === 'note' || (p.confirm === 'quiet' && confirm === null)) confirm = p.confirm;
       const op = p.op;
@@ -961,6 +996,7 @@ export class FastBrowserEngine implements BrowserPort {
     }
     const passwordTyped = plan.some((p) => p.masked);
     const body = await this.after(ctx, shown?.state ?? null, unverified, origin, passwordTyped, confirm);
+    if (body.startsWith('changed: page navigated')) focused = null;
     return [
       `did: ${done.join(', ')}`,
       ...(navigated ? [navigated] : []),

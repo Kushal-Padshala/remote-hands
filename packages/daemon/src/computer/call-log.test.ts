@@ -45,4 +45,16 @@ describe('call log', () => {
     appendCallRecord(home, { at: 'after', tool: 'browser_do', ms: 1, ok: true });
     expect(fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l).at)).toEqual(['after']);
   });
+
+  it('starts a record on a fresh line after a torn write, so the next record stays readable', () => {
+    const file = callLogPath(home);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '{"at":"partia');
+    appendCallRecord(home, { at: 'after', tool: 'browser_do', ms: 1, ok: true });
+    appendCallRecord(home, { at: 'again', tool: 'browser_do', ms: 1, ok: true });
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    expect(lines).toHaveLength(3);
+    expect(JSON.parse(lines[1]!).at).toBe('after');
+    expect(JSON.parse(lines[2]!).at).toBe('again');
+  });
 });

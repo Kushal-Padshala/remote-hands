@@ -1248,17 +1248,25 @@ describe('action hints', () => {
       JSON.stringify({ ok: true, opened: true }),
       JSON.stringify({ ok: true, focused: 'Second' }),
       JSON.stringify({ ok: true, focused: 'Go "now"' }),
-      JSON.stringify({ ok: true, opened: true }),
     ];
     const out = await engine.do([
       { op: 'hover', index: 12 },
       { op: 'press', key: 'Tab' },
       { op: 'press', key: 'Tab' },
-      { op: 'hover', index: 12 },
     ]);
     const lines = out.split('\n');
     expect(lines.filter((l) => l === NOTE)).toHaveLength(1);
     expect(lines.at(-1)).toBe('focus now on: "Go \\"now\\""');
+  });
+
+  it('drops the focus line when any later step (hover, another key) could have moved focus', async () => {
+    await engine.snapshot();
+    t.actions = [JSON.stringify({ ok: true, focused: 'Second' }), JSON.stringify({ ok: true })];
+    expect(await engine.do([{ op: 'press', key: 'Tab' }, { op: 'hover', index: 12 }])).not.toContain('focus now on');
+    t.actions = [JSON.stringify({ ok: true, focused: 'Second' }), JSON.stringify({ ok: true })];
+    expect(await engine.do([{ op: 'press', key: 'Tab' }, { op: 'press', key: 'Escape' }])).not.toContain('focus now on');
+    t.actions = [JSON.stringify({ ok: true, focused: 'Second' }), JSON.stringify({ ok: true })];
+    expect(await engine.do([{ op: 'press', key: 'Tab' }, { op: 'scroll', delta: 100 }])).toContain('focus now on: "Second"');
   });
 });
 
@@ -1339,5 +1347,57 @@ describe('do: label safety (review fixes)', () => {
     t.fail = new BrowserAutomationError('js_disabled', 'Google Chrome', 'JS off in Chrome.');
     expect(await stuck.do([{ op: 'click', target: 'Next' }])).toBe('legacy:do');
     expect(t.actionEvals()).toHaveLength(0);
+  });
+});
+
+describe('do and find: fresh labels, deadline, notes (review fixes)', () => {
+  const save = (...nodes: number[]): string =>
+    JSON.stringify(page({ actions: nodes.map((n) => ({ node: n, role: 'button', label: 'Save', kind: 'click', value: '' })) }));
+
+  it('matches labels against a fresh look, so a second Save that appeared after the last state is seen', async () => {
+    t.snapshots = [save(21)];
+    await engine.snapshot();
+    t.snapshots = [save(21, 22)];
+    await expect(engine.do([{ op: 'click', target: 'Save' }])).rejects.toThrow(
+      'step 1 click invalid: target "Save" is ambiguous (matches [21] button "Save", [22] button "Save"); use index. No steps were run.',
+    );
+    expect(t.actionEvals()).toHaveLength(0);
+  });
+
+  it('keeps numeric ids working after the fresh look when the element is still there', async () => {
+    t.snapshots = [save(21, 22)];
+    await engine.snapshot();
+    await engine.do([{ op: 'click', index: 22 }, { op: 'wait', ms: 1 }]);
+    t.snapshots = [save(21, 22)];
+    await engine.do([{ op: 'click', index: 21 }]);
+    expect(t.actionEvals().map(opOf).map((o) => o.node)).toEqual([22, 21]);
+  });
+
+  it('does not click after an approval wait that ran past the call deadline', async () => {
+    const slow = new FastBrowserEngine({
+      transport: t, legacy, env: {}, now: () => clock, sleep: async (ms) => { clock += ms; },
+      gate: async () => { clock += 61_000; },
+    });
+    await slow.snapshot();
+    await expect(slow.do([{ op: 'click', index: 12 }])).rejects.toThrow('this call ran out of time (60 s); the click was not performed');
+    expect(t.actionEvals()).toHaveLength(0);
+  });
+
+  it('starts no new step once the call deadline has passed', async () => {
+    await engine.snapshot();
+    t.actions = [(): string => { clock += 61_000; return JSON.stringify({ ok: true, label: 'x' }); }];
+    await expect(engine.do([{ op: 'check', index: 9, checked: true }, { op: 'click', index: 12 }])).rejects.toThrow(
+      'step 2 click failed: this call ran out of time (60 s); remaining steps not run (step 1 ok)',
+    );
+    expect(t.actionEvals()).toHaveLength(1);
+    // the deadline belongs to one call: the next call starts fresh
+    await expect(engine.do([{ op: 'click', index: 12 }])).resolves.toContain('did: click');
+  });
+
+  it('browser_find repeats the notes about frames it cannot read and a page it could not read fully', async () => {
+    t.snapshots = [JSON.stringify(page({ frames_blocked: 2, scan_truncated: true }))];
+    const out = await engine.find('Next');
+    expect(out).toContain('2 embedded frames cannot be read here');
+    expect(out).toContain('note: this page is very large');
   });
 });

@@ -68,6 +68,23 @@ describe('createComputerMcpServer', () => {
     expect(Object.fromEntries(records.map((r) => [r.tool, r.ms]))).toEqual({ slow: 400, quick: 7 });
   });
 
+  it('times with a monotonic clock by default, so wall-clock jumps do not reach the log', async () => {
+    const records: ToolCallRecord[] = [];
+    let wall = 50_000_000;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => (wall -= 60_000));
+    try {
+      const client = await connect(
+        [{ name: 't', description: 'd', inputSchema: {}, handler: async () => { await new Promise((r) => setTimeout(r, 25)); return 'ok'; } }],
+        { onCall: (r) => records.push(r) },
+      );
+      await client.callTool({ name: 't', arguments: {} });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(records[0]!.ms).toBeGreaterThanOrEqual(15);
+    expect(records[0]!.ms).toBeLessThan(2000);
+  });
+
   it('never reports a negative duration, even if the clock misbehaves', async () => {
     const records: ToolCallRecord[] = [];
     let clock = 1000;

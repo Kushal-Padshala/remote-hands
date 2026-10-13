@@ -46,15 +46,16 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   const MAX_NESTED_CONTROLS = 2000;
   const MAX_NESTED_TEXT_VISITS = 20000;
   const MAX_CONTROLS = 250;
-  const MAX_OPTIONS_PER_SELECT = 120;
+  const MAX_OPTIONS_PER_SELECT = 500;
   const hostOf = (e) => { const r = e.getRootNode && e.getRootNode(); return r && r.host ? r.host : null; };
   const frameOf = (e) => {
     const view = e.ownerDocument && e.ownerDocument.defaultView;
     try { return view && view !== window ? view.frameElement : null; } catch (err) { return null; }
   };
   const closestDeep = (e, sel) => {
-    for (let n = e; n; n = n.parentElement || hostOf(n) || frameOf(n)) {
-      if (typeof n.matches === 'function' && n.matches(sel)) return n;
+    for (let n = e; n; n = hostOf(n) || frameOf(n)) {
+      const hit = typeof n.closest === 'function' ? n.closest(sel) : null;
+      if (hit) return hit;
     }
     return null;
   };
@@ -145,14 +146,20 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
       }
       if (host.tagName !== 'IFRAME' && host.tagName !== 'FRAME') continue;
       const r = host.getBoundingClientRect();
-      const box = intersect(clip, { l: dx + r.left, t: dy + r.top, r: dx + r.right, b: dy + r.bottom });
+      // The child's viewport is the frame's content box (inside its border).
+      const cl = host.clientLeft || 0, ct = host.clientTop || 0;
+      const cw = host.clientWidth || Math.max(0, r.width - 2 * cl);
+      const ch = host.clientHeight || Math.max(0, r.height - 2 * ct);
+      const box = intersect(clip, { l: dx + r.left + cl, t: dy + r.top + ct, r: dx + r.left + cl + cw, b: dy + r.top + ct + ch });
       if (box.r <= box.l || box.b <= box.t || !visible(host)) continue;
+      // A scaled or rotated frame cannot be mapped by adding offsets: do not guess, report it unreadable.
+      const scaled = host.offsetWidth > 0 && Math.abs(r.width - host.offsetWidth) > 1;
       let doc = null;
-      if (depth < MAX_NEST) {
+      if (depth < MAX_NEST && !scaled) {
         try { doc = host.contentDocument; } catch (err) { doc = null; }
       }
       if (doc && doc.body) {
-        gather(doc, dx + r.left + (host.clientLeft || 0), dy + r.top + (host.clientTop || 0), depth + 1, box);
+        gather(doc, dx + r.left + cl, dy + r.top + ct, depth + 1, box);
       } else if (r.width >= 50 && r.height >= 50) {
         blocked++;
       }
@@ -177,13 +184,13 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
     }
     if (['checkbox', 'radio'].includes(e.type)) base.checked = String(e.checked);
     if (e.tagName === 'SELECT') {
-      let shownOptions = 0;
-      for (const o of e.options) {
-        if (!o.selected && !o.disabled && !o.closest('optgroup[disabled]')) {
-          if (light && ++shownOptions > MAX_OPTIONS_PER_SELECT) break;
-          actions.push({ ...base, kind: 'select', value: o.value,
-            current_value: [...e.selectedOptions].map((opt) => opt.label).join(', '), label: base.label + ' → ' + o.label });
-        }
+      const eligible = [...e.options].filter((o) => !o.selected && !o.disabled && !o.closest('optgroup[disabled]'));
+      const listedOptions = light ? eligible.slice(0, MAX_OPTIONS_PER_SELECT) : eligible;
+      const cut = eligible.length - listedOptions.length;
+      const current = [...e.selectedOptions].map((opt) => opt.label).join(', ');
+      for (const o of listedOptions) {
+        actions.push({ ...base, kind: 'select', value: o.value, current_value: current, label: base.label + ' → ' + o.label,
+          ...(cut > 0 ? { options_omitted: cut } : {}) });
       }
     } else {
       const editable = !e.readOnly && e.getAttribute('aria-readonly') !== 'true' &&
@@ -208,7 +215,10 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
       if (tr.depth > 0 && ++visits > MAX_NESTED_TEXT_VISITS) { scanTruncated = true; break; }
       const value = node.textContent.trim();
       const parent = node.parentElement || (node.parentNode && node.parentNode.host) || null;
-      if (!value || !parent || parent.closest('script,style,noscript,template') || !visible(parent)) continue;
+      if (!value || !parent || parent.closest('script,style,noscript,template')) continue;
+      // Text placed directly in a shadow root has the host as context; the host may have no box of
+      // its own (display: contents), so only explicit hiding applies there.
+      if (node.parentElement ? !visible(parent) : closestDeep(parent, '[aria-hidden="true"],[inert]')) continue;
       range.selectNodeContents(node);
       const r = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect() : { width: 10, height: 10, bottom: 10, top: 1, right: 10, left: 1 };
       if (r.width > 0 && r.height > 0 && r.bottom + tr.dy > tr.clip.t && r.top + tr.dy < tr.clip.b && r.right + tr.dx > tr.clip.l && r.left + tr.dx < tr.clip.r) {

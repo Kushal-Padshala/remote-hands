@@ -89,3 +89,14 @@ describe('resolveTarget', () => {
     expect(r.match(/\[\d+\]/g)).toHaveLength(5);
   });
 });
+
+describe('resolveTarget word boundary (Unicode)', () => {
+  const field = (label: string): PageState => state([el(1, 'textbox', label)]);
+
+  it('treats a following letter outside the BMP or a combining mark as part of the word', () => {
+    expect(resolveTarget(field('Email\u{1D55A}ng list'), 'type', 'email')).toMatchObject({ ok: false });
+    expect(resolveTarget(field('Email\u0301 list'), 'type', 'email')).toMatchObject({ ok: false });
+    expect(resolveTarget(field('Email'), 'type', 'email')).toMatchObject({ ok: true });
+    expect(resolveTarget(field('Email: work'), 'type', 'email')).toMatchObject({ ok: true });
+  });
+});

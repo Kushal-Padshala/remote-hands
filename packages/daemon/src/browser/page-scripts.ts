@@ -70,9 +70,10 @@ const PRELUDE = String.raw`
   };
   const composedClosest = (e, sel) => {
     for (let n = e; n; ) {
-      if (n.matches && n.matches(sel)) return n;
-      let next = n.parentElement;
-      if (!next) { const r = n.getRootNode && n.getRootNode(); next = r && r.host ? r.host : null; }
+      const hit = n.closest ? n.closest(sel) : null;
+      if (hit) return hit;
+      const r = n.getRootNode && n.getRootNode();
+      let next = r && r.host ? r.host : null;
       if (!next) {
         const v = n.ownerDocument && n.ownerDocument.defaultView;
         try { next = v && v !== window ? v.frameElement : null; } catch (err) { next = null; }
@@ -151,12 +152,26 @@ const PRELUDE = String.raw`
     walk(document.documentElement || document.body, 0);
     return found;
   };
+  // Sequential order value of a control, or null when Tab skips it. An explicit tabindex wins;
+  // without one, editing hosts (contenteditable) take focus even though tabIndex reads -1.
+  const tabOrder = (e) => {
+    const attr = e.getAttribute('tabindex');
+    const explicit = attr !== null && attr.trim() !== '' && !Number.isNaN(Number(attr)) ? Math.trunc(Number(attr)) : null;
+    if (explicit !== null) return explicit < 0 ? null : explicit;
+    if (isEditableHost(e)) return 0;
+    return e.tabIndex >= 0 ? e.tabIndex : null;
+  };
   const tabbables = () => {
-    const ok = flatFocusables().filter((e) =>
-      e.tabIndex >= 0 && !e.matches(':disabled') && !composedClosest(e, '[aria-disabled="true"]') &&
-      !(e.tagName === 'INPUT' && e.type === 'hidden') && visibleNow(e));
-    const positive = ok.filter((e) => e.tabIndex > 0).sort((a, b) => a.tabIndex - b.tabIndex);
-    return positive.concat(ok.filter((e) => e.tabIndex === 0));
+    const ok = [];
+    for (const e of flatFocusables()) {
+      const order = tabOrder(e);
+      if (order === null || e.matches(':disabled') || composedClosest(e, '[aria-disabled="true"]')) continue;
+      if (e.tagName === 'INPUT' && e.type === 'hidden') continue;
+      if (visibleNow(e)) ok.push({ e, order });
+    }
+    // Positive values first (page-wide approximation of scoped focus navigation), then the rest in tree order.
+    const positive = ok.filter((x) => x.order > 0).sort((a, b) => a.order - b.order);
+    return positive.concat(ok.filter((x) => x.order === 0)).map((x) => x.e);
   };
   // Moves focus to the next (or previous) control that actually accepts it and returns that
   // control; a candidate the browser refuses is skipped. Null when focus could not move.
@@ -230,12 +245,15 @@ const CLICK = String.raw`
   mouse(el, 'mousedown', false);
   mouse(el, 'pointerup', true);
   mouse(el, 'mouseup', false);
-  // A window-level bubble listener runs after the page's own handlers: if one of them
-  // cancelled the click, the link does not open anything.
+  // Keep the click event itself (a capture listener on the window sees it first) and read its
+  // final state afterwards: a page handler that cancelled it, even with stopPropagation, means
+  // the link opens nothing.
   const view = viewOf(el);
-  const watch = (ev) => { if (ev.defaultPrevented) opened = false; };
-  view.addEventListener('click', watch);
-  try { el.click(); } finally { view.removeEventListener('click', watch); }
+  let clickEvent = null;
+  const record = (ev) => { clickEvent = ev; };
+  view.addEventListener('click', record, true);
+  try { el.click(); } finally { view.removeEventListener('click', record, true); }
+  if (clickEvent && clickEvent.defaultPrevented) opened = false;
   const result = { ok: true, label: current, navigated: false };
   if (opened) result.opened = true;
   return out(result);
@@ -456,9 +474,11 @@ export function buildExtractScript(maxChars: number): string {
     if (n.nodeType === 3) { add(n.textContent || ''); return; }
     if (n.nodeType !== 1 || SKIP.includes(n.tagName)) return;
     if (n.tagName === 'SLOT' && typeof n.assignedNodes === 'function') {
-      // A slot has no box of its own: show what is assigned to it, or its fallback content.
+      // A slot has no box of its own, so checkVisibility cannot judge it; explicit hiding still applies.
+      if (n.hasAttribute('hidden') || n.getAttribute('aria-hidden') === 'true' || n.hasAttribute('inert')) return;
+      if (typeof getComputedStyle === 'function' && getComputedStyle(n).display === 'none') return;
       const assigned = n.assignedNodes({ flatten: true });
-      for (const c of (assigned.length > 0 ? assigned : n.childNodes)) walk(c, depth);
+      for (const c of (assigned.length > 0 ? assigned : n.childNodes)) { if (truncated) return; walk(c, depth); }
       return;
     }
     if (hidden(n)) return;
@@ -470,7 +490,7 @@ export function buildExtractScript(maxChars: number): string {
     if (n.tagName === 'TEXTAREA') { if (n.value) add(n.value); return; }
     if (n.shadowRoot && depth < 3) {
       // The shadow tree is what is rendered; light children only appear where a slot places them.
-      for (const c of n.shadowRoot.childNodes) walk(c, depth + 1);
+      for (const c of n.shadowRoot.childNodes) { if (truncated) return; walk(c, depth + 1); }
       return;
     }
     if ((n.tagName === 'IFRAME' || n.tagName === 'FRAME') && depth < 3) {
@@ -478,7 +498,7 @@ export function buildExtractScript(maxChars: number): string {
       try { d = n.contentDocument; } catch (e) { d = null; }
       if (d && d.body) walk(d.body, depth + 1);
     }
-    for (const c of n.childNodes) walk(c, depth);
+    for (const c of n.childNodes) { if (truncated) return; walk(c, depth); }
   };
   if (root) walk(root, 0);
   if (truncated || text.length > max) {

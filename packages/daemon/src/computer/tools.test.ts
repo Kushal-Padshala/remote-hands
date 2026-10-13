@@ -409,6 +409,9 @@ describe('buildComputerTools', () => {
     expect(d).toMatch(/not a substitute/);
     expect(d).toMatch(/at most 30000 in total/);
     expect(d).toMatch(/currently visible on screen/);
+    expect(d).toMatch(/fresh look at the page/);
+    expect(d).toMatch(/60 seconds/);
+    expect(d).toMatch(/positive tabindex values are ordered page-wide/);
   });
 
   it('browser_find query description does not promise surrounding-text matching', () => {

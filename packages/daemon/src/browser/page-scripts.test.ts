@@ -902,9 +902,14 @@ describe('actions and extract inside shadow roots and frames', () => {
     const frame = addFrame(p, '<div id="ed" contenteditable="true" role="textbox" aria-label="Reply"></div>');
     const idoc = frame.contentDocument;
     const calls: Array<[string, unknown]> = [];
+    idoc.getElementById('ed').textContent = 'old text';
+    const covered: string[] = [];
     idoc.execCommand = (cmd: string, _ui: boolean, val: unknown) => {
       calls.push([cmd, val]);
-      idoc.getElementById('ed').textContent = String(val);
+      const sel = idoc.defaultView.getSelection();
+      const ed = idoc.getElementById('ed');
+      covered.push(sel.rangeCount === 1 && ed.contains(sel.getRangeAt(0).commonAncestorContainer) ? sel.getRangeAt(0).toString() : '(elsewhere)');
+      ed.textContent = String(val);
       return true;
     };
     Object.defineProperty(idoc.defaultView.HTMLElement.prototype, 'innerText', { configurable: true, get(this: any) { return this.textContent; } });
@@ -918,6 +923,7 @@ describe('actions and extract inside shadow roots and frames', () => {
     expect(p.run({ op: 'type', node: reply.node, label: 'Reply', text: 'Thanks!' })).toMatchObject({ ok: true });
     expect(calls).toEqual([['insertText', 'Thanks!']]);
     expect(idoc.getElementById('ed').textContent).toBe('Thanks!');
+    expect(covered).toEqual(['old text']); // the frame's own selection covered the editor's existing contents
   });
 
   it('press Enter goes to the focused control inside a shadow root', () => {
@@ -1159,13 +1165,15 @@ describe('snapshot hardening (review fixes)', () => {
     expect(light(p).frames_blocked).toBeGreaterThanOrEqual(1);
   });
 
-  it('counts a select as one control against the 250 cap and lists at most 120 of its options', () => {
-    const options = Array.from({ length: 400 }, (_, i) => `<option value="${i}">Option ${i}</option>`).join('');
+  it('counts a select as one control against the 250 cap and lists at most 500 of its options, saying how many it left out', () => {
+    const options = Array.from({ length: 800 }, (_, i) => `<option value="${i}">Option ${i}</option>`).join('');
     const p = makePage(`<select aria-label="Year">${options}</select><button>After the select</button>`);
     const snap = light(p);
     const labels = snap.actions.map((a: any) => a.label);
     expect(labels).toContain('After the select');
-    expect(labels.filter((l: string) => l.startsWith('Year → ')).length).toBeLessThanOrEqual(120);
+    const listed = snap.actions.filter((a: any) => a.label.startsWith('Year → '));
+    expect(listed).toHaveLength(500);
+    expect(listed[0].options_omitted).toBe(299);
     expect(snap.omitted_actions).toBe(0);
   });
 
@@ -1309,4 +1317,85 @@ describe('extract: slots and budget (review fixes)', () => {
     expect(text.endsWith('\u2026')).toBe(true);
     expect(text).not.toContain('end');
   }, 60_000);
+});
+
+describe('snapshot geometry and text (round 2 fixes)', () => {
+  const light = (p: Page): any => p.evalJson(buildSnapshotCall());
+  const rectAt = (x: number) => () => ({ x, y: 10, left: x, top: 10, width: 20, height: 20, right: x + 20, bottom: 30 });
+
+  it('clips a frame to its content box, inside its border', () => {
+    const p = makePage('');
+    p.win.CSS = {}; // switch on the geometry checks jsdom normally skips
+    const frame = addFrame(p, '<button id="in">Inside</button><button id="out">Outside</button>', { left: 0, top: 0, width: 200, height: 200 });
+    for (const [k, v] of Object.entries({ clientLeft: 50, clientTop: 50, clientWidth: 100, clientHeight: 100 })) {
+      Object.defineProperty(frame, k, { value: v });
+    }
+    frame.contentDocument.getElementById('in').getBoundingClientRect = rectAt(10);
+    frame.contentDocument.getElementById('out').getBoundingClientRect = rectAt(110);
+    const labels = light(p).actions.map((a: any) => a.label);
+    expect(labels).toContain('Inside');
+    expect(labels).not.toContain('Outside');
+  });
+
+  it('does not guess inside a scaled frame: it is reported as unreadable instead', () => {
+    const p = makePage('');
+    const frame = addFrame(p, '<button>Scaled</button>', { left: 0, top: 0, width: 150, height: 100 });
+    Object.defineProperty(frame, 'offsetWidth', { value: 300 });
+    const snap = light(p);
+    expect(snap.actions.map((a: any) => a.label)).not.toContain('Scaled');
+    expect(snap.frames_blocked).toBe(1);
+  });
+
+  it('reads text placed directly in a shadow root even when the host has no box, unless the host is hidden', () => {
+    const p = makePage('<div id="a"></div><div id="b" aria-hidden="true"></div>');
+    for (const id of ['a', 'b']) {
+      const host = p.doc.getElementById(id);
+      host.checkVisibility = () => false; // a display: contents host has no box
+      host.attachShadow({ mode: 'open' }).append(id === 'a' ? 'Shown text' : 'Hidden text');
+    }
+    const text = light(p).text as string;
+    expect(text).toContain('Shown text');
+    expect(text).not.toContain('Hidden text');
+  });
+});
+
+describe('page scripts (round 2 fixes)', () => {
+  it('Tab stops on a contenteditable editor between two inputs, but not on one with tabindex -1', () => {
+    const p = makePage(
+      '<input aria-label="First"><div contenteditable="true" aria-label="Reply"></div><div contenteditable="true" tabindex="-1" aria-label="Skipped"></div><input aria-label="Last">',
+      { contentEditable: true },
+    );
+    p.doc.querySelector('input').focus();
+    expect((p.run({ op: 'press', key: 'Tab' }) as any).focused).toBe('Reply');
+    expect((p.run({ op: 'press', key: 'Tab' }) as any).focused).toBe('Last');
+    expect((p.run({ op: 'press', key: 'Shift+Tab' }) as any).focused).toBe('Reply');
+  });
+
+  it('omits opened when a handler cancels the click and stops propagation, also inside a shadow root', () => {
+    const cancel = (e: any) => { e.preventDefault(); e.stopPropagation(); };
+    const light = makePage('<a id="l" href="#d" target="_blank">Docs</a>');
+    light.doc.getElementById('l').addEventListener('click', cancel);
+    light.snapshot();
+    expect((light.run({ op: 'click', node: light.node('#l'), label: 'Docs' }) as any).opened).toBeUndefined();
+
+    const shadow = makePage('<div id="host"></div>');
+    const root = shadow.doc.getElementById('host').attachShadow({ mode: 'open' });
+    root.innerHTML = '<a id="l" href="#d" target="_blank">Docs</a>';
+    root.getElementById('l').addEventListener('click', cancel);
+    const snap = shadow.evalJson(buildSnapshotCall());
+    const docs = snap.actions.find((a: any) => a.label === 'Docs');
+    expect(shadow.run({ op: 'click', node: docs.node, label: 'Docs' })).toMatchObject({ ok: true });
+    expect((shadow.run({ op: 'click', node: docs.node, label: 'Docs' }) as any).opened).toBeUndefined();
+  });
+
+  it('extract skips a slot that is hidden, aria-hidden, inert or display none, but still shows a plain one', () => {
+    const p = makePage('<main><x-a id="a">Assigned</x-a></main>');
+    const root = p.doc.getElementById('a').attachShadow({ mode: 'open' });
+    for (const attrs of ['hidden', 'aria-hidden="true"', 'inert', 'style="display:none"']) {
+      root.innerHTML = `<slot ${attrs}>Fallback</slot>`;
+      expect(p.evalJson(buildExtractScript(2000)).text).toBe('');
+    }
+    root.innerHTML = '<slot>Fallback</slot>';
+    expect(p.evalJson(buildExtractScript(2000)).text).toBe('Assigned');
+  });
 });

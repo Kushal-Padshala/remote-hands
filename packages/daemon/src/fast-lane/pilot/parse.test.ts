@@ -57,7 +57,7 @@ describe('parseRendered: real engine samples', () => {
   });
 
   it('keeps elements and records the unreadable-frames note as a plain note', () => {
-    const note = 'note: 1 embedded frame cannot be read here (from another website or sandboxed); use desktop_snapshot for that part';
+    const note = 'note: 1 embedded frame cannot be read here (other website, sandboxed or nested too deeply); use desktop_snapshot for that part';
     const v = parseRendered(`${FULL}\n${note}`);
     expect(v.elements.map((e) => e.id)).toEqual(['1', '2', '3', '4', '5', '6', 'wait']);
     expect(v.notes).toEqual([note]);

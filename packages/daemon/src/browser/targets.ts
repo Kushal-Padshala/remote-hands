@@ -37,11 +37,13 @@ function listed(list: PageElement[]): string {
   return more > 0 ? `${shown.join(', ')} and ${more} more` : shown.join(', ');
 }
 
-const BOUNDARY = /[\p{L}\p{N}]/u;
+const BOUNDARY = /[\p{L}\p{N}\p{M}]/u;
 
 /** `label` starts with `want` and the match ends at a word boundary ("email" in "email address", not "emailing"). */
 function startsWithWord(label: string, want: string): boolean {
-  return label.startsWith(want) && !BOUNDARY.test(label.charAt(want.length));
+  if (!label.startsWith(want)) return false;
+  const next = label.codePointAt(want.length);
+  return next === undefined || !BOUNDARY.test(String.fromCodePoint(next));
 }
 
 /**

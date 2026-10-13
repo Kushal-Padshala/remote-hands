@@ -13,6 +13,8 @@ export interface PageElement {
   value?: string;
   checked?: boolean;
   options?: string[];
+  /** Dropdown choices the page script did not list (very long dropdowns). */
+  optionsOmitted?: number;
 }
 
 export interface PageState {
@@ -45,10 +47,18 @@ const DEFAULT_TEXT_CHARS = 1200;
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
 export function framesNote(n: number): string {
-  return `note: ${n} embedded ${n === 1 ? 'frame' : 'frames'} cannot be read here (from another website or sandboxed); use desktop_snapshot for that part`;
+  return `note: ${n} embedded ${n === 1 ? 'frame' : 'frames'} cannot be read here (other website, sandboxed or nested too deeply); use desktop_snapshot for that part`;
 }
 
 const SCAN_TRUNCATED_NOTE = 'note: this page is very large; some nested content was not read';
+
+/** The notes a page state carries (unreadable frames, incomplete read), for any rendering of it. */
+export function stateNotes(state: PageState): string[] {
+  return [
+    ...(state.blockedFrames ? [framesNote(state.blockedFrames)] : []),
+    ...(state.scanTruncated ? [SCAN_TRUNCATED_NOTE] : []),
+  ];
+}
 
 function baseLabel(label: string): string {
   const i = label.lastIndexOf(ARROW);
@@ -86,6 +96,7 @@ export function normalizeSnapshot(raw: unknown): PageState {
       const current = str(a.current_value);
       const el: PageElement = { id: node, node, role: 'select', label: baseLabel(label), kind: 'select', value: current };
       el.options = current ? [current, optionLabel(label)] : [optionLabel(label)];
+      if (typeof a.options_omitted === 'number' && a.options_omitted > 0) el.optionsOmitted = Math.floor(a.options_omitted);
       byNode.set(node, el);
       elements.push(el);
       continue;
@@ -134,7 +145,7 @@ export function renderElement(el: PageElement, maxOptions = MAX_OPTIONS): string
   if (el.checked === true) line += ' [checked]';
   if (el.options && el.options.length > 0) {
     const shown = el.options.slice(0, maxOptions).map((o) => clean(o));
-    const more = el.options.length - shown.length;
+    const more = el.options.length - shown.length + (el.optionsOmitted ?? 0);
     line += ` options: ${shown.join(' | ')}${more > 0 ? ` | …(+${more})` : ''}`;
   }
   return line;
@@ -167,8 +178,7 @@ export function renderFull(state: PageState, opts: RenderOpts): string {
   if (state.omitted) {
     lines.push(`(${state.omitted} more elements not listed: only the first 250 are captured; use browser_find or scroll)`);
   }
-  if (state.blockedFrames) lines.push(framesNote(state.blockedFrames));
-  if (state.scanTruncated) lines.push(SCAN_TRUNCATED_NOTE);
+  lines.push(...stateNotes(state));
   return lines.join('\n');
 }
 
@@ -202,13 +212,20 @@ export function renderDelta(prev: PageState | null, next: PageState, opts: Rende
   // An unreadable frame that appeared (or changed count) is news the agent must hear even when
   // nothing else moved; one that went away needs no announcement.
   const framesChanged = (next.blockedFrames ?? 0) > 0 && next.blockedFrames !== prev.blockedFrames;
+  const framesGone = (prev.blockedFrames ?? 0) > 0 && !next.blockedFrames;
+  const scanChanged = Boolean(next.scanTruncated) !== Boolean(prev.scanTruncated);
   const out = [`${header(next)} (same page)`];
-  if (lines.length === 0 && !textChanged && !framesChanged) return `${out[0]}\nno visible change`;
+  if (lines.length === 0 && !textChanged && !framesChanged && !framesGone && !scanChanged) return `${out[0]}\nno visible change`;
   if (textChanged) {
     const t = textLine(next.text, opts.textChars ?? DEFAULT_TEXT_CHARS);
     if (t) out.push(t);
   }
-  return [...out, ...lines, `(${unchanged} unchanged)`, ...(framesChanged ? [framesNote(next.blockedFrames!)] : [])].join('\n');
+  const news = [
+    ...(framesChanged ? [framesNote(next.blockedFrames!)] : []),
+    ...(framesGone ? ['note: the frames that could not be read are gone'] : []),
+    ...(scanChanged ? [next.scanTruncated ? SCAN_TRUNCATED_NOTE : 'note: the whole page is being read again'] : []),
+  ];
+  return [...out, ...lines, `(${unchanged} unchanged)`, ...news].join('\n');
 }
 
 function words(s: string): string[] {

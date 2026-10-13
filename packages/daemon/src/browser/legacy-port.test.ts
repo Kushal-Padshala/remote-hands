@@ -137,4 +137,14 @@ describe('LegacyBrowserPort (previous ComputerSession behaviour)', () => {
     await expect(p.do(Array.from({ length: 30 }, () => ({ op: 'wait' as const, ms: 1 })))).resolves.toContain('did: wait');
     await expect(p.do(Array.from({ length: 31 }, () => ({ op: 'wait' as const, ms: 1 })))).rejects.toThrow('at most 30 steps');
   });
+
+  it('starts no new step once the call has run for 60 s', async () => {
+    let t = 0;
+    const d = makeDriver({ clickIndex: vi.fn(async () => { t += 61_000; return { success: true, label: 'Go' }; }) });
+    const p = new LegacyBrowserPort({ driver: d, settleMs: 0, sleep: async () => {}, now: () => t });
+    await expect(p.do([{ op: 'click', index: 1 }, { op: 'click', index: 2 }])).rejects.toThrow(
+      'step 2 click failed: this call ran out of time (60 s); remaining steps not run (step 1 ok)',
+    );
+    expect(d.clickIndex).toHaveBeenCalledTimes(1);
+  });
 });
