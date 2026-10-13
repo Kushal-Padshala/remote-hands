@@ -24,6 +24,8 @@ export interface PageState {
   omitted?: number;
   /** Browser the page was read from (shown in the header). */
   browser?: string;
+  /** Visible frames from another site that the page script cannot read. */
+  blockedFrames?: number;
 }
 
 export interface RenderOpts {
@@ -90,6 +92,9 @@ export function normalizeSnapshot(raw: unknown): PageState {
   }
   const state: PageState = { url: str(obj.url), title: str(obj.title), text: str(obj.text), elements };
   if (typeof obj.omitted_actions === 'number' && obj.omitted_actions > 0) state.omitted = obj.omitted_actions;
+  if (typeof obj.frames_blocked === 'number' && Number.isFinite(obj.frames_blocked) && obj.frames_blocked >= 1) {
+    state.blockedFrames = Math.floor(obj.frames_blocked);
+  }
   return state;
 }
 
@@ -152,6 +157,12 @@ export function renderFull(state: PageState, opts: RenderOpts): string {
   }
   if (state.omitted) {
     lines.push(`(${state.omitted} more elements not listed: only the first 250 are captured; use browser_find or scroll)`);
+  }
+  if (state.blockedFrames) {
+    const n = state.blockedFrames;
+    lines.push(
+      `note: ${n} embedded ${n === 1 ? 'frame' : 'frames'} from another website cannot be read here; use desktop_snapshot for that part`,
+    );
   }
   return lines.join('\n');
 }

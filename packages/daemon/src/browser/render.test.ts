@@ -198,3 +198,28 @@ describe('fix round 1 minors', () => {
     expect(clean(`${'x'.repeat(79)}😀tail`)).toBe(`${'x'.repeat(79)}…`);
   });
 });
+
+describe('blocked frames', () => {
+  const base = { url: 'https://x.test/', title: 'T', text: '', actions: [{ node: 1, role: 'button', label: 'Go', kind: 'click', value: '' }] };
+
+  it('reads frames_blocked into the page state', () => {
+    expect(normalizeSnapshot({ ...base, frames_blocked: 2 }).blockedFrames).toBe(2);
+    expect(normalizeSnapshot(base).blockedFrames).toBeUndefined();
+    expect(normalizeSnapshot({ ...base, frames_blocked: 0 }).blockedFrames).toBeUndefined();
+    expect(normalizeSnapshot({ ...base, frames_blocked: -3 }).blockedFrames).toBeUndefined();
+    expect(normalizeSnapshot({ ...base, frames_blocked: 'x' }).blockedFrames).toBeUndefined();
+  });
+
+  it('renders one note line, singular and plural, after the element lines', () => {
+    const one = renderFull(normalizeSnapshot({ ...base, frames_blocked: 1 }), { text: false }).split('\n');
+    expect(one.at(-1)).toBe('note: 1 embedded frame from another website cannot be read here; use desktop_snapshot for that part');
+    const two = renderFull(normalizeSnapshot({ ...base, frames_blocked: 2 }), { text: false }).split('\n');
+    expect(two.at(-1)).toBe('note: 2 embedded frames from another website cannot be read here; use desktop_snapshot for that part');
+    expect(renderFull(normalizeSnapshot(base), { text: false })).not.toContain('embedded frame');
+  });
+
+  it('keeps the element lines in the exact existing format', () => {
+    const lines = renderFull(normalizeSnapshot({ ...base, frames_blocked: 1 }), { text: false }).split('\n');
+    expect(lines[1]).toBe('[1] button "Go"');
+  });
+});

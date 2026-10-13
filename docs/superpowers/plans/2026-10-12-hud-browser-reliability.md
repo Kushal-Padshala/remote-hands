@@ -87,9 +87,9 @@ function nodeOf(p: Page, el: unknown): number {
   return p.win.__rhFast.ids.get(el);
 }
 
-function addFrame(p: Page, html: string, rect = { left: 10, top: 20, width: 300, height: 200 }): any {
+function addFrame(p: Page, html: string, rect = { left: 10, top: 20, width: 300, height: 200 }, parent: any = p.doc.body): any {
   const frame = p.doc.createElement('iframe');
-  p.doc.body.appendChild(frame);
+  parent.appendChild(frame);
   frame.contentDocument.body.innerHTML = html;
   frame.getBoundingClientRect = () => ({
     x: rect.left, y: rect.top, left: rect.left, top: rect.top, width: rect.width, height: rect.height,
@@ -397,7 +397,7 @@ describe('actions and extract inside shadow roots and frames', () => {
   it('extract includes shadow-root and same-origin frame text and still skips passwords', () => {
     const p = makePage('<main><p>Top text</p><div id="host"></div></main>');
     p.doc.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<p>Shadow text</p><input type="password" value="hunter2">';
-    addFrame(p, '<p>Frame text</p><input type="password" value="swordfish">');
+    addFrame(p, '<p>Frame text</p><input type="password" value="swordfish">', undefined, p.doc.querySelector('main'));
     const out = p.evalJson(buildExtractScript(2000));
     expect(out.text).toContain('Top text');
     expect(out.text).toContain('Shadow text');
