@@ -202,6 +202,7 @@ Desktop tools read and drive Mac apps through `rh-ax`, a small persistent Swift 
 - Turn it off with `RH_AX_HELPER=0`.
 - The helper never turns on `AXEnhancedUserInterface` unless a window comes back empty, and then restores it. `AXManualAccessibility` is set only for Chromium/Electron apps.
 - After an action the session waits until two looks at the window, 150 ms apart, are identical (at most 1.5 s) and returns only what changed. Approval gating is unchanged and also covers double/right click, drag, and submitting a field.
+- Big windows (Electron/Chromium apps, editors, chat): up to 3000 elements are read (3 s budget). The model view is capped at 150 lines; the cap is split evenly across the window's lists, toolbars, groups and scroll areas, and each part that lost lines ends with `… N more in [id] … (desktop_snapshot index=id)`. `index` makes the helper read only that element (`root` in the `snapshot` op; it must belong to the same app and pass the usual epoch and signature check). The zoom is kept for the actions that follow (their diffs are of that part) until its element goes away, then the whole window is read again. `{menu}` is not listed when 60% or more of the elements with actions (and at least 8) offer it, as in Chromium; `desktop_click action=menu` then right-clicks. Icon codes such as `$(check)` are dropped from control labels.
 - Live check against real apps (read only): `RH_LIVE_AX=1 RH_AX_BIN=<path to rh-ax> RH_LIVE_APP=Finder RH_LIVE_PRINT=1 npx vitest run packages/daemon/src/desktop/ax-helper.live.test.ts`.
 
 ### Swift binary cache

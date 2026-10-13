@@ -311,3 +311,112 @@ describe('fingerprint and diff', () => {
     expect(renderDiff(withHint, noHint)).toContain('- … 5 more below');
   });
 });
+
+describe('big windows and web-based apps', () => {
+  /** A window with `lists` labelled lists of `rows` rows each. */
+  function panes(lists: number, rows: number): { snapshot: AxSnapshot; listIds: number[] } {
+    reset();
+    const win = node('AXWindow', 0, { label: 'IDE' });
+    const nodes: AxNode[] = [win];
+    const listIds: number[] = [];
+    for (let l = 0; l < lists; l++) {
+      const list = node('AXList', win.id, { label: `Pane ${l + 1}` });
+      nodes.push(list);
+      listIds.push(list.id);
+      for (let r = 0; r < rows; r++) nodes.push(node('AXButton', list.id, { label: `P${l + 1} item ${r + 1}`, actions: ['AXPress'] }));
+    }
+    return { snapshot: snap(nodes), listIds };
+  }
+
+  it('cuts a big window evenly, so the last pane is not lost, and says where the rest of each pane is', () => {
+    const { snapshot, listIds } = panes(3, 100);
+    const view = buildView(snapshot, { max: 30 });
+    expect(view.lines.length).toBeLessThanOrEqual(30);
+    for (let l = 1; l <= 3; l++) expect(view.text).toContain(`P${l} item 1"`);
+    for (const id of listIds) {
+      expect(view.text).toContain(`[${id}] list "Pane ${listIds.indexOf(id) + 1}"`);
+      expect(view.text).toContain(`more in [${id}] list "Pane ${listIds.indexOf(id) + 1}" (desktop_snapshot index=${id})`);
+    }
+    expect(view.text).not.toContain('more elements hidden; pass filter');
+    expect(view.hidden).toBeGreaterThan(200);
+    // the ids of what was cut are still known
+    expect(view.byId.get(snapshot.nodes[snapshot.nodes.length - 1]!.id)).toBeDefined();
+  });
+
+  it('shows a window that fits as it is', () => {
+    const { snapshot } = panes(2, 5);
+    const view = buildView(snapshot, { max: 30 });
+    expect(view.text).not.toContain('more in');
+    expect(view.hidden).toBe(0);
+  });
+
+  it('gives a pane that fits whole all of its lines and spends the rest on the big ones', () => {
+    reset();
+    const win = node('AXWindow', 0);
+    const small = node('AXList', win.id, { label: 'Small' });
+    const big = node('AXList', win.id, { label: 'Big' });
+    const nodes = [win, small, ...Array.from({ length: 3 }, (_, i) => node('AXButton', small.id, { label: `S${i}` })), big];
+    for (let i = 0; i < 100; i++) nodes.push(node('AXButton', big.id, { label: `B${i}` }));
+    const view = buildView(snap(nodes), { max: 20 });
+    for (let i = 0; i < 3; i++) expect(view.text).toContain(`"S${i}"`);
+    expect(view.text).toContain(`more in [${big.id}] list "Big"`);
+    expect(view.text).not.toContain(`more in [${small.id}]`);
+    expect(view.lines.length).toBeLessThanOrEqual(20);
+  });
+
+  it('keeps the old tail cut when there are more panes than lines', () => {
+    const { snapshot } = panes(40, 3);
+    const view = buildView(snapshot, { max: 10 });
+    // ten lines and the line saying more exist
+    expect(view.lines.length).toBe(11);
+    expect(view.text).toContain('more elements hidden; pass filter to narrow');
+  });
+
+  it('names the part of the window that was read on its own', () => {
+    const { snapshot, listIds } = panes(1, 2);
+    const view = buildView(snapshot, { zoom: `[${listIds[0]}] list "Pane 1"` });
+    expect(view.header).toBe(`app: Finder · window: "Downloads" · inside: [${listIds[0]}] list "Pane 1"`);
+    expect(view.regions.get(listIds[0]!)).toEqual({ id: listIds[0], role: 'list', label: 'Pane 1' });
+  });
+
+  it('knows scroll areas as parts that can be read on their own', () => {
+    reset();
+    const win = node('AXWindow', 0);
+    const area = node('AXScrollArea', win.id);
+    const view = buildView(snap([win, area, node('AXButton', area.id, { label: 'Go', actions: ['AXPress'] })]));
+    expect(view.regions.get(area.id)).toEqual({ id: area.id, role: 'scroll area', label: '' });
+  });
+
+  it('does not list {menu} on every element of an app that offers it everywhere, but keeps it where it is rare', () => {
+    reset();
+    const win = node('AXWindow', 0);
+    const many = Array.from({ length: 10 }, (_, i) => node('AXButton', win.id, { label: `B${i}`, actions: ['AXPress', 'AXShowMenu'] }));
+    const view = buildView(snap([win, ...many]));
+    expect(view.text).not.toContain('{menu}');
+    expect(view.items.find((i) => i.label === 'B0')!.actionTargets).toEqual({ AXPress: many[0]!.id });
+
+    reset();
+    const w2 = node('AXWindow', 0);
+    const plain = Array.from({ length: 10 }, (_, i) => node('AXButton', w2.id, { label: `P${i}`, actions: ['AXPress'] }));
+    const special = node('AXButton', w2.id, { label: 'Tools', actions: ['AXPress', 'AXShowMenu'] });
+    expect(buildView(snap([w2, ...plain, special])).lines).toContain(`[${special.id}] button "Tools" {menu}`);
+  });
+
+  it('drops icon codes from a control label but not from the text the approver sees or from fields', () => {
+    reset();
+    const win = node('AXWindow', 0);
+    const commit = node('AXButton', win.id, { label: '$(check) Commit', actions: ['AXPress'] });
+    const field = node('AXTextField', win.id, { label: 'echo $(date)' });
+    const view = buildView(snap([win, commit, field]));
+    expect(view.lines).toContain(`[${commit.id}] button "Commit"`);
+    expect(view.items.find((i) => i.id === commit.id)!.gateLabel).toBe('$(check) Commit');
+    expect(view.text).toContain('echo $(date)');
+  });
+
+  it('drops icon codes from a row label too', () => {
+    reset();
+    const win = node('AXWindow', 0);
+    const row = node('AXRow', win.id, { label: '$(check) Commit' });
+    expect(buildView(snap([win, row])).lines).toEqual([`[${row.id}] row "Commit"`]);
+  });
+});

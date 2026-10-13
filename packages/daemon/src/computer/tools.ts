@@ -68,9 +68,13 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
     {
       name: 'desktop_snapshot',
       description:
-        'List the controls and text of a macOS app window as "[index] role \\"label\\"" with state (disabled, selected, checked, focused), values in fields ("= \\"text\\""), extra actions in braces ({open}, {menu}) and a hint line when more is scrolled out of view ("… N more below"). Indexes stay the same across snapshots and actions while the element stays on screen. Use filter to search by role/label substring. Later desktop tools must target the same app as the latest snapshot, so either omit app on all calls or pass the same app.',
-      inputSchema: { app, filter: z.string().optional().describe('Case-insensitive substring of role or label.') },
-      handler: (a) => session.desktopSnapshot(a.app, a.filter),
+        'List the controls and text of a macOS app window as "[index] role \\"label\\"" with state (disabled, selected, checked, focused), values in fields ("= \\"text\\""), extra actions in braces ({open}, {menu}) and a hint line when more is scrolled out of view ("… N more below"). Indexes stay the same across snapshots and actions while the element stays on screen. Use filter to search by role/label substring. In a big window (editors, chat and web-based apps) each list or pane is cut short and ends with "… N more in [id] … (desktop_snapshot index=id)": pass that index to read just that part in full; ids from outside it are not available until you take a full snapshot, and later actions keep showing only that part while it stays on screen. Later desktop tools must target the same app as the latest snapshot, so either omit app on all calls or pass the same app.',
+      inputSchema: {
+        app,
+        filter: z.string().optional().describe('Case-insensitive substring of role or label.'),
+        index: z.number().int().min(1).optional().describe('Read only this list, pane or scroll area from the latest snapshot.'),
+      },
+      handler: (a) => session.desktopSnapshot(a.app, a.filter, a.index),
     },
     {
       name: 'desktop_click',

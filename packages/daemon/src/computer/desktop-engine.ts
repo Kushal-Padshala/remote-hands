@@ -8,14 +8,22 @@ import { buildView, renderDiff, type View, type ViewItem } from '../desktop/ax-m
  * messages for the model.
  */
 
+/** A part of the window (a list, a pane) that is read on its own. */
+export interface Zoom {
+  id: number;
+  /** `[12] list "Changes"`: what the view header says it is inside. */
+  text: string;
+}
+
 export interface EngineSnapshot {
   app: string;
   snapshot: AxSnapshot;
   view: View;
+  zoom?: Zoom;
 }
 
 const SNAPSHOT_TIMEOUT_MS = 15_000;
-const MAX_NODES = 600;
+const MAX_NODES = 3000;
 const BUDGET_MS = 3000;
 const ACTION_TIMEOUT_MS = 10_000;
 const SETTLE_MAX_MS = 1500;
@@ -28,6 +36,9 @@ const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeou
 /** The helper's error codes that mean "use the slower path" rather than "tell the model". */
 const FALLBACK_CODES = new Set(['unavailable', 'helper_exited', 'timeout']);
 
+/** The element the model named is gone or changed. */
+export class StaleElementError extends Error {}
+
 export function describeHelperError(err: AxHelperError, app: string): Error | null {
   if (FALLBACK_CODES.has(err.code)) return null;
   switch (err.code) {
@@ -38,7 +49,7 @@ export function describeHelperError(err: AxHelperError, app: string): Error | nu
     case 'no_app':
       return new Error(app ? `No running app matches "${app}". Use desktop_open to start it.` : 'No app is in front.');
     case 'stale':
-      return new Error('That element is no longer there. Call desktop_snapshot again.');
+      return new StaleElementError('That element is no longer there. Call desktop_snapshot again.');
     default:
       return new Error(err.message || 'The accessibility helper reported an error.');
   }
@@ -58,21 +69,46 @@ export class DesktopEngine {
     return this.helper.ready();
   }
 
-  /** Reads `app` (the front app when empty), remembers it, and returns what the model reads. Null: use the slower path. */
-  async snapshot(app: string, opts: { filter?: string } = {}): Promise<string | null> {
-    const taken = await this.take(app);
+  /**
+   * Reads `app` (the front app when empty), remembers it, and returns what the model reads. With `index`, only
+   * that list, pane or element of the latest snapshot is read (and ids from outside it are forgotten).
+   * Null: use the slower path.
+   */
+  async snapshot(app: string, opts: { filter?: string; index?: number } = {}): Promise<string | null> {
+    let zoom: Zoom | undefined;
+    let target = app;
+    if (opts.index !== undefined) {
+      const last = this.last;
+      if (!last) throw new Error('No snapshot yet. Call desktop_snapshot first, then zoom into an index from it.');
+      const region = last.view.regions.get(opts.index);
+      const item = last.view.byId.get(opts.index);
+      if (!region && !item) throw new Error(`Index ${opts.index} not in last snapshot. Call desktop_snapshot again.`);
+      const role = region?.role ?? item!.role;
+      const label = region?.label ?? item!.label;
+      zoom = { id: opts.index, text: `[${opts.index}] ${role === 'hint' ? 'scroll area' : role}${label ? ` "${label}"` : ''}` };
+      target = last.app;
+    }
+    const taken = await this.take(target, zoom?.id);
     if (!taken) return null;
-    const view = buildView(taken.snapshot, opts.filter ? { filter: opts.filter } : {});
+    const viewOpts = zoom ? { zoom: zoom.text } : {};
+    const view = buildView(taken.snapshot, opts.filter ? { filter: opts.filter, ...viewOpts } : viewOpts);
     // A filtered view hides lines, so the ids the model may use are those of the whole window.
-    this.last = { app: taken.app, snapshot: taken.snapshot, view: opts.filter ? buildView(taken.snapshot) : view };
+    this.last = {
+      app: taken.app,
+      snapshot: taken.snapshot,
+      view: opts.filter ? buildView(taken.snapshot, viewOpts) : view,
+      ...(zoom ? { zoom } : {}),
+    };
     return view.text;
   }
 
-  /** Reads the window again without remembering it. Null: use the slower path. */
-  async take(app: string): Promise<{ app: string; snapshot: AxSnapshot } | null> {
+  /** Reads the window (or, with `root`, one part of it) again without remembering it. Null: use the slower path. */
+  async take(app: string, root?: number): Promise<{ app: string; snapshot: AxSnapshot } | null> {
     if (!(await this.helper.ready())) return null;
+    const epoch = this.last?.snapshot.epoch;
+    const rootPart = root === undefined ? {} : { root, ...(epoch !== undefined ? { epoch } : {}) };
     try {
-      const snapshot = await this.helper.request<AxSnapshot>({ op: 'snapshot', app, maxNodes: MAX_NODES, budgetMs: BUDGET_MS }, SNAPSHOT_TIMEOUT_MS);
+      const snapshot = await this.helper.request<AxSnapshot>({ op: 'snapshot', app, maxNodes: MAX_NODES, budgetMs: BUDGET_MS, ...rootPart }, SNAPSHOT_TIMEOUT_MS);
       return { app: snapshot.app.name || app, snapshot };
     } catch (err) {
       if (err instanceof AxHelperError) {
@@ -202,11 +238,21 @@ export class DesktopEngine {
     const started = now();
     if ((opts.firstMs ?? 120) > 0) await sleep(opts.firstMs ?? 120);
     let previous: string | null = null;
+    // a part of the window that was zoomed into stays the view while it is still there
+    let zoom = this.last?.zoom;
     for (;;) {
-      const taken = await this.take(app);
+      let taken: { app: string; snapshot: AxSnapshot } | null;
+      try {
+        taken = await this.take(app, zoom?.id);
+      } catch (err) {
+        if (!zoom || !(err instanceof StaleElementError)) throw err;
+        zoom = undefined;
+        previous = null;
+        taken = await this.take(app);
+      }
       if (!taken) return null;
-      const view = buildView(taken.snapshot);
-      this.last = { app: taken.app, snapshot: taken.snapshot, view };
+      const view = buildView(taken.snapshot, zoom ? { zoom: zoom.text } : {});
+      this.last = { app: taken.app, snapshot: taken.snapshot, view, ...(zoom ? { zoom } : {}) };
       if (view.fingerprint === previous || now() - started >= SETTLE_MAX_MS) return renderDiff(before, view);
       previous = view.fingerprint;
       if ((opts.gapMs ?? 150) > 0) await sleep(opts.gapMs ?? 150);

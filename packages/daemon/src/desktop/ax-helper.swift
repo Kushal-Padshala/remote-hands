@@ -383,6 +383,18 @@ func snapshot(_ id: Any?, _ request: [String: Any]) {
     let windowTitle = (request["window"] as? String) ?? ""
 
     let appElement = AXUIElementCreateApplication(app.processIdentifier)
+    // Reading one part of the window on its own (a list, a pane): the element must be one of this app's.
+    var zoomRoot: AXUIElement? = nil
+    if request["root"] != nil {
+        guard let element = liveElement(id, request, key: "root") else { return }
+        var owner: pid_t = 0
+        AXUIElementGetPid(element, &owner)
+        if owner != app.processIdentifier {
+            fail(id, "bad_request", "That element belongs to another app.")
+            return
+        }
+        zoomRoot = element
+    }
     if needsManualAccessibility(app), !manualAccessibilitySet.contains(app.processIdentifier) {
         AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         manualAccessibilitySet.insert(app.processIdentifier)
@@ -403,7 +415,11 @@ func snapshot(_ id: Any?, _ request: [String: Any]) {
             }
             windowInfo = info
             // Children of the window are limited to the window's own area.
-            walker.visit(w, parent: 0, clip: frame, owner: nil, depth: 0)
+            if zoomRoot == nil { walker.visit(w, parent: 0, clip: frame, owner: nil, depth: 0) }
+        }
+        if let root = zoomRoot {
+            walker.visit(root, parent: 0, clip: visibleFrame(root), owner: nil, depth: 0)
+            return (walker, window, windowInfo)
         }
         // Open menus and popovers hang off the app, not the window.
         for extra in (attribute(appElement, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
@@ -424,7 +440,7 @@ func snapshot(_ id: Any?, _ request: [String: Any]) {
     // Some older apps only build their tree when "enhanced UI" is on. Ask for it only when the tree came back nearly empty,
     // and put the previous setting back afterwards (it can disturb window managers and animations).
     var enhancedRetried = false
-    if walker.nodes.count < 6 && !walker.timedOut {
+    if zoomRoot == nil && walker.nodes.count < 6 && !walker.timedOut {
         let previous = flag(attribute(appElement, "AXEnhancedUserInterface")) ?? false
         if !previous {
             AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
@@ -447,7 +463,7 @@ func snapshot(_ id: Any?, _ request: [String: Any]) {
         "elapsedMs": Int((DispatchTime.now().uptimeNanoseconds - started) / 1_000_000),
     ]
     if let info = windowInfo { out["window"] = info }
-    if window == nil { out["noWindow"] = true }
+    if window == nil && zoomRoot == nil { out["noWindow"] = true }
     reply(id, out)
 }
 

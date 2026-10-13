@@ -29,7 +29,7 @@ function fakeHelper(over: { failOps?: Record<string, AxHelperError>; setMatches?
       if (failure) throw failure;
       switch (op.op) {
         case 'snapshot':
-          return { ok: true, epoch: 77, app: { name: 'Notes', pid: 1 }, window: { title: 'Doc' }, nodes: fake.nodes, truncated: false, timedOut: false, elapsedMs: 1 } satisfies AxSnapshot;
+          return { ok: true, epoch: 77, app: { name: 'Notes', pid: 1 }, window: { title: 'Doc' }, nodes: op.root === undefined ? fake.nodes : fake.nodes.filter((n) => n.id === op.root || n.parent === op.root), truncated: false, timedOut: false, elapsedMs: 1 } satisfies AxSnapshot;
         case 'setValue':
           if (over.setMatches !== false) fake.nodes = fake.nodes.map((n) => (n.id === op.h ? { ...n, value: String(op.value) } : n));
           return { ok: true, matches: over.setMatches !== false };
@@ -77,6 +77,26 @@ describe('ComputerSession with the fast reader', () => {
     expect(text).toContain('[2] button "Save"');
     expect(text).toContain('… 4 more below (desktop_scroll [6])');
     expect(legacyWalk).not.toHaveBeenCalled();
+  });
+
+  it('reads one part of the window when given an index from the latest snapshot', async () => {
+    const helper = fakeHelper();
+    const { session } = make(helper);
+    await session.desktopSnapshot('Notes');
+    const text = await session.desktopSnapshot('Notes', undefined, 6);
+    expect(helper.calls.filter((c) => c.op === 'snapshot').pop()).toMatchObject({ root: 6, epoch: 77 });
+    expect(text).toContain('inside: [6] scroll area');
+    expect(text).toContain('[7] row "report.pdf" {open}');
+    expect(text).not.toContain('[2] button "Save"');
+    await expect(session.desktopSnapshot('Mail', undefined, 6)).rejects.toThrow(/Last snapshot was of Notes/);
+  });
+
+  it('cannot zoom before a fast snapshot, or when the slower reader is in use', async () => {
+    const fresh = make(fakeHelper()).session;
+    await expect(fresh.desktopSnapshot('Notes', undefined, 6)).rejects.toThrow(/fast reader/);
+    const slow = make(fakeHelper({ ready: false }));
+    await slow.session.desktopSnapshot('Notes');
+    await expect(slow.session.desktopSnapshot('Notes', undefined, 1)).rejects.toThrow(/fast reader/);
   });
 
   it('uses the slower reader unchanged when the helper is not ready, fails to start, or times out', async () => {

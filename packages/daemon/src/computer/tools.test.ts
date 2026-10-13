@@ -70,7 +70,9 @@ describe('buildComputerTools', () => {
     await tool('browser_type').handler({ index: 2, text: 'hi', submit: true });
     expect(session.browserType).toHaveBeenLastCalledWith(2, 'hi', true);
     await tool('desktop_snapshot').handler({ filter: 'save' });
-    expect(session.desktopSnapshot).toHaveBeenCalledWith(undefined, 'save');
+    expect(session.desktopSnapshot).toHaveBeenCalledWith(undefined, 'save', undefined);
+    await tool('desktop_snapshot').handler({ app: 'Code', index: 12 });
+    expect(session.desktopSnapshot).toHaveBeenLastCalledWith('Code', undefined, 12);
   });
 
   it('batch runs steps in order and returns the last state', async () => {

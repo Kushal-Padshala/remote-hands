@@ -101,8 +101,17 @@ export class ComputerSession {
     }
   }
 
-  async desktopSnapshot(app?: string, filter?: string): Promise<string> {
+  async desktopSnapshot(app?: string, filter?: string, index?: number): Promise<string> {
     const engine = this.deps.engine;
+    if (index !== undefined) {
+      // reading one part of the latest window: the ids it names came from the fast reader
+      const fast = this.activeEngine('desktop_snapshot with index');
+      this.snapshotApp(app);
+      const text = await fast.snapshot('', { ...(filter ? { filter } : {}), index });
+      if (text === null) throw new Error('desktop_snapshot with index needs the fast reader, which is not available right now. Take a full desktop_snapshot instead.');
+      this.cache = { app: fast.current()?.app || this.cache?.app || '', elements: [] };
+      return text;
+    }
     if (engine) {
       const text = await engine.snapshot(app ?? '', filter ? { filter } : {});
       if (text !== null) {

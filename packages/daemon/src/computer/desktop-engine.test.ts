@@ -78,3 +78,54 @@ describe('DesktopEngine.snapshot', () => {
     expect(await engine.snapshot('Notes')).toContain('note: this app has no open window');
   });
 });
+
+describe('DesktopEngine zoom', () => {
+  const LIST: AxNode = { id: 3, parent: 1, role: 'AXList', label: 'Changes', x: 0, y: 0, width: 200, height: 300 };
+  const ROW: AxNode = { id: 4, parent: 3, role: 'AXButton', label: 'a.ts', actions: ['AXPress'], x: 0, y: 0, width: 100, height: 20 };
+  const full = (): AxSnapshot => snapshotOf([WIN, BTN, LIST, ROW], { epoch: 9 });
+  const part = (): AxSnapshot => snapshotOf([LIST, ROW], { epoch: 9 });
+
+  it('reads only the named part with the helper, names it in the header and forgets ids from outside it', async () => {
+    const helper = fake((op) => (op.root === undefined ? full() : part()));
+    const engine = new DesktopEngine(helper);
+    await engine.snapshot('Notes');
+    const text = await engine.snapshot('', { index: 3 });
+    expect(helper.calls[1]).toMatchObject({ op: 'snapshot', app: 'Notes', root: 3, epoch: 9 });
+    expect(text).toBe('app: Notes · window: "All Notes" · inside: [3] list "Changes"\n[3] list "Changes"\n  [4] button "a.ts"');
+    expect(engine.current()?.view.byId.has(2)).toBe(false);
+    expect(() => engine.item(2)).toThrow(/not in last snapshot/);
+    expect(engine.item(4).label).toBe('a.ts');
+  });
+
+  it('refuses an index that was not in the latest snapshot, and a zoom before any snapshot', async () => {
+    const engine = new DesktopEngine(fake(() => full()));
+    await expect(engine.snapshot('', { index: 3 })).rejects.toThrow(/No snapshot yet/);
+    await engine.snapshot('Notes');
+    await expect(engine.snapshot('', { index: 99 })).rejects.toThrow(/Index 99 not in last snapshot/);
+  });
+
+  it('keeps reading the same part after an action, and the whole window again once that part is gone', async () => {
+    let gone = false;
+    const helper = fake((op) => {
+      if (op.root !== undefined) return gone ? new AxHelperError('stale', 'x') : part();
+      return full();
+    });
+    const engine = new DesktopEngine(helper);
+    await engine.snapshot('Notes');
+    await engine.snapshot('', { index: 3 });
+    const before = engine.current()!.view;
+    const same = await engine.settle('Notes', before, { firstMs: 0, gapMs: 0 });
+    expect(same).toContain('no visible change');
+    expect(helper.calls.filter((c) => c.root === 3).length).toBeGreaterThanOrEqual(3);
+    gone = true;
+    const after = await engine.settle('Notes', before, { firstMs: 0, gapMs: 0 });
+    expect(after).toContain('[2] button "New Note"');
+    expect(engine.current()?.zoom).toBeUndefined();
+  });
+
+  it('answers null when the helper cannot serve the zoom', async () => {
+    const engine = new DesktopEngine(fake((op) => (op.root === undefined ? full() : new AxHelperError('timeout', 'x'))));
+    await engine.snapshot('Notes');
+    expect(await engine.snapshot('', { index: 3 })).toBeNull();
+  });
+});

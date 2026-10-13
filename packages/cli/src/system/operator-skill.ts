@@ -43,7 +43,7 @@ When the \`rh-computer\` MCP server is registered with your agent (\`rh mcp inst
 
 | Tool | Purpose |
 |---|---|
-| \`desktop_snapshot\` | List the controls and text of an app window as \`[index] role "label"\` with state, field values and scroll hints. Indexes stay the same while an element stays on screen. Optional \`app\` and \`filter\` (role/label substring). |
+| \`desktop_snapshot\` | List the controls and text of an app window as \`[index] role "label"\` with state, field values and scroll hints. Indexes stay the same while an element stays on screen. Optional \`app\`, \`filter\` (role/label substring) and \`index\` (read only that list or pane in full, from a \`… N more in [id]\` line; ids from outside it are unavailable until the next full snapshot). |
 | \`desktop_click\` | Press an element by index from the latest \`desktop_snapshot\` through native Accessibility. Optional \`action\`: \`open\`, \`menu\`, \`double\`, \`right\`. |
 | \`desktop_type\` | Type text into the focused element, or into the field at \`index\` (\`replace\` swaps its content, \`submit\` presses Return). |
 | \`desktop_scroll\` | Scroll the list or area at \`index\` up/down/left/right when the snapshot says \`… N more below\`. |
