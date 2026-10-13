@@ -394,6 +394,22 @@ describe('big windows and web-based apps', () => {
     expect(view.regions.has(areas[159]!)).toBe(true);
   });
 
+  it('does not let panes a filter left out use up the overview', () => {
+    reset();
+    const win = node('AXWindow', 0);
+    const nodes: AxNode[] = [win];
+    for (let l = 0; l < 20; l++) nodes.push(node('AXList', win.id, { label: `Unrelated ${l}` }));
+    const targets: number[] = [];
+    for (let l = 0; l < 160; l++) {
+      const list = node('AXList', win.id, { label: `TargetPane ${l}` });
+      targets.push(list.id);
+      nodes.push(list, ...Array.from({ length: 5 }, () => node('AXButton', list.id, { label: 'Send' })));
+    }
+    const view = buildView(snap(nodes), { filter: 'send' });
+    expect(view.text).not.toContain('Unrelated');
+    expect(view.text).toContain(`[${targets[0]}] list "TargetPane 0"`);
+  });
+
   it('cuts a window without panes to the cap, ending with one line saying the rest is hidden', () => {
     reset();
     const win = node('AXWindow', 0);

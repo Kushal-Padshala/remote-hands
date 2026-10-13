@@ -495,7 +495,8 @@ function fairTrim(list: ViewItem[], max: number, regions: Map<number, Region>, z
   while (q > 0 && total(q) > max) q -= 1;
   if (q === 0) {
     // more parts than lines: list the parts themselves (each can be read on its own), then say the rest is hidden
-    const parts = [...regions.values()].filter((r) => r.id !== zoomId);
+    // only parts that hold some of the lines being shown (a filter leaves out the others)
+    const parts = [...regions.values()].filter((r) => r.id !== zoomId && groups.has(r.id));
     if (parts.length === 0) return { items: list.slice(0, max), markers: 0 };
     const listed = parts.slice(0, max - 1);
     const entries = listed.map((r) => regionEntry(r, groups.get(r.id)?.length ?? 0));

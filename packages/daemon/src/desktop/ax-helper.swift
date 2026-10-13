@@ -561,6 +561,11 @@ func zoomClip(_ element: AXUIElement) -> (CGRect?, Bool) {
     var current: AXUIElement = element
     var visited = Set<Int>()
     var bounded = false
+    // an area that is itself the part being read, and has no size, shows nothing
+    let own = fetch(element, [kAXRoleAttribute, kAXSizeAttribute])
+    if let role = text(own[0]), viewportRoles.contains(role) || role == "AXWindow" || role == "AXSheet", let s = size(own[1]), s.width < 1 || s.height < 1 {
+        return (nil, true)
+    }
     for _ in 0..<64 {
         guard let parent = attribute(current, kAXParentAttribute), CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
         let p = parent as! AXUIElement
@@ -570,9 +575,9 @@ func zoomClip(_ element: AXUIElement) -> (CGRect?, Bool) {
         let role = text(attribute(p, kAXRoleAttribute)) ?? ""
         if viewportRoles.contains(role) || role == "AXWindow" || role == "AXSheet" {
             let v = fetch(p, [kAXPositionAttribute, kAXSizeAttribute])
+            // an area with no size shows nothing, whether or not it reports where it is
+            if let s = size(v[1]), s.width < 1 || s.height < 1 { return (nil, true) }
             if let o = point(v[0]), let s = size(v[1]) {
-                // an area with no size shows nothing
-                if s.width < 1 || s.height < 1 { return (nil, true) }
                 let f = CGRect(origin: o, size: s)
                 let next = frame.map { $0.intersection(f) } ?? f
                 if next.isNull || next.width < 1 || next.height < 1 { return (nil, true) }
