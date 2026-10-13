@@ -14,6 +14,7 @@ export type PageOp = (
   | { op: 'check'; node: number; label: string; checked: boolean }
   | { op: 'press'; key: string }
   | { op: 'scroll'; delta: number }
+  | { op: 'hover'; node: number; label: string }
 ) & {
   /** `performance.timeOrigin` from the snapshot: a different document makes the op `stale`. */
   origin?: number | string;
@@ -26,7 +27,7 @@ export type PageOpResult =
    * `verified: false` means the action ran but its effect could not be confirmed in-page
    * (async-rendering widgets); the engine confirms by re-snapshotting.
    */
-  | { ok: true; label?: string; navigated?: boolean; value?: string; verified?: boolean }
+  | { ok: true; label?: string; navigated?: boolean; value?: string; verified?: boolean; opened?: boolean; focused?: string }
   | { ok: false; error: PageOpError; current?: string; message?: string };
 
 /**
@@ -56,15 +57,15 @@ const PRELUDE = String.raw`
     }
     el.dispatchEvent(new MouseEvent(type, init));
   };
-  const key = (el, type, k) => {
-    const init = { key: k, code: k.length === 1 ? '' : k, bubbles: true, cancelable: true, view: window };
+  const key = (el, type, k, shift) => {
+    const init = { key: k, code: k.length === 1 ? '' : k, shiftKey: shift === true, bubbles: true, cancelable: true, view: window };
     if (k === 'Enter') Object.assign(init, { keyCode: 13, which: 13 });
     return el.dispatchEvent(new KeyboardEvent(type, init));
   };
-  const pressKey = (el, k) => {
-    const allowed = key(el, 'keydown', k);
-    if (k.length === 1 || k === 'Enter') key(el, 'keypress', k);
-    key(el, 'keyup', k);
+  const pressKey = (el, k, shift) => {
+    const allowed = key(el, 'keydown', k, shift);
+    if (k.length === 1 || k === 'Enter') key(el, 'keypress', k, shift);
+    key(el, 'keyup', k, shift);
     return allowed;
   };
   const submitForm = (form) => {
@@ -98,6 +99,31 @@ const PRELUDE = String.raw`
       a = next;
     }
     return a;
+  };
+  const FOCUSABLE = 'a[href],button,input,select,textarea,summary,[tabindex],[contenteditable="true"]';
+  const tabbables = () => {
+    const c = window.__rhFast || window.__jevFast;
+    const all = c && typeof c.deepAll === 'function' ? c.deepAll(FOCUSABLE) : Array.from(document.querySelectorAll(FOCUSABLE));
+    const ok = all.filter((e) => {
+      if (e.matches(':disabled') || (e.closest && e.closest('[aria-disabled="true"]'))) return false;
+      if (e.tagName === 'INPUT' && e.type === 'hidden') return false;
+      const ti = e.getAttribute('tabindex');
+      if (ti !== null && Number(ti) < 0) return false;
+      if (c && typeof c.visible === 'function' && !c.visible(e)) return false;
+      return true;
+    });
+    const positive = (e) => Number(e.getAttribute('tabindex')) > 0;
+    const first = ok.filter(positive).sort((a, b) => Number(a.getAttribute('tabindex')) - Number(b.getAttribute('tabindex')));
+    return first.concat(ok.filter((e) => !positive(e)));
+  };
+  const moveFocus = (from, backwards) => {
+    const list = tabbables();
+    if (list.length === 0) return null;
+    const i = list.indexOf(from);
+    const j = i < 0 ? (backwards ? list.length - 1 : 0) : (backwards ? (i - 1 + list.length) % list.length : (i + 1) % list.length);
+    const next = list[j];
+    try { next.focus(); } catch (e) { return null; }
+    return next;
   };
 `;
 
@@ -149,13 +175,42 @@ const RESOLVE = String.raw`
 `;
 
 const CLICK = String.raw`
+  const link = el.closest ? el.closest('a[href],area[href]') : null;
+  const opened = !!link && String(link.getAttribute('target') || '').toLowerCase() === '_blank' && !link.hasAttribute('download');
   reveal(el);
   mouse(el, 'pointerdown', true);
   mouse(el, 'mousedown', false);
   mouse(el, 'pointerup', true);
   mouse(el, 'mouseup', false);
   el.click();
-  return out({ ok: true, label: current, navigated: false });
+  const result = { ok: true, label: current, navigated: false };
+  if (opened) result.opened = true;
+  return out(result);
+`;
+
+const HOVER = String.raw`
+  if (typeof el.scrollIntoView === 'function') {
+    try { el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); } catch (e) {}
+  }
+  const emit = (target, type, pointer, bubbles) => {
+    const init = { bubbles: bubbles, cancelable: true, view: window };
+    if (pointer) {
+      if (typeof window.PointerEvent === 'function') target.dispatchEvent(new PointerEvent(type, init));
+      return;
+    }
+    target.dispatchEvent(new MouseEvent(type, init));
+  };
+  const chain = [];
+  for (let n = el; n && n.nodeType === 1; n = n.parentElement || (n.getRootNode && n.getRootNode().host) || null) chain.unshift(n);
+  for (const n of chain) {
+    emit(n, 'pointerenter', true, false);
+    emit(n, 'mouseenter', false, false);
+  }
+  emit(el, 'pointerover', true, true);
+  emit(el, 'mouseover', false, true);
+  emit(el, 'pointermove', true, true);
+  emit(el, 'mousemove', false, true);
+  return out({ ok: true, label: current });
 `;
 
 const TYPE = String.raw`
@@ -264,10 +319,21 @@ const CHECK = String.raw`
 `;
 
 const PRESS = String.raw`
-  const k = String(op.key);
+  const lower = String(op.key).toLowerCase();
+  const backwards = lower === 'shift+tab';
+  const k = backwards || lower === 'tab' ? 'Tab' : String(op.key);
   const target = deepActive();
-  const allowed = pressKey(target, k);
+  const allowed = pressKey(target, k, backwards);
   if (k === 'Enter' && allowed && target.tagName === 'INPUT' && target.form) submitForm(target.form);
+  if (k === 'Tab' && allowed) {
+    const next = moveFocus(target, backwards);
+    if (next) {
+      const c = window.__rhFast || window.__jevFast;
+      const plain = next.getAttribute('aria-label') || next.getAttribute('title') || next.getAttribute('placeholder') || next.textContent || '';
+      const label = String((c && c.name ? c.name(next) : '') || plain || next.tagName.toLowerCase()).replace(/\s+/g, ' ').trim().slice(0, 80);
+      return out({ ok: true, focused: label });
+    }
+  }
   return out({ ok: true });
 `;
 
@@ -282,6 +348,7 @@ const BODIES: Record<PageOp["op"], string> = {
   type: GUARD + RESOLVE + NAV_HOOK + TYPE,
   select: GUARD + RESOLVE + SELECT,
   check: GUARD + RESOLVE + CHECK,
+  hover: GUARD + RESOLVE + HOVER,
   press: GUARD + NAV_HOOK + PRESS,
   scroll: GUARD + SCROLL,
 };

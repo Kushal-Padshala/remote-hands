@@ -974,3 +974,113 @@ describe('actions and extract inside shadow roots and frames', () => {
     expect(text).not.toContain('Level4');
   });
 });
+
+describe('buildActionScript: hover', () => {
+  it('fires over/enter/move on the element and enter on its ancestors, outermost first', () => {
+    const p = makePage('<nav id="menu"><a id="item" href="#x">Products</a></nav>');
+    const seen: string[] = [];
+    for (const type of ['mouseover', 'mouseenter', 'mousemove']) {
+      p.doc.getElementById('menu').addEventListener(type, () => seen.push(`menu:${type}`));
+      p.doc.getElementById('item').addEventListener(type, () => seen.push(`item:${type}`));
+    }
+    p.snapshot();
+    expect(p.run({ op: 'hover', node: p.node('#item'), label: 'Products' })).toMatchObject({ ok: true });
+    expect(seen).toEqual(expect.arrayContaining(['menu:mouseenter', 'item:mouseenter', 'item:mouseover', 'menu:mouseover', 'item:mousemove']));
+    expect(seen.indexOf('menu:mouseenter')).toBeLessThan(seen.indexOf('item:mouseenter'));
+  });
+
+  it('keeps the label and disabled guards', () => {
+    const p = makePage('<button id="b">Save</button><button id="d" disabled>Off</button>');
+    p.snapshot();
+    expect(p.run({ op: 'hover', node: p.node('#b'), label: 'Other' })).toMatchObject({ ok: false, error: 'changed' });
+    expect(p.run({ op: 'hover', node: 99999, label: 'x' })).toMatchObject({ ok: false, error: 'stale' });
+  });
+});
+
+describe('buildActionScript: press Tab', () => {
+  const FIELDS = '<input id="a" aria-label="First"><input id="b" aria-label="Second"><button id="c">Go</button>';
+
+  it('moves focus forward and back and reports the label', () => {
+    const p = makePage(FIELDS);
+    p.snapshot();
+    p.doc.getElementById('a').focus();
+    expect(p.run({ op: 'press', key: 'Tab' })).toMatchObject({ ok: true, focused: 'Second' });
+    expect(p.doc.activeElement.id).toBe('b');
+    expect(p.run({ op: 'press', key: 'shift+tab' })).toMatchObject({ ok: true, focused: 'First' });
+    expect(p.doc.activeElement.id).toBe('a');
+  });
+
+  it('wraps around at both ends and starts at the first control when nothing is focused', () => {
+    const p = makePage(FIELDS);
+    p.snapshot();
+    expect(p.run({ op: 'press', key: 'Tab' })).toMatchObject({ focused: 'First' });
+    p.doc.getElementById('c').focus();
+    expect(p.run({ op: 'press', key: 'TAB' })).toMatchObject({ focused: 'First' });
+    p.doc.getElementById('a').focus();
+    expect(p.run({ op: 'press', key: 'Shift+Tab' })).toMatchObject({ focused: 'Go' });
+  });
+
+  it('skips disabled, hidden-type, tabindex=-1 and aria-hidden controls and honours positive tabindex first', () => {
+    const p = makePage(
+      '<input id="a" aria-label="A"><input id="off" aria-label="Off" disabled><input type="hidden" id="h"><input id="skip" aria-label="Skip" tabindex="-1"><div aria-hidden="true"><input id="hid" aria-label="Hid"></div><input id="z" aria-label="Z" tabindex="1">',
+    );
+    p.snapshot();
+    expect(p.run({ op: 'press', key: 'Tab' })).toMatchObject({ focused: 'Z' });
+    expect(p.run({ op: 'press', key: 'Tab' })).toMatchObject({ focused: 'A' });
+    expect(p.run({ op: 'press', key: 'Tab' })).toMatchObject({ focused: 'Z' });
+  });
+
+  it('does not move focus when the page cancels keydown', () => {
+    const p = makePage(FIELDS);
+    p.snapshot();
+    p.doc.getElementById('a').focus();
+    p.doc.addEventListener('keydown', (e: any) => e.preventDefault());
+    const res = p.run({ op: 'press', key: 'Tab' });
+    expect(res).toMatchObject({ ok: true });
+    expect((res as any).focused).toBeUndefined();
+    expect(p.doc.activeElement.id).toBe('a');
+  });
+
+  it('works before any snapshot and with no focusable controls', () => {
+    const p = makePage(FIELDS);
+    expect(p.run({ op: 'press', key: 'Tab' })).toMatchObject({ ok: true, focused: 'First' });
+    const empty = makePage('<p>nothing here</p>');
+    expect(empty.run({ op: 'press', key: 'Tab' })).toMatchObject({ ok: true });
+  });
+
+  it('crosses into shadow roots in tab order', () => {
+    const p = makePage('<input id="a" aria-label="First"><div id="host"></div>');
+    p.doc.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<input aria-label="Inner">';
+    p.snapshot();
+    p.doc.getElementById('a').focus();
+    expect(p.run({ op: 'press', key: 'Tab' })).toMatchObject({ ok: true, focused: 'Inner' });
+  });
+});
+
+describe('buildActionScript: click opened hint', () => {
+  function pageWithLink(attrs: string) {
+    const p = makePage(`<a id="l" href="https://example.org/x" ${attrs}>Docs</a>`);
+    p.doc.addEventListener('click', (e: any) => e.preventDefault());
+    p.snapshot();
+    return p;
+  }
+
+  it('reports opened for target=_blank in any case', () => {
+    for (const attrs of ['target="_blank"', 'target="_BLANK"']) {
+      const p = pageWithLink(attrs);
+      expect(p.run({ op: 'click', node: p.node('#l'), label: 'Docs' })).toMatchObject({ ok: true, opened: true });
+    }
+  });
+
+  it('omits opened for same-tab links, downloads and plain buttons', () => {
+    for (const attrs of ['', 'target="_self"', 'target="_top"', 'target="_blank" download']) {
+      const p = pageWithLink(attrs);
+      const res = p.run({ op: 'click', node: p.node('#l'), label: 'Docs' }) as any;
+      expect(res.ok).toBe(true);
+      expect(res.opened).toBeUndefined();
+    }
+    const b = makePage('<button id="b">Go</button>');
+    b.snapshot();
+    expect((b.run({ op: 'click', node: b.node('#b'), label: 'Go' }) as any).opened).toBeUndefined();
+  });
+});
