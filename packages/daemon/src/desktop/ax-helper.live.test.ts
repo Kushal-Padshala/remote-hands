@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AxHelperClient, type AxSnapshot } from './ax-helper.js';
+import { buildView } from './ax-model.js';
 
 // Live check against the real helper and a real running app. Skipped unless asked:
 //   RH_LIVE_AX=1 RH_AX_BIN=/path/to/rh-ax RH_LIVE_APP=Finder npx vitest run packages/daemon/src/desktop/ax-helper.live.test.ts
@@ -18,6 +19,19 @@ describe.skipIf(!process.env.RH_LIVE_AX)('rh-ax against a real app (read only)',
       expect(first.truncated).toBe(false);
       expect(second.elapsedMs).toBeLessThan(3000);
       expect(second.nodes.map((n) => n.id)).toEqual(first.nodes.map((n) => n.id));
+    } finally {
+      client.stop();
+    }
+  }, 60_000);
+
+  it('renders a compact view (set RH_LIVE_PRINT=1 to print it)', async () => {
+    const client = new AxHelperClient({ enabled: true, launch: () => ({ command: bin, args: [] }) });
+    try {
+      const snap = await client.request<AxSnapshot>({ op: 'snapshot', app }, 15_000);
+      const view = buildView(snap);
+      if (process.env.RH_LIVE_PRINT) process.stderr.write(`\n${view.text}\n(${snap.nodes.length} raw nodes -> ${view.lines.length} lines, ${snap.elapsedMs} ms)\n`);
+      expect(view.lines.length).toBeLessThanOrEqual(155);
+      expect(view.text.startsWith('app: ')).toBe(true);
     } finally {
       client.stop();
     }

@@ -148,18 +148,24 @@ func needsManualAccessibility(_ app: NSRunningApplication) -> Bool {
 
 var manualAccessibilitySet = Set<pid_t>()
 
+/// Whether an element is something you can read as a window (an app that has none can report itself as its focused "window").
+func isWindowLike(_ element: AXUIElement) -> Bool {
+    let role = text(attribute(element, kAXRoleAttribute)) ?? ""
+    return role == "AXWindow" || role == "AXSheet" || role == "AXDrawer"
+}
+
 func chooseWindow(_ appElement: AXUIElement, title: String) -> AXUIElement? {
-    let windows = (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+    let windows = ((attribute(appElement, kAXWindowsAttribute) as? [AXUIElement]) ?? []).filter { isWindowLike($0) }
     if !title.isEmpty {
         for w in windows {
             let t = text(attribute(w, kAXTitleAttribute)) ?? ""
             if t.localizedCaseInsensitiveContains(title) || title.localizedCaseInsensitiveContains(t) { return w }
         }
     }
-    if let focused = attribute(appElement, kAXFocusedWindowAttribute), CFGetTypeID(focused) == AXUIElementGetTypeID() {
+    if let focused = attribute(appElement, kAXFocusedWindowAttribute), CFGetTypeID(focused) == AXUIElementGetTypeID(), isWindowLike(focused as! AXUIElement) {
         return (focused as! AXUIElement)
     }
-    if let main = attribute(appElement, kAXMainWindowAttribute), CFGetTypeID(main) == AXUIElementGetTypeID() {
+    if let main = attribute(appElement, kAXMainWindowAttribute), CFGetTypeID(main) == AXUIElementGetTypeID(), isWindowLike(main as! AXUIElement) {
         return (main as! AXUIElement)
     }
     for w in windows {
@@ -202,6 +208,8 @@ final class Walker {
     var nodes: [[String: Any]] = []
     var truncated = false
     var timedOut = false
+    /// Accessibility trees can contain loops and repeats (a row listing its table as a child): each element is read once.
+    var seen = Set<Int>()
     let maxNodes: Int
     let deadline: UInt64
 
@@ -223,6 +231,10 @@ final class Walker {
         if truncated || timedOut || depth > 48 { return }
         if nodes.count >= maxNodes { truncated = true; return }
         if DispatchTime.now().uptimeNanoseconds > deadline { timedOut = true; return }
+
+        let id = handles.handle(for: element)
+        if seen.contains(id) { return }
+        seen.insert(id)
 
         let v = fetch(element, snapshotAttributes)
         let role = text(v[0]) ?? ""
@@ -255,7 +267,6 @@ final class Walker {
         let hasText = !label.isEmpty || !(value ?? "").isEmpty
         let visible = (frame?.width ?? 0) >= 1 && (frame?.height ?? 0) >= 1
         var myIndex: Int? = nil
-        let id = handles.handle(for: element)
 
         if visible || hasText {
             var node: [String: Any] = ["id": id, "parent": parent, "role": role]
