@@ -314,6 +314,6 @@ describe('ComputerSession with the fast reader', () => {
 
   it('tells the model plainly when Accessibility permission is missing', async () => {
     const { session } = make(fakeHelper({ failOps: { snapshot: new AxHelperError('not_trusted', 'x') } }));
-    await expect(session.desktopSnapshot('Notes')).rejects.toThrow('Accessibility permission is missing');
+    await expect(session.desktopSnapshot('Notes')).rejects.toThrow('macOS is asking the user to allow "Remote Hands"');
   });
 });

@@ -351,9 +351,25 @@ final class Walker {
     }
 }
 
+var promptedThisRun = false
+
+/// Shows macOS's own "would like to control this computer" dialog, which also lists this app in System Settings.
+/// At most once per run and once per half hour, so a person who said no is not nagged.
+func askForAccessibility() {
+    if promptedThisRun { return }
+    promptedThisRun = true
+    let marker = NSString(string: "~/.remote-hands/ax-prompted").expandingTildeInPath
+    if let attrs = try? FileManager.default.attributesOfItem(atPath: marker),
+       let modified = attrs[.modificationDate] as? Date, Date().timeIntervalSince(modified) < 1800 { return }
+    FileManager.default.createFile(atPath: marker, contents: Data())
+    let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+    _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
+}
+
 func snapshot(_ id: Any?, _ request: [String: Any]) {
     guard AXIsProcessTrusted() else {
-        fail(id, "not_trusted", "Accessibility permission is not granted for the process that started this helper.")
+        askForAccessibility()
+        fail(id, "not_trusted", "Accessibility permission is not granted to Remote Hands.")
         return
     }
     let started = DispatchTime.now().uptimeNanoseconds
@@ -946,7 +962,13 @@ func handle(_ line: String) {
     let id = request["id"]
     switch request["op"] as? String ?? "" {
     case "ping":
-        reply(id, ["ok": true, "version": helperVersion, "trusted": AXIsProcessTrusted()])
+        let trusted = AXIsProcessTrusted()
+        // `prompt` is asked for when setting up: it shows macOS's own permission window (always, unlike a snapshot).
+        if !trusted, (request["prompt"] as? Bool) == true {
+            let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+            _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
+        }
+        reply(id, ["ok": true, "version": helperVersion, "trusted": trusted])
     case "snapshot":
         snapshot(id, request)
     case "perform":
@@ -972,6 +994,34 @@ func handle(_ line: String) {
     }
 }
 
+// MARK: - Who macOS holds responsible
+
+@_silgen_name("responsibility_spawnattrs_setdisclaim")
+func responsibility_spawnattrs_setdisclaim(_ attr: UnsafeMutablePointer<posix_spawnattr_t?>, _ disclaim: Int32) -> Int32
+
+/// macOS decides which app may use Accessibility by the "responsible process" at the top of the chain that started this one
+/// (a terminal, an editor, or just `node` under launchd). Re-running this same program as its own responsible process makes
+/// the permission belong to "Remote Hands" alone, so one switch works however the helper was started.
+func becomeOwnResponsibleProcess() {
+    if ProcessInfo.processInfo.environment["RH_AX_SELF"] == "1" { return }
+    guard let exe = Bundle.main.executablePath else { return }
+    var attr: posix_spawnattr_t? = nil
+    guard posix_spawnattr_init(&attr) == 0 else { return }
+    guard responsibility_spawnattrs_setdisclaim(&attr, 1) == 0 else { return }
+    guard posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETEXEC)) == 0 else { return }
+    var environment = ProcessInfo.processInfo.environment
+    environment["RH_AX_SELF"] = "1"
+    var argv: [UnsafeMutablePointer<CChar>?] = ([exe] + CommandLine.arguments.dropFirst()).map { strdup($0) }
+    argv.append(nil)
+    var envp: [UnsafeMutablePointer<CChar>?] = environment.map { strdup("\($0.key)=\($0.value)") }
+    envp.append(nil)
+    var pid: pid_t = 0
+    // With SETEXEC this replaces the current process and does not return; on failure carry on as before.
+    _ = posix_spawn(&pid, exe, nil, &attr, argv, envp)
+}
+
+becomeOwnResponsibleProcess()
+
 // MARK: - Main loop
 
 Thread.detachNewThread {
@@ -979,7 +1029,8 @@ Thread.detachNewThread {
         if line.isEmpty { continue }
         DispatchQueue.main.async { handle(line) }
     }
-    exit(0)
+    // queued behind the requests already read, so their replies are written first
+    DispatchQueue.main.async { exit(0) }
 }
 
 dispatchMain()

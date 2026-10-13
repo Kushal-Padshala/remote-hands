@@ -83,12 +83,34 @@ export const AX_BUILD_FAILURE_TTL_MS = 10 * 60_000;
 const buildsInFlight = new Map<string, Promise<AxBinaryResult>>();
 const buildFailures = new Map<string, number>();
 
-export function axHelperPaths(home: string = os.homedir()): { swift: string; binary: string } {
+const AX_BUNDLE_ID = 'com.remote-hands.helper';
+
+/**
+ * The helper lives in a small app bundle so macOS lists it as "Remote Hands" in System Settings > Accessibility:
+ * one switch, however the helper gets started.
+ */
+export function axHelperPaths(home: string = os.homedir()): { swift: string; binary: string; bundle: string } {
+  const bundle = path.join(home, '.remote-hands', 'bin', 'Remote Hands.app');
   return {
     swift: path.join(home, '.remote-hands', 'ax-helper.swift'),
-    binary: path.join(home, '.remote-hands', 'bin', 'rh-ax'),
+    binary: path.join(bundle, 'Contents', 'MacOS', 'rh-ax'),
+    bundle,
   };
 }
+
+const INFO_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>${AX_BUNDLE_ID}</string>
+<key>CFBundleName</key><string>Remote Hands</string>
+<key>CFBundleDisplayName</key><string>Remote Hands</string>
+<key>CFBundleExecutable</key><string>rh-ax</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>1.0</string>
+<key>LSUIElement</key><true/>
+</dict></plist>
+`;
 
 function realCompile(swiftFile: string, output: string): Promise<number | null> {
   return new Promise((resolve) => {
@@ -156,8 +178,14 @@ export function ensureAxHelperBinary(opts: AxBinaryOptions = {}): Promise<AxBina
         if (typeof status === 'number') buildFailures.set(binary, now);
         return { ok: false, error: 'could not build the accessibility helper (it needs the Xcode Command Line Tools: xcode-select --install)' };
       }
-      if (process.platform === 'darwin' && !opts.compile) spawnSync('codesign', ['-s', '-', '--force', tmp], { stdio: 'ignore' });
       fs.renameSync(tmp, binary);
+      fs.writeFileSync(path.join(path.dirname(path.dirname(binary)), 'Info.plist'), INFO_PLIST);
+      // Signed by identifier alone, so a rebuilt helper keeps the permission the user already gave it.
+      if (process.platform === 'darwin' && !opts.compile) {
+        spawnSync('codesign', ['-s', '-', '--force', '-i', AX_BUNDLE_ID, `-r=designated => identifier "${AX_BUNDLE_ID}"`, axHelperPaths(opts.home).bundle], { stdio: 'ignore' });
+      }
+      // the earlier loose binary is not used any more
+      fs.rmSync(path.join(path.dirname(axHelperPaths(opts.home).bundle), 'rh-ax'), { force: true });
       buildFailures.delete(binary);
       return { ok: true, path: binary };
     } catch (err) {
@@ -169,6 +197,21 @@ export function ensureAxHelperBinary(opts: AxBinaryOptions = {}): Promise<AxBina
   })();
   buildsInFlight.set(binary, job);
   return job;
+}
+
+/** Whether Remote Hands may use Accessibility, asked of the built helper itself. `prompt` shows macOS's own permission window. */
+export function axHelperTrust(opts: { home?: string; prompt?: boolean } = {}): 'trusted' | 'untrusted' | 'unavailable' {
+  if (process.platform !== 'darwin') return 'unavailable';
+  const { binary } = axHelperPaths(opts.home);
+  if (!fs.existsSync(binary)) return 'unavailable';
+  try {
+    const res = spawnSync(binary, [], { input: `${JSON.stringify({ id: 1, op: 'ping', ...(opts.prompt ? { prompt: true } : {}) })}\n`, encoding: 'utf-8', timeout: 8000 });
+    const line = String(res.stdout ?? '').split('\n').find((l) => l.trim().startsWith('{'));
+    if (!line) return 'unavailable';
+    return (JSON.parse(line) as { trusted?: boolean }).trusted === true ? 'trusted' : 'untrusted';
+  } catch {
+    return 'unavailable';
+  }
 }
 
 // ---- the client -----------------------------------------------------------------------------

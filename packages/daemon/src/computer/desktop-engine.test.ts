@@ -58,7 +58,7 @@ describe('DesktopEngine.snapshot', () => {
 
   it('tells the model plainly about a missing permission or an app that is not running', async () => {
     await expect(new DesktopEngine(fake(() => new AxHelperError('not_trusted', 'x'))).snapshot('Notes')).rejects.toThrow(
-      'Accessibility permission is missing, so apps cannot be read',
+      'macOS is asking the user to allow',
     );
     expect(describeHelperError(new AxHelperError('no_app', 'x'), 'Nope')?.message).toBe('No running app matches "Nope". Use desktop_open to start it.');
     expect(describeHelperError(new AxHelperError('no_app', 'x'), '')?.message).toBe('No app is in front.');

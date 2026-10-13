@@ -33,7 +33,7 @@ export function describeHelperError(err: AxHelperError, app: string): Error | nu
   switch (err.code) {
     case 'not_trusted':
       return new Error(
-        `Accessibility permission is missing, so apps cannot be read or controlled. Tell the user to open System Settings > Privacy & Security > Accessibility and turn on "node" (${process.execPath}; add it with the + button if it is not listed), then try again. Do not try to work around it.`,
+        'macOS is asking the user to allow "Remote Hands" to control this computer (a window titled "Accessibility Access"; if it was dismissed: System Settings > Privacy & Security > Accessibility > switch on "Remote Hands"). Tell the user to click "Open System Settings" and switch it on, then try again in a few seconds. Do not try to work around it.',
       );
     case 'no_app':
       return new Error(app ? `No running app matches "${app}". Use desktop_open to start it.` : 'No app is in front.');

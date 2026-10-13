@@ -79,3 +79,4 @@ export * from './fast-lane/pilot/pilot.js';
 export * from './fast-lane/config.js';
 export * from './fast-lane/runlog.js';
 export * from './fast-lane/brief.js';
+export { axHelperTrust, ensureAxHelperBinary, axHelperPaths, axHelperEnabledByDefault } from './desktop/ax-helper.js';

@@ -10,6 +10,7 @@ import {
   axBinaryIsCurrent,
   axHelperEnabledByDefault,
   axHelperPaths,
+  axHelperTrust,
   ensureAxHelperBinary,
   type AxSnapshot,
 } from './ax-helper.js';
@@ -170,6 +171,12 @@ describe('the helper binary', () => {
     expect(b).toEqual(a);
     expect(compiles).toBe(1);
     expect(fs.readFileSync(axHelperPaths(home).binary, 'utf8')).toBe('binary');
+    // inside an app bundle that macOS lists as "Remote Hands"
+    const { bundle, binary } = axHelperPaths(home);
+    expect(binary).toBe(path.join(bundle, 'Contents', 'MacOS', 'rh-ax'));
+    const plist = fs.readFileSync(path.join(bundle, 'Contents', 'Info.plist'), 'utf8');
+    expect(plist).toContain('<string>com.remote-hands.helper</string>');
+    expect(plist).toContain('<key>CFBundleName</key><string>Remote Hands</string>');
     expect(await ensureAxHelperBinary({ home, source: 's', compile })).toEqual(a);
     expect(compiles).toBe(1);
     fs.rmSync(home, { recursive: true, force: true });
@@ -201,6 +208,22 @@ describe('the helper binary', () => {
     expect(compiles).toBe(2);
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(home2, { recursive: true, force: true });
+  });
+
+  it('removes the loose binary of an earlier version when the bundle is built', async () => {
+    const home = homeFor();
+    const loose = path.join(home, '.remote-hands', 'bin', 'rh-ax');
+    fs.mkdirSync(path.dirname(loose), { recursive: true });
+    fs.writeFileSync(loose, 'old');
+    await ensureAxHelperBinary({ home, source: 'z', compile: async (_s, out) => (fs.writeFileSync(out, 'b'), 0) });
+    expect(fs.existsSync(loose)).toBe(false);
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('asks the built helper whether it is trusted, and says unavailable when there is none', () => {
+    const home = homeFor();
+    expect(axHelperTrust({ home })).toBe('unavailable');
+    fs.rmSync(home, { recursive: true, force: true });
   });
 
   it('the embedded source is exactly the .swift file', async () => {

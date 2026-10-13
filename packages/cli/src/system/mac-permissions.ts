@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
+import { axHelperEnabledByDefault, axHelperTrust, ensureAxHelperBinary } from '@remote-hands/daemon';
 import { c } from '../output/ui.js';
 
 export function checkMacFullDiskAccess(): boolean {
@@ -124,6 +125,9 @@ export function requestMacScreenCapture(): void {
 
 export function checkMacAccessibility(): boolean {
   if (process.platform !== 'darwin') return true;
+  // Remote Hands' own helper holds the permission ("Remote Hands" in System Settings), whatever started it.
+  const own = axHelperTrust();
+  if (own !== 'unavailable') return own === 'trusted';
   try {
     const res = spawnSync('swift', ['-e', 'import ApplicationServices; exit(AXIsProcessTrusted() ? 0 : 1)'], {
       encoding: 'utf-8',
@@ -166,6 +170,12 @@ export async function ensureMacPermissions(
 
   probeMacAppDataPermissions();
 
+  // The helper that holds the Accessibility permission has to exist before it can be asked.
+  if (axHelperEnabledByDefault()) {
+    stdout(`  ${c.dim('Preparing the Remote Hands helper...')}`);
+    await ensureAxHelperBinary();
+  }
+
   let screenOk = checkMacScreenCapture();
   let fdaOk = checkMacFullDiskAccess();
   let accessOk = checkMacAccessibility();
@@ -186,18 +196,24 @@ export async function ensureMacPermissions(
   } else if (!fdaOk) {
     openMacPrivacySettings('FullDiskAccess');
   } else if (!accessOk) {
-    openMacPrivacySettings('Accessibility');
+    // macOS's own "Remote Hands would like to control this computer" window, with an Open System Settings button;
+    // without the helper, open the pane by hand.
+    if (axHelperTrust({ prompt: true }) === 'unavailable') openMacPrivacySettings('Accessibility');
   }
+  const helperAsks = !accessOk && axHelperTrust() !== 'unavailable';
 
-  const targets = [hostApp];
-  if (hostApp === 'Antigravity IDE') {
-    targets.push('Antigravity');
-  }
-  if (!targets.includes('node')) {
-    targets.push('node');
-  }
-  if (hostApp !== 'Terminal') {
-    targets.push('Terminal (if running from macOS Terminal)');
+  const accessOnly = helperAsks && screenOk && fdaOk;
+  const targets = accessOnly ? ['Remote Hands'] : [hostApp];
+  if (!accessOnly) {
+    if (hostApp === 'Antigravity IDE') {
+      targets.push('Antigravity');
+    }
+    if (!targets.includes('node')) {
+      targets.push('node');
+    }
+    if (hostApp !== 'Terminal') {
+      targets.push('Terminal (if running from macOS Terminal)');
+    }
   }
 
   const permissionItems: string[] = [];
@@ -208,7 +224,11 @@ export async function ensureMacPermissions(
     permissionItems.push(`${c.bold(c.white('Full Disk Access'))}                 ${c.dim('(System Settings -> Privacy & Security -> Full Disk Access)')}`);
   }
   if (!accessOk) {
-    permissionItems.push(`${c.bold(c.white('Accessibility'))}                    ${c.dim('(System Settings -> Privacy & Security -> Accessibility)')}`);
+    permissionItems.push(
+      helperAsks
+        ? `${c.bold(c.white('Accessibility'))}                    ${c.dim('(a macOS window is asking to allow "Remote Hands": click Open System Settings, then switch it on)')}`
+        : `${c.bold(c.white('Accessibility'))}                    ${c.dim('(System Settings -> Privacy & Security -> Accessibility)')}`,
+    );
   }
 
   stdout(
@@ -224,7 +244,7 @@ export async function ensureMacPermissions(
       targets.map((t) => `${c.cyan('│')}  ${c.brightCyan('•')} ${c.bold(c.white(t))}`).join('\n') +
       '\n' +
       `${c.cyan('│')}\n` +
-      `${c.cyan('│')}  ${c.dim(`(If not in the list, click [+] at the bottom and add ${hostApp} from /Applications)`)}\n` +
+      (accessOnly ? '' : `${c.cyan('│')}  ${c.dim(`(If not in the list, click [+] at the bottom and add ${hostApp} from /Applications)`)}\n`) +
       `${c.cyan('│')}  ${c.dim('Waiting for permission... (press Enter once granted, or Enter to skip)')}\n` +
       c.cyan(`╰${hr}\n`),
   );
