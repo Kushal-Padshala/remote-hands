@@ -127,7 +127,9 @@ describe('HudServiceManager on Windows', () => {
     });
     return { manager, calls, started, home, cli };
   }
-  const supervisorRow = (pid: number) => ({ stdout: `"rh-hud.exe","${pid}","Console","1","18,000 K"\r\n`, stderr: '', status: 0 });
+  /** What PowerShell prints for the command line of a process. */
+  const commandLine = (text: string) => ({ stdout: `${text}\r\n`, stderr: '', status: 0 });
+  const supervisorRow = (_pid: number) => commandLine(`"${EXE}" supervise`);
 
   it('registers a short login entry, keeps the long paths in a settings file, copies the CLI to a stable place and starts now', () => {
     const { manager, calls, started, home, cli } = setup();
@@ -159,7 +161,7 @@ describe('HudServiceManager on Windows', () => {
   });
 
   it('ends only the service it started (checked by its process id and program name), never every rh-hud.exe', () => {
-    const { manager, calls, home, cli } = setup({ exec: (cmd, args) => (cmd === 'tasklist' ? supervisorRow(4242) : ok) });
+    const { manager, calls, home, cli } = setup({ exec: (cmd) => (cmd === 'powershell' ? supervisorRow(4242) : ok) });
     fs.mkdirSync(path.join(home, '.remote-hands'), { recursive: true });
     fs.writeFileSync(path.join(home, '.remote-hands', 'hud-supervisor.pid'), '4242');
     manager.install(cli);
@@ -168,12 +170,18 @@ describe('HudServiceManager on Windows', () => {
     expect(calls.some(([c, a]) => c === 'taskkill' && a.includes('/IM'))).toBe(false);
   });
 
-  it('does not end a program that only happens to have the supervisor\'s old process id', () => {
-    const { manager, calls, home, cli } = setup({ exec: (cmd) => (cmd === 'tasklist' ? { stdout: 'INFO: No tasks are running which match the specified criteria.', stderr: '', status: 0 } : ok) });
-    fs.mkdirSync(path.join(home, '.remote-hands'), { recursive: true });
-    fs.writeFileSync(path.join(home, '.remote-hands', 'hud-supervisor.pid'), '4242');
-    manager.install(cli);
-    expect(calls.some(([c]) => c === 'taskkill')).toBe(false);
+  it('does not end a program that only happens to have the supervisor\'s old process id, even another rh-hud.exe (a prompt window)', () => {
+    for (const reused of ['"C:\\Windows\\notepad.exe" file.txt', `"${EXE}" prompt --app=Chrome`, `"${EXE}" listen`]) {
+      const { manager, calls, home, cli } = setup({ exec: (cmd) => (cmd === 'powershell' ? commandLine(reused) : ok) });
+      fs.mkdirSync(path.join(home, '.remote-hands'), { recursive: true });
+      fs.writeFileSync(path.join(home, '.remote-hands', 'hud-supervisor.pid'), '4242');
+      manager.install(cli);
+      expect(calls.some(([c]) => c === 'taskkill'), reused).toBe(false);
+    }
+    const gone = setup({ exec: (cmd) => (cmd === 'powershell' ? { stdout: '', stderr: 'no such process', status: 1 } : ok) });
+    fs.mkdirSync(path.join(gone.home, '.remote-hands'), { recursive: true });
+    fs.writeFileSync(path.join(gone.home, '.remote-hands', 'hud-supervisor.pid'), '4242');
+    expect(gone.manager.isRunning()).toBe(false);
   });
 
   it('says why when the program cannot be built, and starts nothing', () => {
@@ -199,19 +207,19 @@ describe('HudServiceManager on Windows', () => {
     fs.writeFileSync(path.join(alive.home, '.remote-hands', 'hud-supervisor.pid'), '4242');
     expect(alive.manager.isInstalled()).toBe(true);
     expect(alive.manager.isRunning()).toBe(true);
-    const none = setup({ exec: (cmd) => (cmd === 'reg' ? { stdout: '', stderr: 'not found', status: 1 } : { stdout: 'INFO: No tasks are running which match the specified criteria.', stderr: '', status: 0 }) });
+    const none = setup({ exec: (cmd) => (cmd === 'reg' ? { stdout: '', stderr: 'not found', status: 1 } : { stdout: '', stderr: '', status: 1 }) });
     expect(none.manager.isInstalled()).toBe(false);
     expect(none.manager.isRunning()).toBe(false);
   });
 
   it('removes the login entry and ends the service by its process id on uninstall', () => {
-    const { manager, calls, home } = setup({ exec: (cmd) => (cmd === 'tasklist' ? supervisorRow(4242) : ok) });
+    const { manager, calls, home } = setup({ exec: (cmd) => (cmd === 'powershell' ? supervisorRow(4242) : ok) });
     fs.mkdirSync(path.join(home, '.remote-hands'), { recursive: true });
     fs.writeFileSync(path.join(home, '.remote-hands', 'hud-supervisor.pid'), '4242');
     expect(manager.uninstall()).toBe(true);
     expect(calls.map(([c, a]) => `${c} ${a.join(' ')}`)).toEqual([
       'reg delete HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v RemoteHandsHud /f',
-      expect.stringMatching(/^tasklist /),
+      expect.stringMatching(/^powershell /),
       'taskkill /PID 4242 /T /F',
     ]);
     expect(fs.existsSync(path.join(home, '.remote-hands', 'hud-supervisor.pid'))).toBe(false);

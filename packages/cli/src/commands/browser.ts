@@ -28,7 +28,8 @@ export async function ensureChromeAutomationReady(options?: { headless?: boolean
     return true;
   }
 
-  if (ChromeManager.isSystemChromeRunning()) {
+  // (Windows: the person's own Chrome running does not matter, Remote Hands' browser has a profile of its own)
+  if (process.platform !== 'win32' && ChromeManager.isSystemChromeRunning()) {
     return false;
   }
 

@@ -106,12 +106,21 @@ export class HudServiceManager {
     return res.status === 0 && res.stdout.includes('com.remote-hands.hud');
   }
 
-  /** The supervisor's process id, but only when that id still belongs to a running rh-hud.exe (ids are reused). */
+  /**
+   * The supervisor's process id, but only when that id is still a running `rh-hud.exe supervise`: ids are reused, and an
+   * independently opened prompt window (same program, other role) must never be mistaken for the service.
+   */
   private windowsSupervisorPid(): number | undefined {
     const pid = readHudSupervisorPid(this.home);
     if (pid === undefined) return undefined;
-    const res = this.exec('tasklist', ['/FI', `PID eq ${pid}`, '/FI', `IMAGENAME eq ${WINDOWS_HUD_IMAGE}`, '/FO', 'CSV', '/NH']);
-    return res.status === 0 && res.stdout.toLowerCase().includes(`"${WINDOWS_HUD_IMAGE}"`) ? pid : undefined;
+    const res = this.exec('powershell', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
+    ]);
+    const line = res.status === 0 ? res.stdout.toLowerCase() : '';
+    return line.includes(WINDOWS_HUD_IMAGE) && /\bsupervise\b/.test(line) ? pid : undefined;
   }
 
   private windowsSupervisorAlive(): boolean {

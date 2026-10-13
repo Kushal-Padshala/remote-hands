@@ -35,5 +35,13 @@ describe('parseDaemonConfig', () => {
 
     expect(config.workspaceAllowlist).toEqual(['/Users/kushal/project', '/tmp/work']);
   });
-});
 
+  it('reads a Windows allowlist separated by semicolons, so a drive letter keeps its colon', () => {
+    const config = parseDaemonConfig({
+      ...validEnv,
+      REMOTE_HANDS_WORKSPACE_ALLOWLIST: 'C:\\work;D:\\projects\\app',
+    });
+    expect(config.workspaceAllowlist).toEqual(['C:\\work', 'D:\\projects\\app']);
+    expect(() => parseDaemonConfig({ ...validEnv, REMOTE_HANDS_WORKSPACE_ALLOWLIST: 'C:\\work;;D:\\x' })).toThrow(/empty entry/);
+  });
+});

@@ -103,8 +103,10 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
       stdout('[!] Desktop HUD: installed but not running (run: rh hud install; log: ~/.remote-hands/logs/hud.log)');
     } else if (readHudStatus()?.state === 'failed') {
       stdout('[!] Desktop HUD: running, but its shortcut is used by another program (Ctrl + Shift + Space and Ctrl + Alt + Space)');
-    } else {
+    } else if (readHudStatus()?.state === 'ready') {
       stdout(`[✓] Desktop HUD: running; press ${hudHotkeyLabel()} to open it`);
+    } else {
+      stdout('[!] Desktop HUD: running but has not confirmed its shortcut (starting, or blocked; log: ~/.remote-hands/logs/hud.log)');
     }
   }
 

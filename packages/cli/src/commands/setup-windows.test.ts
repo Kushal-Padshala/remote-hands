@@ -91,7 +91,9 @@ describe('rh setup --hud on Windows', () => {
     expect((await run({ browser: { path: 'C:\\edge.exe', kind: 'edge' } })).out).toContain('Microsoft Edge found (used because Google Chrome is not installed)');
     const none = await run({ browser: undefined });
     expect(none.out).toContain('No Chrome or Edge was found');
-    expect(none.code).toBe(0);
+    expect(none.out).toContain('Not ready: no Chrome or Edge browser was found');
+    expect(none.out).not.toContain('Desktop HUD is ready');
+    expect(none.code).toBe(1);
   });
 
   it('waits for the shortcut before saying the HUD is ready, and fails loudly when no shortcut is free', async () => {
@@ -102,8 +104,44 @@ describe('rh setup --hud on Windows', () => {
     expect(failed.code).toBe(1);
     expect(failed.out).toContain('already used by another program');
     expect(failed.out).not.toContain('Desktop HUD is ready');
+    // no answer in time: installed, but no claim that the shortcut works
     const slow = await run({ hotkey: null });
-    expect(slow.out).toContain('still starting');
+    expect(slow.out).toContain('has not confirmed its shortcut yet');
+    expect(slow.out).not.toContain('Desktop HUD is ready');
+    expect(slow.out).not.toContain('anywhere and type');
     expect(slow.code).toBe(0);
+  });
+
+  it('does not say the HUD is ready when a required step failed: the tools could not be registered, or the HUD could not be installed', async () => {
+    const calls: string[] = [];
+    const out: string[] = [];
+    const runner: CommandRunner = async (cmd, args) => {
+      calls.push(cmd);
+      if (args[0] === 'models') return { exitCode: 0, stdout: 'gemini-3.8-flash', stderr: '' };
+      return { exitCode: 0, stdout: '', stderr: '' };
+    };
+    found.agy = 'C:\\agy\\agy.exe';
+    const base = {
+      stdout: (l: string) => out.push(l),
+      stderr: () => {},
+      runner,
+      fs: mockFs,
+      projectRoot: 'C:\\project',
+      prepareHotkeyHelper: () => ({ ok: true as const, path: 'C:\\rh-hud.exe' }),
+      findBrowser: () => ({ path: 'C:\\chrome.exe', kind: 'chrome' as const }),
+      isTTY: false,
+    };
+    const registerFails = await setupCommand(['--hud'], { ...base, installMcp: async () => 1, hudServiceManager: service() } as never);
+    expect(registerFails).toBe(1);
+    expect(out.join('\n')).toContain('Not ready: the browser tools could not be registered');
+    out.length = 0;
+    const installFails = await setupCommand(['--hud'], {
+      ...base,
+      installMcp: async () => 0,
+      hudServiceManager: { ...service(), install: () => ({ success: false, plistPath: 'x', error: 'could not add the startup entry' }) },
+    } as never);
+    expect(installFails).toBe(1);
+    expect(out.join('\n')).toContain('Not ready: the HUD could not be installed (could not add the startup entry)');
+    expect(out.join('\n')).not.toContain('Desktop HUD is ready');
   });
 });

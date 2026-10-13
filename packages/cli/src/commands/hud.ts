@@ -54,6 +54,7 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
     const res = serviceManager.install();
     if (res.success) {
       // Windows: the shortcut is only reported once the listener has said it holds it
+      let confirmed = true;
       if (process.platform === 'win32' && typeof serviceManager.waitForHotkey === 'function') {
         stdout('Starting the HUD...');
         const status = await serviceManager.waitForHotkey();
@@ -62,11 +63,12 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
           return 1;
         }
         if (!status) {
-          stdout(c.yellow('The HUD is still starting. Check it in a minute with "rh hud status"; the log is ~/.remote-hands/logs/hud.log.'));
+          confirmed = false;
+          stdout(c.yellow('The HUD has not confirmed its shortcut yet. Give it a minute, then check with "rh doctor" (log: ~/.remote-hands/logs/hud.log).'));
         }
       }
       stdout(c.brightGreen('✔ Desktop Overlay Assistant installed successfully!'));
-      stdout(`  HotKey:      ${c.bold(hudHotkeyLabel())} (available on any screen)`);
+      if (confirmed) stdout(`  HotKey:      ${c.bold(hudHotkeyLabel())} (available on any screen)`);
       stdout(`  ${process.platform === 'win32' ? 'Starts at login: ' : 'LaunchAgent: '}${res.plistPath}`);
       stdout(`  Status:      Running in background with 0% idle CPU`);
       return 0;
@@ -93,8 +95,11 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
     stdout('');
     stdout(c.bold('Remote Hands Desktop Overlay Status:'));
     stdout(`  Installed: ${installed ? c.green('Yes') : c.dim('No')}`);
-    stdout(`  Running:   ${running ? c.brightGreen(`Active (listening for ${hudHotkeyLabel().replace(/ /g, '')})`) : c.dim('Inactive')}`);
-    if (process.platform === 'win32' && running && readHudStatus()?.state === 'failed') {
+    // Windows: a running service is only "listening" once the listener has said it holds its shortcut
+    const winState = process.platform === 'win32' && running ? readHudStatus()?.state : undefined;
+    const waiting = process.platform === 'win32' && running && winState === undefined;
+    stdout(`  Running:   ${running ? (waiting ? c.yellow('Starting, or blocked (see ~/.remote-hands/logs/hud.log)') : c.brightGreen(`Active (listening for ${hudHotkeyLabel().replace(/ /g, '')})`)) : c.dim('Inactive')}`);
+    if (winState === 'failed') {
       stdout(`  Hotkey:    ${c.yellow('not available: another program uses Ctrl + Shift + Space and Ctrl + Alt + Space')}`);
     }
     if (!installed) {

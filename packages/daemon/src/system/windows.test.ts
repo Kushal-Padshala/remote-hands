@@ -45,6 +45,10 @@ describe('shellQuote', () => {
     expect(shellQuote('agy')).toBe('agy');
     expect(shellQuote('C:\\Users\\Ana Lee\\agy.exe')).toBe('"C:\\Users\\Ana Lee\\agy.exe"');
     expect(shellQuote('"C:\\a b\\agy.exe"')).toBe('"C:\\a b\\agy.exe"');
+    // characters cmd.exe would act on, in valid folder names
+    expect(shellQuote('C:\\Users\\Ana&Lee\\agy.exe')).toBe('"C:\\Users\\Ana&Lee\\agy.exe"');
+    expect(shellQuote('C:\\Users\\Ana(Lee)\\agy.exe')).toBe('"C:\\Users\\Ana(Lee)\\agy.exe"');
+    expect(shellQuote('C:\\Users\\Ana,Lee;x=y\\agy.exe')).toBe('"C:\\Users\\Ana,Lee;x=y\\agy.exe"');
   });
 });
 

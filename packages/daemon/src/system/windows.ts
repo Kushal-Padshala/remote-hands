@@ -63,7 +63,8 @@ export function agyCommand(lookup: WindowsLookup = {}): string {
 
 /** A command as one string for a shell, quoted when it has spaces (only for callers that must use a shell). */
 export function shellQuote(command: string): string {
-  return /\s/.test(command) && !/^".*"$/.test(command) ? `"${command}"` : command;
+  // spaces and the characters cmd.exe treats as operators (& | < > ^ ( ) , ; =) all need the quotes
+  return /[\s&|<>^(),;=%!]/.test(command) && !/^".*"$/.test(command) ? `"${command}"` : command;
 }
 
 /**

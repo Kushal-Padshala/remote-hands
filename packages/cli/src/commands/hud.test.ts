@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { hudCommand } from './hud.js';
 
 describe('CLI hud command', () => {
@@ -133,5 +133,50 @@ describe('CLI hud command', () => {
     expect(listenerObj).toBeDefined();
     listenerObj.stop();
     expect(stopped).toBe(true);
+  });
+});
+
+describe('CLI hud install on Windows', () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  beforeEach(() => {
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+  });
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', platform);
+  });
+
+  const run = async (hotkey: { state: string } | null) => {
+    const logs: string[] = [];
+    const errors: string[] = [];
+    const serviceManager = {
+      install: vi.fn().mockReturnValue({ success: true, plistPath: 'the Windows startup list' }),
+      isInstalled: () => true,
+      isRunning: () => true,
+      waitForHotkey: vi.fn().mockResolvedValue(hotkey),
+    };
+    const code = await hudCommand(['install'], { serviceManager, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
+    return { code, out: logs.join('\n'), err: errors.join('\n') };
+  };
+
+  it('names the shortcut only after the listener confirmed it', async () => {
+    const ready = await run({ state: 'ready' });
+    expect(ready.code).toBe(0);
+    expect(ready.out).toContain('HotKey:');
+    expect(ready.out).toContain('Starts at login: the Windows startup list');
+  });
+
+  it('says it is not confirmed, and does not name a shortcut, when the listener has not answered', async () => {
+    const slow = await run(null);
+    expect(slow.code).toBe(0);
+    expect(slow.out).toContain('has not confirmed its shortcut yet');
+    expect(slow.out).not.toContain('HotKey:');
+    expect(slow.out).toContain('installed successfully');
+  });
+
+  it('fails with a plain message when no shortcut was free', async () => {
+    const failed = await run({ state: 'failed' });
+    expect(failed.code).toBe(1);
+    expect(failed.err).toContain('already used by another program');
+    expect(failed.out).not.toContain('installed successfully');
   });
 });

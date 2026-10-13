@@ -35,17 +35,34 @@ describe('scripts/install-windows.ps1', () => {
     expect(code).toMatch(/try\s*{\s*Install-RemoteHands/);
   });
 
-  it('installs the published package and hands over to the guided setup', () => {
+  it('installs the published package into its own folder, never relying on any npm setting or the machine\'s Node', () => {
     expect(code).toContain("$Package = 'remote-hands-cli'");
-    expect(code).toContain('install -g $Package');
-    expect(code).toContain('setup --hud');
-    expect(code).toContain('$MinNodeMajor = 22');
+    expect(code).toContain('install -g $Package --prefix $NpmPrefix');
+    expect(code).not.toMatch(/config get prefix/);
+    expect(code).toContain("$NodeDir = Join-Path $Home_ 'node'");
+    // npm is run with the private Node, not whatever `npm` is first on PATH
+    expect(code).toContain('& $NodeExe $npmCli install');
+    expect(code).not.toMatch(/Get-Command\s+(node|npm)/i);
   });
 
-  it('removes npm\'s .ps1 launchers so a default Windows setting does not block the rh command', () => {
-    expect(code).toContain('.ps1');
-    expect(code).toContain('Remove-Item');
-    expect(code).toContain("'rh.cmd'");
+  it('accepts only a Node that has node:sqlite without a flag (22.13+, 23.4+, 24+)', () => {
+    expect(code).toContain('if ($major -eq 22) { return ($minor -ge 13) }');
+    expect(code).toContain('if ($major -eq 23) { return ($minor -ge 4) }');
+    expect(code).toContain('if ($major -ge 24) { return $true }');
+    expect(code).toContain('Test-NodeVersion $_.version');
+  });
+
+  it('makes launchers bound to that Node, first on PATH, in plain ASCII with the folders spelled as %LOCALAPPDATA%', () => {
+    expect(code).toContain('"%LOCALAPPDATA%\\remote-hands\\node\\node.exe"');
+    expect(code).toContain('remote-hands\\npm\\node_modules\\remote-hands-cli\\dist\\index.js" %*');
+    expect(code).toContain("@('rh', 'remote-hands', 'rh-browser')");
+    expect(code).toContain('[Text.Encoding]::ASCII');
+    expect(code).toContain('Add-ToUserPathFirst $BinDir');
+    expect(code).toContain('@($Folder) + $parts');
+  });
+
+  it('hands over to the guided setup with the private Node directly, so PATH does not matter', () => {
+    expect(code).toContain('& $NodeExe $CliEntry setup --hud');
   });
 
   it('stops at the first problem and says it in words', () => {

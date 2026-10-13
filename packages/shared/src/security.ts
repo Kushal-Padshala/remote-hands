@@ -11,14 +11,29 @@ export function timingSafeEqualStr(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/** A Windows path: `C:\\work`, `c:/work` or a network path `\\\\server\\share`. */
+const looksWindows = (p: string): boolean => /^[A-Za-z]:([\\/]|$)/.test(p) || p.startsWith('\\\\');
+
 /**
- * Collapses `.`, `..` and repeated slashes so `/home/me/../../etc` is checked as `/etc`.
+ * Collapses `.`, `..` and repeated slashes so `/home/me/../../etc` is checked as `/etc`. A Windows path (drive letter or
+ * network share) is first written with forward slashes and a capital drive letter, and is compared without regard to case
+ * (Windows ignores it), so `c:\Users\Ana\..\..\Windows` is checked as `C:/Windows`. Other paths are unchanged.
  * Pure string work: shared code also runs in Workers and the browser, where node:path is absent.
  */
 function normalizePath(p: string): string {
-  const absolute = p.startsWith('/');
+  const windows = looksWindows(p);
+  let rest = windows ? p.replace(/\\/g, '/') : p;
+  let drive = '';
+  if (windows) {
+    const m = /^([A-Za-z]):/.exec(rest);
+    if (m) {
+      drive = `${m[1]!.toUpperCase()}:`;
+      rest = rest.slice(2);
+    }
+  }
+  const absolute = rest.startsWith('/') || drive !== '';
   const out: string[] = [];
-  for (const part of p.split('/')) {
+  for (const part of rest.split('/')) {
     if (part === '' || part === '.') continue;
     if (part === '..') {
       if (out.length > 0 && out[out.length - 1] !== '..') out.pop();
@@ -27,7 +42,10 @@ function normalizePath(p: string): string {
     }
     out.push(part);
   }
-  return (absolute ? '/' : '') + out.join('/');
+  const joined = drive + (absolute ? '/' : '') + out.join('/');
+  // a leading double slash marks a network share, which the collapse above would have flattened
+  const share = windows && drive === '' && p.startsWith('\\\\') ? '/' : '';
+  return (windows ? (share + joined).toLowerCase().replace(/^([a-z]):/, (_m, d: string) => `${d.toUpperCase()}:`) : joined);
 }
 
 export function isSafeWorkspacePath(
@@ -49,14 +67,22 @@ export function isSafeWorkspacePath(
       return { allowed: false, reason: `Access to system directory "${forbidden}" is forbidden` };
     }
   }
+  // Windows: the system folders of any drive (paths are compared lower case, see normalizePath)
+  if (looksWindows(targetPath.trim())) {
+    const system = /^[A-Za-z]:\/(windows|program files|program files \(x86\)|programdata)(\/|$)/i.exec(normalized);
+    if (system) return { allowed: false, reason: `Access to system directory "${system[1]}" is forbidden` };
+  }
 
   const forbiddenSubdirs = ['.ssh', '.aws', '.gnupg', '.config/gcloud', '.config/gh', '.kube', '.docker', 'Library/Keychains'];
+  const windowsPath = looksWindows(targetPath.trim());
+  const subject = windowsPath ? normalized.toLowerCase() : normalized;
   for (const sub of forbiddenSubdirs) {
+    const needle = windowsPath ? sub.toLowerCase() : sub;
     if (
-      normalized.endsWith('/' + sub) ||
-      normalized.includes('/' + sub + '/') ||
-      normalized === sub ||
-      normalized.startsWith(sub + '/')
+      subject.endsWith('/' + needle) ||
+      subject.includes('/' + needle + '/') ||
+      subject === needle ||
+      subject.startsWith(needle + '/')
     ) {
       return { allowed: false, reason: `Access to credential directory "${sub}" is forbidden` };
     }

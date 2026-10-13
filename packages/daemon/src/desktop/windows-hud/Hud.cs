@@ -948,7 +948,8 @@ namespace RemoteHands
                             psi.RedirectStandardError = true;
                             using (Process p = Process.Start(psi))
                             {
-                                if (job != IntPtr.Zero) Native.AssignProcessToJobObject(job, p.Handle);
+                                if (job == IntPtr.Zero) Log("no job object: helpers the listener leaves behind are ended by their own input closing");
+                                else if (!Native.AssignProcessToJobObject(job, p.Handle)) Log("the listener could not be placed in a job (an outer job may forbid it): helpers are ended by their own input closing");
                                 p.OutputDataReceived += delegate(object s, DataReceivedEventArgs e) { if (e.Data != null) Log(e.Data); };
                                 p.ErrorDataReceived += delegate(object s, DataReceivedEventArgs e) { if (e.Data != null) Log("error: " + e.Data); };
                                 p.BeginOutputReadLine();

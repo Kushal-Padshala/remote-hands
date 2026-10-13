@@ -43,3 +43,40 @@ describe('Security Utilities', () => {
     expect(isSafeBrowserUrl('file:///Users/me/.ssh/id_rsa')).toBe(false);
   });
 });
+
+describe('Windows workspace paths', () => {
+  it('treats backslashes and drive letters as the Windows path they are, so traversal and credential folders are caught', () => {
+    expect(isSafeWorkspacePath('C:\\Users\\Ana\\work\\app').allowed).toBe(true);
+    expect(isSafeWorkspacePath('C:\\Users\\Ana\\.ssh').allowed).toBe(false);
+    expect(isSafeWorkspacePath('c:/users/ana/.AWS/credentials').allowed).toBe(false);
+    expect(isSafeWorkspacePath('C:\\Users\\Ana\\work\\..\\.ssh').allowed).toBe(false);
+    expect(isSafeWorkspacePath('C:\\Users\\Ana\\AppData\\Roaming\\gcloud').allowed).toBe(true);
+    expect(isSafeWorkspacePath('C:\\Users\\Ana\\.config\\gcloud').allowed).toBe(false);
+  });
+
+  it('refuses the Windows system folders on any drive, in any case', () => {
+    for (const bad of ['C:\\Windows', 'c:\\windows\\system32', 'D:/Program Files/App', 'C:\\Program Files (x86)\\x', 'C:\\ProgramData\\x', 'C:\\Users\\Ana\\..\\..\\Windows\\System32']) {
+      expect(isSafeWorkspacePath(bad).allowed, bad).toBe(false);
+    }
+    expect(isSafeWorkspacePath('C:\\Windowsfoo\\x').allowed).toBe(true);
+  });
+
+  it('keeps an allowlist inside its folder even with mixed separators and traversal, and ignores case', () => {
+    const allow = ['C:/work'];
+    expect(isSafeWorkspacePath('C:\\work\\app', allow).allowed).toBe(true);
+    expect(isSafeWorkspacePath('c:\\WORK', allow).allowed).toBe(true);
+    expect(isSafeWorkspacePath('C:/work/..\\Users\\Ana\\.ssh', allow).allowed).toBe(false);
+    expect(isSafeWorkspacePath('C:/work/../other', allow).allowed).toBe(false);
+    expect(isSafeWorkspacePath('D:\\work', allow).allowed).toBe(false);
+    expect(isSafeWorkspacePath('C:\\workshop', allow).allowed).toBe(false);
+  });
+
+  it('knows network shares and leaves Unix paths exactly as they were', () => {
+    expect(isSafeWorkspacePath('\\\\server\\share\\project').allowed).toBe(true);
+    expect(isSafeWorkspacePath('\\\\server\\share\\project\\.ssh').allowed).toBe(false);
+    // a backslash in a Unix name is just a character
+    expect(isSafeWorkspacePath('/home/user/odd\\name').allowed).toBe(true);
+    expect(isSafeWorkspacePath('/home/user/odd\\.ssh').allowed).toBe(true);
+    expect(isSafeWorkspacePath('/home/user/.ssh').allowed).toBe(false);
+  });
+});

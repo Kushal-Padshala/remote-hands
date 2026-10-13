@@ -4,16 +4,25 @@
 #
 #   irm https://raw.githubusercontent.com/Kushal-Padshala/remote-hands/main/scripts/install-windows.ps1 | iex
 #
-# It installs Node.js for you if it is missing (into your own user folder), installs the Remote Hands
-# command line tool, and then starts its guided setup. You can run it again at any time.
+# It puts everything in your own user folder (%LOCALAPPDATA%\remote-hands): its own copy of Node.js (so nothing
+# on your computer can clash with it), the Remote Hands command line tool, and two small launchers (rh and
+# remote-hands) that always use that copy of Node. Then it starts the guided setup. You can run it again at any
+# time: that updates everything.
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $ProgressPreference = 'SilentlyContinue'
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
 
+# The newest Node releases have what Remote Hands needs built in (node:sqlite without a flag: 22.13 or newer).
 $MinNodeMajor = 22
 $Package = 'remote-hands-cli'
+$Home_ = Join-Path $env:LOCALAPPDATA 'remote-hands'
+$NodeDir = Join-Path $Home_ 'node'
+$NpmPrefix = Join-Path $Home_ 'npm'
+$BinDir = Join-Path $Home_ 'bin'
+$NodeExe = Join-Path $NodeDir 'node.exe'
+$CliEntry = Join-Path $NpmPrefix 'node_modules\remote-hands-cli\dist\index.js'
 
 function Write-Step([string]$Message) {
     Write-Host ''
@@ -24,25 +33,31 @@ function Write-Note([string]$Message) {
     Write-Host "   $Message"
 }
 
-# Puts a folder on the user's PATH for good (this user only) and for this window.
-function Add-ToUserPath([string]$Folder) {
+# Puts a folder FIRST on the user's PATH for good (this user only) and for this window.
+function Add-ToUserPathFirst([string]$Folder) {
     $current = [Environment]::GetEnvironmentVariable('Path', 'User')
     if ($null -eq $current) { $current = '' }
-    $parts = @($current.Split(';') | Where-Object { $_ -ne '' })
-    if ($parts -notcontains $Folder) {
-        [Environment]::SetEnvironmentVariable('Path', ((@($parts) + $Folder) -join ';'), 'User')
-    }
-    if ((@($env:Path.Split(';'))) -notcontains $Folder) {
-        $env:Path = "$Folder;$env:Path"
-    }
+    $parts = @($current.Split(';') | Where-Object { $_ -ne '' -and $_ -ne $Folder })
+    [Environment]::SetEnvironmentVariable('Path', ((@($Folder) + $parts) -join ';'), 'User')
+    $session = @($env:Path.Split(';') | Where-Object { $_ -ne '' -and $_ -ne $Folder })
+    $env:Path = ((@($Folder) + $session) -join ';')
 }
 
-function Get-NodeMajor {
-    $node = Get-Command node -ErrorAction SilentlyContinue
-    if ($null -eq $node) { return 0 }
-    try { $version = (& $node.Source --version) } catch { return 0 }
-    if ($version -match '^v(\d+)\.') { return [int]$Matches[1] }
-    return 0
+# True when this Node.js has what Remote Hands needs built in.
+function Test-NodeVersion([string]$Text) {
+    if ($Text -match '^v(\d+)\.(\d+)\.') {
+        $major = [int]$Matches[1]
+        $minor = [int]$Matches[2]
+        if ($major -ge 24) { return $true }
+        if ($major -eq 23) { return ($minor -ge 4) }
+        if ($major -eq 22) { return ($minor -ge 13) }
+    }
+    return $false
+}
+
+function Get-OwnNodeVersion {
+    if (-not (Test-Path $NodeExe)) { return '' }
+    try { return ((& $NodeExe --version) | Out-String).Trim() } catch { return '' }
 }
 
 # Downloads the current long-term-support Node.js (checked against its published checksum) and unpacks it
@@ -52,7 +67,7 @@ function Install-Node {
     if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') { $arch = 'arm64' }
     Write-Note 'Looking up the current Node.js release...'
     $releases = Invoke-RestMethod -Uri 'https://nodejs.org/dist/index.json'
-    $pick = $releases | Where-Object { $_.lts -and ([int]($_.version.TrimStart('v').Split('.')[0]) -ge $MinNodeMajor) } | Select-Object -First 1
+    $pick = $releases | Where-Object { $_.lts -and (Test-NodeVersion $_.version) } | Select-Object -First 1
     if ($null -eq $pick) { throw 'Could not find a suitable Node.js release on nodejs.org.' }
     $version = $pick.version
     $zipName = "node-$version-win-$arch.zip"
@@ -71,15 +86,23 @@ function Install-Node {
         $unpacked = Join-Path $workDir 'unpacked'
         Expand-Archive -Path $zipPath -DestinationPath $unpacked -Force
         $inner = Get-ChildItem -Path $unpacked | Select-Object -First 1
-        $target = Join-Path $env:LOCALAPPDATA 'remote-hands\node'
-        if (Test-Path $target) { Remove-Item -Recurse -Force $target }
-        New-Item -ItemType Directory -Path (Split-Path $target) -Force | Out-Null
-        Move-Item -Path $inner.FullName -Destination $target
-        Add-ToUserPath $target
+        if (Test-Path $NodeDir) { Remove-Item -Recurse -Force $NodeDir }
+        New-Item -ItemType Directory -Path (Split-Path $NodeDir) -Force | Out-Null
+        Move-Item -Path $inner.FullName -Destination $NodeDir
         Write-Note "Node.js $version installed."
     }
     finally {
         Remove-Item -Recurse -Force $workDir -ErrorAction SilentlyContinue
+    }
+}
+
+# A launcher that always runs Remote Hands with its own Node.js, whatever else is installed or first on PATH.
+# The folders are written with %LOCALAPPDATA%, so the file stays plain ASCII even for a name like "Jose with an accent".
+function Write-Launchers {
+    New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+    $body = '@echo off' + "`r`n" + '"%LOCALAPPDATA%\remote-hands\node\node.exe" "%LOCALAPPDATA%\remote-hands\npm\node_modules\remote-hands-cli\dist\index.js" %*' + "`r`n"
+    foreach ($name in @('rh', 'remote-hands', 'rh-browser')) {
+        [IO.File]::WriteAllText((Join-Path $BinDir "$name.cmd"), $body, [Text.Encoding]::ASCII)
     }
 }
 
@@ -93,44 +116,41 @@ function Install-RemoteHands {
     if (-not [Environment]::Is64BitOperatingSystem) { throw 'Remote Hands needs 64-bit Windows.' }
     Write-Note 'Windows 10 or newer: OK'
 
-    Write-Step 'Node.js'
-    $major = Get-NodeMajor
-    if ($major -ge $MinNodeMajor) {
-        Write-Note "Node.js $major is installed: OK"
+    Write-Step 'Node.js (a private copy, used only by Remote Hands)'
+    $own = Get-OwnNodeVersion
+    if (Test-NodeVersion $own) {
+        Write-Note "Already installed ($own): OK"
     }
     else {
-        if ($major -gt 0) { Write-Note "Your Node.js (version $major) is too old: installing a current one next to it." }
         Install-Node
-        if ((Get-NodeMajor) -lt $MinNodeMajor) { throw 'Node.js was installed but could not be started. Please close this window, open a new PowerShell and run the command again.' }
+        $own = Get-OwnNodeVersion
+        if (-not (Test-NodeVersion $own)) { throw 'Node.js was installed but could not be started. Please try again, or ask for help with this message.' }
     }
 
     Write-Step 'Remote Hands'
-    $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
-    if ($null -eq $npm) { $npm = Get-Command npm -ErrorAction SilentlyContinue }
-    if ($null -eq $npm) { throw 'npm was not found next to Node.js.' }
+    $npmCli = Join-Path $NodeDir 'node_modules\npm\bin\npm-cli.js'
+    if (-not (Test-Path $npmCli)) { throw 'npm was not found in the Node.js that was installed.' }
+    New-Item -ItemType Directory -Path $NpmPrefix -Force | Out-Null
     Write-Note 'Installing the Remote Hands command line tool...'
-    & $npm.Source install -g $Package
+    # The folder is given on the command line, so no setting on this computer (a project file, an old npm setup) can redirect it.
+    & $NodeExe $npmCli install -g $Package --prefix $NpmPrefix
     if ($LASTEXITCODE -ne 0) { throw 'Installing Remote Hands failed (see the messages above).' }
-    $prefix = (& $npm.Source config get prefix).Trim()
-    Add-ToUserPath $prefix
-    # PowerShell would pick npm's .ps1 launcher, which a default Windows setting blocks. The .cmd launchers work everywhere.
-    foreach ($name in @('rh', 'remote-hands', 'rh-browser')) {
-        Remove-Item -Path (Join-Path $prefix "$name.ps1") -Force -ErrorAction SilentlyContinue
-    }
-    $rh = Join-Path $prefix 'rh.cmd'
-    if (-not (Test-Path $rh)) { throw "The rh command was not created in $prefix." }
-    Write-Note 'Installed.'
+    if (-not (Test-Path $CliEntry)) { throw "Remote Hands was installed but its program file is missing in $NpmPrefix." }
+    Write-Launchers
+    Add-ToUserPathFirst $BinDir
+    Write-Note 'Installed. The commands rh and remote-hands are ready in new PowerShell windows.'
 
     Write-Step 'Guided setup (a few questions and one sign-in)'
     Write-Host ''
-    & $rh setup --hud
+    # Run directly with the private Node: it does not depend on PATH at all.
+    & $NodeExe $CliEntry setup --hud
     if ($LASTEXITCODE -ne 0) {
         Write-Host ''
         Write-Host 'Setup did not finish. Fix what it says above, then run:  rh setup --hud' -ForegroundColor Yellow
         return
     }
     Write-Host ''
-    Write-Host 'All done. To check on things later, open PowerShell and type:  rh doctor' -ForegroundColor Green
+    Write-Host 'Setup finished. To check that everything is ready, open a new PowerShell and type:  rh doctor' -ForegroundColor Green
 }
 
 try {

@@ -91,6 +91,8 @@ export interface CommandContext {
   } | undefined;
   /** Builds the Shift+Cmd+Space helper during HUD setup (tests replace it; mocked runs skip the real build). */
   prepareHotkeyHelper?: (() => { ok: true; path: string } | { ok: false; error: string }) | undefined;
+  /** Registers the computer-use tools with agy (tests replace it; a test runner otherwise skips the step). */
+  installMcp?: (() => Promise<number>) | undefined;
   /** Windows: where Chrome or Edge is installed (tests replace it). */
   findBrowser?: (() => BrowserExecutable | undefined) | undefined;
   /** Injected AppleScript transport for `rh browser doctor` (tests). */
@@ -602,14 +604,17 @@ async function hudSetupFlow(
     stdout: (msg) => stdout(renderStepInfo(msg)),
     stderr,
   };
-  if (context.runner) {
+  // What must work for the HUD to do anything. On Windows a missing piece stops "ready" from being claimed.
+  const blockers: string[] = [];
+  if (context.runner && !context.installMcp) {
     stdout(renderStepInfo('Skipped in test mode'));
   } else {
-    const mcpCode = await mcpCommand(['install'], mcpOpts);
+    const mcpCode = await (context.installMcp ?? (() => mcpCommand(['install'], mcpOpts)))();
     if (mcpCode === 0) {
       stdout(renderStepSuccess('Registered the rh-computer tools with agy'));
     } else {
       stdout(renderStepInfo('Could not register the computer-use tools; run "rh mcp install" after fixing the message above.'));
+      if (windows) blockers.push('the browser tools could not be registered with the agent (run "rh mcp install")');
     }
   }
 
@@ -622,6 +627,7 @@ async function hudSetupFlow(
       stdout(renderStepInfo('Remote Hands opens its own browser window the first time you ask for something on the web. Sign in to the sites you want it to use in that window, once; it remembers.'));
     } else {
       stdout(renderStepInfo('No Chrome or Edge was found. Install Google Chrome from https://www.google.com/chrome and run "rh setup" again.'));
+      blockers.push('no Chrome or Edge browser was found');
     }
     step += 1;
   }
@@ -636,6 +642,7 @@ async function hudSetupFlow(
         }
       : new HudServiceManager());
   let helperError: string | null = null;
+  let unconfirmed = false;
   if (process.platform !== 'darwin' && process.platform !== 'win32') {
     stdout(renderStepInfo('The desktop HUD hotkey service is supported on macOS and Windows.'));
   } else {
@@ -661,18 +668,29 @@ async function hudSetupFlow(
           helperError = 'the shortcut (Ctrl + Shift + Space, or Ctrl + Alt + Space) is already used by another program: close that program or change its shortcut, then run "rh hud install"';
           stdout(renderStepInfo(`Shortcut: ${helperError}`));
         } else if (!status) {
-          stdout(renderStepInfo('The HUD is still starting; check it in a minute with "rh hud status".'));
+          unconfirmed = true;
+          stdout(renderStepInfo('The HUD has not confirmed its shortcut yet: check it in a minute with "rh doctor".'));
         }
       }
     } else {
       stdout(renderStepInfo(`Desktop HUD note: ${res.error || 'could not auto-load the LaunchAgent'}`));
+      if (windows) blockers.push(`the HUD could not be installed (${res.error || 'unknown reason'})`);
     }
   }
 
   stdout(renderStepStart(TOTAL, TOTAL, 'Done'));
+  if (blockers.length > 0) {
+    for (const b of blockers) stdout(renderStepInfo(`Not ready: ${b}.`));
+    stdout(renderStepInfo('Fix that, then run "rh setup --hud" again.'));
+    return 1;
+  }
   if (helperError) {
     stdout(renderStepInfo('Desktop HUD is installed but the hotkey will not work yet (see above).'));
     return 1;
+  }
+  if (unconfirmed) {
+    stdout(renderStepInfo('Desktop HUD is installed, but its shortcut is not confirmed yet. Give it a minute, then check with "rh doctor".'));
+    return 0;
   }
   stdout(renderStepSuccess('Desktop HUD is ready'));
   stdout(`\n  Press ${c.bold(hudHotkeyLabel())} anywhere and type what you want done.`);

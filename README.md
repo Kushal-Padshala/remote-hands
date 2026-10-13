@@ -175,7 +175,7 @@ npx remote-hands-cli setup
 
 #### Windows (browser use)
 
-On Windows 10 or 11, open PowerShell (Start menu, type `PowerShell`, Enter) and paste this one line. It needs no administrator rights: it installs Node.js for you (in your own user folder) if you do not have it, installs Remote Hands, and starts the guided setup, which signs in to the agent (agy) with your Google account and installs the HUD.
+On Windows 10 or 11, open PowerShell (Start menu, type `PowerShell`, Enter) and paste this one line. It needs no administrator rights: it puts a private copy of Node.js and Remote Hands in your own user folder (so nothing already on your computer can clash with it), and starts the guided setup, which signs in to the agent (agy) with your Google account and installs the HUD.
 
 ```powershell
 irm https://raw.githubusercontent.com/Kushal-Padshala/remote-hands/main/scripts/install-windows.ps1 | iex
