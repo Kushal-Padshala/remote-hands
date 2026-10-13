@@ -1,5 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import os from 'node:os';
+import { appendCallRecord, classifyError, type ToolCallRecord } from './call-log.js';
 import type { ComputerSession } from './session.js';
 import { buildComputerTools, type ComputerTool } from './tools.js';
 
@@ -18,6 +20,8 @@ export function formatTimeout(ms: number): string {
 export interface ComputerMcpServerOptions {
   /** Per-call limit so a handler that never settles cannot block the queue (default 90 s). */
   callTimeoutMs?: number | undefined;
+  /** Told about every finished call (tool name, timing, outcome class only). Must not throw; if it does it is ignored. */
+  onCall?: ((record: ToolCallRecord) => void) | undefined;
 }
 
 export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcpServerOptions = {}): McpServer {
@@ -42,9 +46,11 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
     server.registerTool(
       tool.name,
       { description: tool.description, inputSchema: tool.inputSchema },
-      (args: any) =>
-        serialized(() =>
-          withTimeout(
+      async (args: any) => {
+        let started = Date.now();
+        const result = await serialized(() => {
+          started = Date.now(); // time the work itself, not the wait for earlier calls
+          return withTimeout(
             (async (): Promise<Result> => {
               try {
                 return { content: [{ type: 'text' as const, text: await tool.handler(args) }] };
@@ -52,14 +58,28 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
                 return { isError: true, content: [{ type: 'text' as const, text: `error: ${err?.message ?? String(err)}` }] };
               }
             })(),
-          ),
-        ),
+          );
+        });
+        if (opts.onCall) {
+          try {
+            const record: ToolCallRecord = { at: new Date(started).toISOString(), tool: tool.name, ms: Date.now() - started, ok: result.isError !== true };
+            if (result.isError) record.kind = classifyError(result.content[0]?.text ?? '');
+            opts.onCall(record);
+          } catch {
+            // logging must never break the call
+          }
+        }
+        return result;
+      },
     );
   }
   return server;
 }
 
 export async function serveComputerMcp(session: ComputerSession): Promise<void> {
-  const server = createComputerMcpServer(buildComputerTools(session));
+  const server = createComputerMcpServer(
+    buildComputerTools(session),
+    process.env.RH_CALL_LOG === '0' ? {} : { onCall: (record) => appendCallRecord(os.homedir(), record) },
+  );
   await server.connect(new StdioServerTransport());
 }

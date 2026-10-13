@@ -2,10 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { z } from 'zod';
-import { createComputerMcpServer } from './mcp-server.js';
+import { createComputerMcpServer, type ComputerMcpServerOptions } from './mcp-server.js';
+import type { ToolCallRecord } from './call-log.js';
 import type { ComputerTool } from './tools.js';
 
-async function connect(tools: ComputerTool[], opts?: { callTimeoutMs?: number }) {
+async function connect(tools: ComputerTool[], opts?: ComputerMcpServerOptions) {
   const server = createComputerMcpServer(tools, opts);
   const client = new Client({ name: 'test', version: '0.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
@@ -24,6 +25,58 @@ describe('createComputerMcpServer', () => {
     const res = await client.callTool({ name: 'echo', arguments: { text: 'hi' } });
     expect(handler).toHaveBeenCalledWith({ text: 'hi' });
     expect(res.content).toEqual([{ type: 'text', text: 'state text' }]);
+    expect(res.isError).toBeFalsy();
+  });
+
+  it('reports each call to onCall with timing and outcome, never the arguments or result', async () => {
+    const records: ToolCallRecord[] = [];
+    const client = await connect(
+      [
+        { name: 'ok_tool', description: 'd', inputSchema: { text: z.string() }, handler: async () => 'secret result' },
+        { name: 'bad_tool', description: 'd', inputSchema: {}, handler: async () => { throw new Error('Element [3]: page changed. Call browser_snapshot.'); } },
+      ],
+      { onCall: (r) => records.push(r) },
+    );
+    await client.callTool({ name: 'ok_tool', arguments: { text: 'private typed text' } });
+    await client.callTool({ name: 'bad_tool', arguments: {} });
+    expect(records.map((r) => [r.tool, r.ok, r.kind])).toEqual([['ok_tool', true, undefined], ['bad_tool', false, 'stale']]);
+    expect(JSON.stringify(records)).not.toContain('secret');
+    expect(JSON.stringify(records)).not.toContain('private typed text');
+    expect(records.every((r) => typeof r.ms === 'number' && r.ms >= 0 && !Number.isNaN(Date.parse(r.at)))).toBe(true);
+  });
+
+  it('records a timed-out call as a timeout', async () => {
+    const records: ToolCallRecord[] = [];
+    const client = await connect(
+      [{ name: 'hang', description: 'd', inputSchema: {}, handler: () => new Promise<string>(() => {}) }],
+      { callTimeoutMs: 20, onCall: (r) => records.push(r) },
+    );
+    const res = await client.callTool({ name: 'hang', arguments: {} });
+    expect(res.isError).toBe(true);
+    expect(records.map((r) => [r.tool, r.ok, r.kind])).toEqual([['hang', false, 'timeout']]);
+  });
+
+  it('times the work itself, not the wait behind an earlier call', async () => {
+    const records: ToolCallRecord[] = [];
+    const nap = (name: string, ms: number): ComputerTool => ({
+      name,
+      description: name,
+      inputSchema: {},
+      handler: async () => { await new Promise((r) => setTimeout(r, ms)); return name; },
+    });
+    const client = await connect([nap('slow', 120), nap('quick', 1)], { onCall: (r) => records.push(r) });
+    await Promise.all([client.callTool({ name: 'slow', arguments: {} }), client.callTool({ name: 'quick', arguments: {} })]);
+    const quick = records.find((r) => r.tool === 'quick')!;
+    expect(quick.ms).toBeLessThan(100);
+  });
+
+  it('a throwing onCall never breaks the tool call', async () => {
+    const client = await connect(
+      [{ name: 't', description: 'd', inputSchema: {}, handler: async () => 'fine' }],
+      { onCall: () => { throw new Error('logger down'); } },
+    );
+    const res = await client.callTool({ name: 't', arguments: {} });
+    expect(res.content).toEqual([{ type: 'text', text: 'fine' }]);
     expect(res.isError).toBeFalsy();
   });
 
