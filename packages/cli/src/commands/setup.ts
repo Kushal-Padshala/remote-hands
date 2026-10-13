@@ -62,8 +62,9 @@ import {
   c,
 } from '../output/ui.js';
 
-import { HudServiceManager, SpotlightHudRunner, hudHotkeyLabel, type ChromeManager, type DynamicPowerManager } from '@remote-hands/daemon';
+import { ChromeManager as ChromeLookup, HudServiceManager, SpotlightHudRunner, hudHotkeyLabel, type BrowserExecutable, type ChromeManager, type DynamicPowerManager } from '@remote-hands/daemon';
 import { defaultAsk } from './browser-setup.js';
+import { AGY_WINDOWS_INSTALL, agyShellCommand, locateAgy } from '../system/agy.js';
 import { mcpCommand } from './mcp.js';
 
 export interface CommandContext {
@@ -90,6 +91,8 @@ export interface CommandContext {
   } | undefined;
   /** Builds the Shift+Cmd+Space helper during HUD setup (tests replace it; mocked runs skip the real build). */
   prepareHotkeyHelper?: (() => { ok: true; path: string } | { ok: false; error: string }) | undefined;
+  /** Windows: where Chrome or Edge is installed (tests replace it). */
+  findBrowser?: (() => BrowserExecutable | undefined) | undefined;
   /** Injected AppleScript transport for `rh browser doctor` (tests). */
   browserTransport?: import('./browser-doctor.js').BrowserDoctorTransport | undefined;
   /** Injected pieces of `rh browser setup` (tests): setup service, prompt, TTY flag, state file. */
@@ -114,17 +117,18 @@ async function setupAgentAndPermissions(
   totalSteps: number,
 ): Promise<number | null> {
   stdout(renderStepStart(stepNum, totalSteps, 'AI Coding Agent (agy)'));
-  const agyWhich = await runner('which', ['agy']);
-  const agyInstalled = agyWhich.exitCode === 0 && agyWhich.stdout.trim().length > 0;
+  const agyFound = await locateAgy(runner);
+  const agyInstalled = agyFound !== undefined;
+  let agyPath = agyFound;
 
   if (!agyInstalled) {
     stdout(renderStepAction('agy CLI not found — installing now...'));
     if (process.platform === 'win32') {
-      stdout(renderStepInfo('Run this in PowerShell: irm https://antigravity.google/cli/install.ps1 | iex'));
-      const winRes = await runner('powershell', ['-Command', 'irm https://antigravity.google/cli/install.ps1 | iex'], { interactive: true });
+      stdout(renderStepInfo(`Running in PowerShell: ${AGY_WINDOWS_INSTALL.manual}`));
+      const winRes = await runner(AGY_WINDOWS_INSTALL.command, AGY_WINDOWS_INSTALL.args, { interactive: true });
       if (winRes.exitCode !== 0) {
         stderr(renderStepError('Failed to install agy. Please install manually:'));
-        stderr('  PowerShell: irm https://antigravity.google/cli/install.ps1 | iex');
+        stderr(`  PowerShell: ${AGY_WINDOWS_INSTALL.manual}`);
         stderr('Then re-run "rh setup".');
         return 1;
       }
@@ -139,18 +143,26 @@ async function setupAgentAndPermissions(
       }
     }
 
-    const verifyInstall = await runner('which', ['agy']);
-    if (verifyInstall.exitCode !== 0) {
+    const verified = await locateAgy(runner);
+    agyPath = verified;
+    if (verified === undefined) {
+      if (process.platform === 'win32') {
+        stderr(renderStepError('agy was installed but cannot be found yet.'));
+        stderr('Close this window, open a new PowerShell window, and run "rh setup" again.');
+        return 1;
+      }
       stdout(renderStepInfo('agy installed but not in PATH yet — running agy install...'));
       await runner('agy', ['install'], { interactive: true });
     }
     stdout(renderStepSuccess('agy CLI installed successfully'));
   } else {
-    stdout(renderStepInfo(`agy found at ${agyWhich.stdout.trim()}`));
+    stdout(renderStepInfo(`agy found at ${agyFound}`));
   }
+  // On Windows the full path (a new terminal is not needed for it); elsewhere the plain name, as always.
+  const agy = agyShellCommand(agyPath);
 
   stdout(renderStepInfo('Verifying agy authentication...'));
-  const agyNeedsLogin = await agyNeedsSignIn(runner);
+  const agyNeedsLogin = await agyNeedsSignIn(runner, agy);
 
   if (agyNeedsLogin) {
     stdout(renderStepAction('agy requires sign-in — launching interactive session...'));
@@ -159,9 +171,9 @@ async function setupAgentAndPermissions(
     } else {
       stdout(renderStepInfo('Follow the on-screen instructions to sign in with your Google account.'));
     }
-    await runner('agy', [], { interactive: true });
+    await runner(agy, [], { interactive: true });
 
-    const agyRecheck = await runner('agy', ['-p', 'reply with ok', '--print-timeout', '60s']);
+    const agyRecheck = await runner(agy, ['-p', 'reply with ok', '--print-timeout', '60s']);
     if (agyRecheck.exitCode !== 0) {
       stderr(renderStepError('agy sign-in was not completed.'));
       stderr('Please run "agy" in your terminal to sign in, then re-run "rh setup".');
@@ -535,13 +547,13 @@ const AUTH_HINTS = ['not authenticated', 'sign in', 'sign-in', 'log in', 'login'
  * timeout (a cold agy takes a while to load its MCP servers: a slow answer is not a
  * missing sign-in). Sign-in is requested only when agy's own output asks for it.
  */
-async function agyNeedsSignIn(runner: CommandRunner): Promise<boolean> {
-  const models = await runner('agy', ['models']);
+async function agyNeedsSignIn(runner: CommandRunner, agy = 'agy'): Promise<boolean> {
+  const models = await runner(agy, ['models']);
   const modelsText = `${models.stdout}\n${models.stderr}`.toLowerCase();
   if (models.exitCode === 0 && /gemini|claude|gpt/.test(modelsText) && !AUTH_HINTS.some((h) => modelsText.includes(h))) {
     return false;
   }
-  const probe = await runner('agy', ['-p', 'reply with ok', '--print-timeout', '60s']);
+  const probe = await runner(agy, ['-p', 'reply with ok', '--print-timeout', '60s']);
   const text = `${probe.stdout}\n${probe.stderr}`.toLowerCase();
   return AUTH_HINTS.some((h) => text.includes(h));
 }
@@ -577,7 +589,9 @@ async function hudSetupFlow(
   stdout: (msg: string) => void,
   stderr: (msg: string) => void,
 ): Promise<number> {
-  const TOTAL = 4;
+  // Windows has one more step: the browser Remote Hands drives
+  const windows = process.platform === 'win32';
+  const TOTAL = windows ? 5 : 4;
   stdout(renderBanner());
 
   const agyErr = await setupAgentAndPermissions(args, context, runner, fs, projectRoot, stdout, stderr, 1, TOTAL);
@@ -599,7 +613,19 @@ async function hudSetupFlow(
     }
   }
 
-  stdout(renderStepStart(3, TOTAL, 'Desktop HUD background service'));
+  let step = 3;
+  if (windows) {
+    stdout(renderStepStart(step, TOTAL, 'Browser for Remote Hands'));
+    const browser = (context.findBrowser ?? (() => ChromeLookup.findBrowserExecutable()))();
+    if (browser) {
+      stdout(renderStepSuccess(browser.kind === 'chrome' ? 'Google Chrome found' : 'Microsoft Edge found (used because Google Chrome is not installed)'));
+      stdout(renderStepInfo('Remote Hands opens its own browser window the first time you ask for something on the web. Sign in to the sites you want it to use in that window, once; it remembers.'));
+    } else {
+      stdout(renderStepInfo('No Chrome or Edge was found. Install Google Chrome from https://www.google.com/chrome and run "rh setup" again.'));
+    }
+    step += 1;
+  }
+  stdout(renderStepStart(step, TOTAL, 'Desktop HUD background service'));
   const hudService =
     context.hudServiceManager ??
     (context.runner
@@ -643,7 +669,7 @@ async function hudSetupFlow(
     }
   }
 
-  stdout(renderStepStart(4, TOTAL, 'Done'));
+  stdout(renderStepStart(TOTAL, TOTAL, 'Done'));
   if (helperError) {
     stdout(renderStepInfo('Desktop HUD is installed but the hotkey will not work yet (see above).'));
     return 1;

@@ -173,6 +173,18 @@ rh setup
 npx remote-hands-cli setup
 ```
 
+#### Windows (browser use)
+
+On Windows 10 or 11, open PowerShell (Start menu, type `PowerShell`, Enter) and paste this one line. It needs no administrator rights: it installs Node.js for you (in your own user folder) if you do not have it, installs Remote Hands, and starts the guided setup, which signs in to the agent (agy) with your Google account and installs the HUD.
+
+```powershell
+irm https://raw.githubusercontent.com/Kushal-Padshala/remote-hands/main/scripts/install-windows.ps1 | iex
+```
+
+Then press **Ctrl + Shift + Space** (or **Ctrl + Alt + Space** if another program already uses the first) anywhere, type what you want done on the web, and press Enter. A Remote Hands browser window (Chrome, or Edge if Chrome is not installed) opens the first time; sign in to the sites you want it to use in that window, once. Browser tasks work the same way as on the Mac (the same agent, the same fast page tools, risky clicks still wait for your approval). Other Windows programs cannot be controlled yet. `rh doctor` shows what is ready; `rh hud status` shows whether the HUD is running; `rh hud uninstall` removes it.
+
+How it works is in [docs/development.md](docs/development.md#windows).
+
 ### 2. Start the Daemon
 
 ```bash

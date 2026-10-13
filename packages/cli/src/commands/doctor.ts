@@ -1,7 +1,8 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { CommandContext } from './setup.js';
-import { ChromeManager } from '@remote-hands/daemon';
+import { ChromeManager, HudServiceManager, hudHotkeyLabel, readHudStatus } from '@remote-hands/daemon';
+import { locateAgy } from '../system/agy.js';
 import { ensureWranglerLogin, defaultRunner } from '../cloudflare/wrangler.js';
 import { checkBrowserHarness } from '../system/browser-harness.js';
 import { defaultFileSystem } from '../cloudflare/project.js';
@@ -37,11 +38,11 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
     stdout('[!] Browser automation: browser-harness not found (install via: uv tool install --python 3.12 browser-harness)');
   }
 
-  const agyRes = await runner('which', ['agy']);
-  if (agyRes.exitCode === 0) {
+  const agyPath = await locateAgy(runner);
+  if (agyPath !== undefined) {
     stdout('[✓] AI coding agent: agy is installed');
   } else {
-    stdout('[!] AI coding agent: agy CLI not found on PATH');
+    stdout(process.platform === 'win32' ? '[!] AI coding agent: agy CLI not found (run: rh setup)' : '[!] AI coding agent: agy CLI not found on PATH');
   }
 
   const permsConfigured = await checkAgyPermissions(fs);
@@ -86,6 +87,25 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
     stdout(`[✓] Chrome profiles: ${profiles.length} detected (${profileNames})`);
   } else {
     stdout('[!] Chrome profiles: 0 detected');
+  }
+
+  if (process.platform === 'win32') {
+    const browser = ChromeManager.findBrowserExecutable();
+    if (browser) {
+      stdout(`[✓] Browser: ${browser.kind === 'chrome' ? 'Google Chrome' : 'Microsoft Edge'} found (Remote Hands opens its own window with its own profile)`);
+    } else {
+      stdout('[!] Browser: no Chrome or Edge found (install Google Chrome from https://www.google.com/chrome)');
+    }
+    const hud = new HudServiceManager();
+    if (!hud.isInstalled()) {
+      stdout('[!] Desktop HUD: not installed (run: rh setup)');
+    } else if (!hud.isRunning()) {
+      stdout('[!] Desktop HUD: installed but not running (run: rh hud install; log: ~/.remote-hands/logs/hud.log)');
+    } else if (readHudStatus()?.state === 'failed') {
+      stdout('[!] Desktop HUD: running, but its shortcut is used by another program (Ctrl + Shift + Space and Ctrl + Alt + Space)');
+    } else {
+      stdout(`[✓] Desktop HUD: running; press ${hudHotkeyLabel()} to open it`);
+    }
   }
 
   if (process.platform === 'darwin') {
