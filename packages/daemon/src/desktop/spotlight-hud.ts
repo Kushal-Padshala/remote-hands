@@ -364,9 +364,14 @@ export class SpotlightHudRunner {
     let stopped = false;
     let child: any = null;
     let restartTimer: NodeJS.Timeout | null = null;
+    // Windows: a helper that cannot get its shortcut ends at once; trying again every second would never stop
+    let startedAt = 0;
+    let retryMs = 1000;
+    let warnedShortcut = false;
 
     const spawnChild = () => {
       if (stopped) return;
+      startedAt = Date.now();
       // Windows: what the helper said about its shortcut belongs to that helper only
       if (process.platform === 'win32') clearHudReadyStatus();
       try {
@@ -384,7 +389,10 @@ export class SpotlightHudRunner {
                 saveHudStatus({ state: 'ready', keys: parsed.keys });
               } else if (parsed && parsed.event === 'hotkey-failed') {
                 saveHudStatus({ state: 'failed' });
-                console.error('Remote Hands: the HUD hotkey is already used by another program (tried Ctrl+Shift+Space and Ctrl+Alt+Space). Close that program and run "rh hud install" again.');
+                if (!warnedShortcut) {
+                  warnedShortcut = true;
+                  console.error('Remote Hands: the HUD hotkey is already used by another program (tried Ctrl+Shift+Space and Ctrl+Alt+Space). Close that program and run "rh hud install" again.');
+                }
               } else if (parsed && typeof parsed.app === 'string') {
                 onTrigger(parsed as SpotlightPromptResult);
               }
@@ -394,7 +402,8 @@ export class SpotlightHudRunner {
         child.on('exit', () => {
           if (process.platform === 'win32') clearHudReadyStatus();
           if (!stopped) {
-            restartTimer = setTimeout(spawnChild, 1000);
+            if (process.platform === 'win32') retryMs = Date.now() - startedAt > 60_000 ? 1000 : Math.min(retryMs * 2, 30_000);
+            restartTimer = setTimeout(spawnChild, process.platform === 'win32' ? retryMs : 1000);
           }
         });
       } catch {}
