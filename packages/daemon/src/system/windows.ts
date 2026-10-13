@@ -18,13 +18,14 @@ export interface WindowsLookup {
 const DEFAULT_PATHEXT = '.COM;.EXE;.BAT;.CMD';
 
 /** The first place on PATH (honouring PATHEXT) that holds `name`; undefined off Windows or when it is not there. */
-export function findOnWindowsPath(name: string, lookup: WindowsLookup = {}): string | undefined {
+export function findOnWindowsPath(name: string, lookup: WindowsLookup = {}, opts: { nativeOnly?: boolean } = {}): string | undefined {
   const platform = lookup.platform ?? process.platform;
   if (platform !== 'win32') return undefined;
   const env = lookup.env ?? process.env;
   const exists = lookup.exists ?? ((file: string) => fs.existsSync(file));
   const rawPath = env.Path ?? env.PATH ?? '';
-  const exts = (env.PATHEXT ?? DEFAULT_PATHEXT).split(';').filter(Boolean).map((e) => e.toLowerCase());
+  // Node cannot start a .cmd or .bat without a shell, so a caller that starts programs itself asks for real programs only.
+  const exts = opts.nativeOnly ? ['.exe', '.com'] : (env.PATHEXT ?? DEFAULT_PATHEXT).split(';').filter(Boolean).map((e) => e.toLowerCase());
   const hasExt = exts.some((e) => name.toLowerCase().endsWith(e));
   for (const dir of rawPath.split(';').map((d) => d.trim().replace(/^"(.*)"$/, '$1')).filter(Boolean)) {
     const candidates = hasExt ? [name] : exts.map((e) => name + e);
@@ -47,7 +48,7 @@ export function findAgyOnWindows(lookup: WindowsLookup = {}): string | undefined
   if (platform !== 'win32') return undefined;
   const env = lookup.env ?? process.env;
   const exists = lookup.exists ?? ((file: string) => fs.existsSync(file));
-  const onPath = findOnWindowsPath('agy', lookup);
+  const onPath = findOnWindowsPath('agy', lookup, { nativeOnly: true });
   if (onPath) return onPath;
   const home = lookup.homedir ?? os.homedir();
   const localAppData = env.LOCALAPPDATA || path.win32.join(home, 'AppData', 'Local');
@@ -65,6 +66,19 @@ export function shellQuote(command: string): string {
   return /\s/.test(command) && !/^".*"$/.test(command) ? `"${command}"` : command;
 }
 
+/**
+ * What to tell the person when the agent program could not be started. On Windows the usual causes (not installed, only a
+ * script shim on PATH, blocked) all have the same remedy; elsewhere the system's own message is kept.
+ */
+export function describeSpawnError(err: unknown, command: string, platform: NodeJS.Platform = process.platform): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const code = (err as { code?: unknown } | null)?.code;
+  if (platform === 'win32' && (code === 'ENOENT' || code === 'EINVAL' || code === 'EACCES' || code === 'EPERM')) {
+    return `Remote Hands could not start the agent program (${command}). Run "rh setup" to install or repair it.`;
+  }
+  return message;
+}
+
 export interface KillTreeDeps {
   platform?: NodeJS.Platform | undefined;
   run?: ((command: string, args: string[]) => { status: number | null }) | undefined;
@@ -77,6 +91,8 @@ export interface KillTreeDeps {
 export function killWindowsProcessTree(pid: number | undefined, deps: KillTreeDeps = {}): boolean {
   const platform = deps.platform ?? process.platform;
   if (platform !== 'win32' || typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 4) return false;
+  // never this program or the one that started it
+  if (pid === process.pid || pid === process.ppid) return false;
   const run = deps.run ?? ((command: string, args: string[]) => spawnSync(command, args, { windowsHide: true, stdio: 'ignore' }));
   try {
     return run('taskkill', ['/pid', String(pid), '/T', '/F']).status === 0;

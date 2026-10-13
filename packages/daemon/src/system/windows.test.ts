@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { agyCommand, findAgyOnWindows, findOnWindowsPath, killWindowsProcessTree, shellQuote } from './windows.js';
+import { agyCommand, describeSpawnError, findAgyOnWindows, findOnWindowsPath, killWindowsProcessTree, shellQuote } from './windows.js';
 
 const present = (...files: string[]) => (f: string) => files.includes(f);
 
@@ -60,6 +60,38 @@ describe('killWindowsProcessTree', () => {
     const run = vi.fn(() => ({ status: 0 }));
     expect(killWindowsProcessTree(1234, { platform: 'darwin', run })).toBe(false);
     for (const bad of [undefined, 0, 1, 4, -5, 1.5, NaN]) expect(killWindowsProcessTree(bad as number, { platform: 'win32', run })).toBe(false);
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe('only real programs are chosen for agy', () => {
+  it('never returns a script shim, which Node cannot start without a shell, and falls through to the installer folder', () => {
+    const env = { Path: 'C:\\tools', LOCALAPPDATA: 'C:\\Users\\Ana\\AppData\\Local', PATHEXT: '.COM;.EXE;.BAT;.CMD' };
+    const installed = 'C:\\Users\\Ana\\AppData\\Local\\agy\\bin\\agy.exe';
+    expect(agyCommand({ platform: 'win32', env, exists: present('C:\\tools\\agy.cmd', installed) })).toBe(installed);
+    expect(agyCommand({ platform: 'win32', env, exists: present('C:\\tools\\agy.cmd', 'C:\\tools\\agy.bat') })).toBe('agy');
+    // other programs may still be found as scripts
+    expect(findOnWindowsPath('npm', { platform: 'win32', env, exists: present('C:\\tools\\npm.cmd') })).toBe('C:\\tools\\npm.cmd');
+  });
+});
+
+describe('describeSpawnError', () => {
+  it('gives one plain remedy on Windows for the usual failures, and keeps the system message elsewhere', () => {
+    for (const code of ['ENOENT', 'EINVAL', 'EACCES', 'EPERM']) {
+      const err = Object.assign(new Error(`spawn agy ${code}`), { code });
+      expect(describeSpawnError(err, 'agy', 'win32')).toBe('Remote Hands could not start the agent program (agy). Run "rh setup" to install or repair it.');
+      expect(describeSpawnError(err, 'agy', 'darwin')).toBe(`spawn agy ${code}`);
+    }
+    expect(describeSpawnError(new Error('weird'), 'agy', 'win32')).toBe('weird');
+    expect(describeSpawnError('text', 'agy', 'win32')).toBe('text');
+  });
+});
+
+describe('killWindowsProcessTree never targets this program', () => {
+  it('refuses this process and its parent', () => {
+    const run = vi.fn(() => ({ status: 0 }));
+    expect(killWindowsProcessTree(process.pid, { platform: 'win32', run })).toBe(false);
+    expect(killWindowsProcessTree(process.ppid, { platform: 'win32', run })).toBe(false);
     expect(run).not.toHaveBeenCalled();
   });
 });

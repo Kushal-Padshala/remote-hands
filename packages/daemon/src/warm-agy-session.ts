@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { EventInput } from './task-store.js';
 import { effortFor } from './hud-models.js';
-import { killWindowsProcessTree } from './system/windows.js';
+import { describeSpawnError, killWindowsProcessTree } from './system/windows.js';
 
 export interface WarmSessionConfig {
   model: string;
@@ -62,7 +62,8 @@ function defaultKill(proc: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): vo
     }
   }
   // Windows has no process groups: end the agent and the tool servers it started together.
-  if (killWindowsProcessTree(proc.pid)) return;
+  // (a process that already ended is left alone: Windows may have given its id to something else)
+  if (proc.exitCode === null && proc.signalCode === null && killWindowsProcessTree(proc.pid)) return;
   proc.kill(signal);
 }
 
@@ -244,7 +245,7 @@ export class WarmAgySession {
     proc.stdin?.on('error', () => {});
     proc.stdout?.on('data', (chunk: Buffer) => this.onData(proc, chunk.toString()));
     proc.stderr?.on('data', () => {});
-    proc.on('error', (err: Error) => this.onClose(proc, err?.message));
+    proc.on('error', (err: Error) => this.onClose(proc, describeSpawnError(err, this.opts.command)));
     proc.on('close', () => this.onClose(proc));
     return proc;
   }

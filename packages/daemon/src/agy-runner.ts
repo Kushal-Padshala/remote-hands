@@ -10,7 +10,8 @@ import { HermesBrain } from './hermes-brain.js';
 import { clearActiveTask, writeActiveTask } from './action-gate.js';
 import type { WarmAgySession, WarmSessionConfig } from './warm-agy-session.js';
 import { effortFor } from './hud-models.js';
-import { killWindowsProcessTree } from './system/windows.js';
+import { describeSpawnError, killWindowsProcessTree } from './system/windows.js';
+import { WINDOWS_COMPUTER_REMINDER, computerPrompt } from './computer/prompt.js';
 
 export interface AgentRunResult {
   events: readonly EventInput[];
@@ -242,7 +243,9 @@ export function getLiveOpenBrowserTabs(): string {
   return '';
 }
 
-export function getDefaultRemoteHandsSystemPrompt(): string {
+export function getDefaultRemoteHandsSystemPrompt(platform: NodeJS.Platform = process.platform): string {
+  // Off the Mac the agent has the browser tools only, and the Mac instructions would send it to tools that are not there.
+  if (platform !== 'darwin') return computerPrompt(platform);
   const profileInfo = getDetectedChromeProfiles();
   const openTabs = getLiveOpenBrowserTabs();
   const parts = [DEFAULT_REMOTE_HANDS_SYSTEM_PROMPT];
@@ -251,7 +254,8 @@ export function getDefaultRemoteHandsSystemPrompt(): string {
   return parts.join('\n\n');
 }
 
-export function getDefaultRemoteHandsReminder(): string {
+export function getDefaultRemoteHandsReminder(platform: NodeJS.Platform = process.platform): string {
+  if (platform !== 'darwin') return WINDOWS_COMPUTER_REMINDER;
   const profileInfo = getDetectedChromeProfiles();
   const openTabs = getLiveOpenBrowserTabs();
   const parts = [DEFAULT_REMOTE_HANDS_REMINDER];
@@ -646,6 +650,11 @@ export class ProcessAgentRunner implements AgentRunner {
         detached: process.platform !== 'win32',
       });
 
+      // A finished process keeps its id: it must not be sent a kill later (Windows may have given the id to something else).
+      let childGone = false;
+      proc.once('exit', () => {
+        childGone = true;
+      });
       const killProc = (sig: NodeJS.Signals = 'SIGTERM') => {
         try {
           if (proc.pid) {
@@ -655,25 +664,28 @@ export class ProcessAgentRunner implements AgentRunner {
               } catch {
                 proc.kill(sig);
               }
-            } else if (!killWindowsProcessTree(proc.pid)) {
+            } else if (!childGone && !killWindowsProcessTree(proc.pid)) {
               proc.kill(sig);
             }
           }
         } catch {}
       };
 
+      let escalation: NodeJS.Timeout | undefined;
+      const onAbort = () => {
+        killProc('SIGTERM');
+        escalation = setTimeout(() => killProc('SIGKILL'), 400);
+      };
       if (signal?.aborted) {
         killProc('SIGTERM');
       } else if (signal) {
-        signal.addEventListener(
-          'abort',
-          () => {
-            killProc('SIGTERM');
-            setTimeout(() => killProc('SIGKILL'), 400);
-          },
-          { once: true },
-        );
+        signal.addEventListener('abort', onAbort, { once: true });
       }
+      // once the agent has ended, a later abort of the shared signal is not about it
+      proc.once('close', () => {
+        signal?.removeEventListener('abort', onAbort);
+        if (escalation) clearTimeout(escalation);
+      });
 
       const events: EventInput[] = [];
       let summary = '';
@@ -726,7 +738,7 @@ export class ProcessAgentRunner implements AgentRunner {
       });
 
       proc.on('error', (err) => {
-        reject(err);
+        reject(process.platform === 'win32' ? new Error(describeSpawnError(err, binary)) : err);
       });
 
       proc.on('close', (code) => {
