@@ -1122,8 +1122,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                         self.statusPill.textColor = .systemOrange
                         self.stopButton.isHidden = true
                         self.panel.makeFirstResponder(self.textField)
-                    } else if status == "FAILED" || status == "ERROR" {
+                    } else if status == "FAILED" {
+                        // The task is over: stop the spinner and give the input back.
+                        self.isWorking = false
+                        self.statusPill.stringValue = "✖ FAILED"
+                        self.statusPill.textColor = .systemRed
+                        self.stopButton.isHidden = true
+                        self.appendHistory(role: role ?? "ERROR", text: text.isEmpty ? "The task failed." : text, color: .systemRed, icon: "⚠")
+                        self.panel.makeFirstResponder(self.textField)
+                    } else if status == "ERROR" {
                         self.appendHistory(role: role ?? "ERROR", text: text.isEmpty ? "Action error occurred." : text, color: .systemRed, icon: "⚠")
+                    } else if text.isEmpty && !self.isWorking {
+                        // A status-word-only update that arrives after the task ended must not bring the spinner back.
+                        return
                     } else {
                         self.isWorking = true
                         self.statusPill.stringValue = "● " + status
@@ -1133,7 +1144,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                             var color = NSColor.systemCyan
                             var icon = "🧠"
                             let r = role ?? status
-                            if status == "EXECUTING" || status == "ACTION" || role == "ACTION" {
+                            if status == "EXECUTING" || status == "ACTION" || role == "ACTION" || role == "ATTENTION" {
                                 color = NSColor(red: 1.0, green: 0.78, blue: 0.28, alpha: 1.0)
                                 icon = "⚡"
                             } else if status == "FOCUS" {

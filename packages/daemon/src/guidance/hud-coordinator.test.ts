@@ -387,6 +387,35 @@ describe('HudCoordinator', () => {
     expect(mockStore.appendEvent.mock.calls.filter((call: any[]) => call[1].kind === 'agent_text').length).toBeGreaterThan(3);
   });
 
+  it('sends nothing to the HUD after Stop, even for an event that was still being stored', async () => {
+    const updates: string[] = [];
+    const send = (status: string, text: string) => { updates.push(`${status}:${text}`); };
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    const mockStore = {
+      markTaskRunning: vi.fn().mockResolvedValue({ id: 't-stop' }),
+      appendEvent: vi.fn().mockImplementation(async (_id: string, ev: any) => { if (ev.kind === 'agent_text') await held; }),
+      cancelTask: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn(),
+    };
+    const mockRunner = {
+      run: vi.fn().mockImplementation(async (_t: any, onEvent: any, signal: AbortSignal) => {
+        await onEvent({ kind: 'agent_text', payload: { text: ' ' } });
+        return { status: 'done', summary: signal.aborted ? 'stopped' : 'x', conversationId: null };
+      }),
+    };
+    const c = new HudCoordinator({
+      hudRunner: mockHudRunner, intentResolver: mockIntentResolver, guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver, store: mockStore as any, runner: mockRunner as any,
+    });
+    const running = c.executeTaskStandalone({ id: 't-stop' } as any, send);
+    await new Promise((r) => setTimeout(r, 10));
+    await c.stopActiveTask('Stopped by user', send);
+    release();
+    await running;
+    expect(updates).toEqual(['STARTING:', 'STOPPED:Stopped by user']);
+  });
+
   it('focuses the browser once on macOS and never steals focus on tool call events', async () => {
     mockMacOsDriver.focusWindow = vi.fn().mockResolvedValue(undefined);
     const mockRunner = {

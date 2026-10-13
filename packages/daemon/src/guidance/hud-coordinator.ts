@@ -451,7 +451,8 @@ export class HudCoordinator {
         if (store.appendEvent) {
           await store.appendEvent(running!.id, event as any).catch(() => {});
         }
-        feed?.event(event);
+        // A Stop that landed while the event was being stored must not be followed by a status update.
+        if (!abortController.signal.aborted) feed?.event(event);
       }, abortController.signal);
 
       if (res.conversationId) {
