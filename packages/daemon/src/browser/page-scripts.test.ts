@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { DOM_SNAPSHOT_SCRIPT } from '../browser-snapshot.js';
+import { normalizeSnapshot, renderElement } from './render.js';
 import {
   buildActionScript,
   buildExtractScript,
@@ -1171,9 +1172,10 @@ describe('snapshot hardening (review fixes)', () => {
     const snap = light(p);
     const labels = snap.actions.map((a: any) => a.label);
     expect(labels).toContain('After the select');
-    const listed = snap.actions.filter((a: any) => a.label.startsWith('Year → '));
+    const listed = snap.actions.filter((a: any) => a.kind === 'select');
     expect(listed).toHaveLength(500);
     expect(listed[0].options_omitted).toBe(299);
+    expect(listed[1]).toEqual({ id: expect.any(String), node: listed[0].node, kind: 'select', value: expect.any(String), label: expect.stringMatching(/^ → Option /) });
     expect(snap.omitted_actions).toBe(0);
   });
 
@@ -1492,6 +1494,73 @@ describe('page scripts and snapshot (round 3 fixes)', () => {
     p.doc.getElementById('wrapper').checkVisibility = () => false; // no box of its own
     p.doc.getElementById('a').attachShadow({ mode: 'open' }).innerHTML = '<slot style="visibility:hidden"></slot>';
     expect(p.evalJson(buildExtractScript(2000)).text).toBe('Wrapped text');
+  });
+});
+
+describe('page scripts and snapshot (round 4 fixes)', () => {
+  const light = (p: Page): any => p.evalJson(buildSnapshotCall());
+
+  it('keeps many dropdowns with many selected choices and long labels well under the bridge limit', () => {
+    const label = 'L'.repeat(209);
+    const options = Array.from({ length: 531 }, (_, i) => `<option value="${i}" ${i < 30 ? 'selected' : ''}>${label}${i}</option>`).join('');
+    const p = makePage(Array.from({ length: 12 }, (_, i) => `<select multiple aria-label="Pick ${i}">${options}</select>`).join(''));
+    const raw = p.win.eval(buildSnapshotCall()) as string;
+    expect(Buffer.byteLength(raw, 'utf8')).toBeLessThan(6 * 1024 * 1024);
+    const state = normalizeSnapshot(JSON.parse(raw));
+    expect(state.elements.filter((e) => e.kind === 'select')).toHaveLength(12);
+  }, 60_000);
+
+  it('a compact dropdown still renders exactly as before: label, current value, choices', () => {
+    const p = makePage('<select aria-label="Country"><option value="us" selected>US</option><option value="ca">Canada</option><option value="mx">Mexico</option></select>');
+    const state = normalizeSnapshot(light(p));
+    const select = state.elements.find((e) => e.kind === 'select')!;
+    expect(renderElement(select)).toBe(`[${select.id}] select "Country" = "US" options: US | Canada | Mexico`);
+  });
+
+  it('reads a frame under identity scale/rotate, but not under a real one', () => {
+    const cases: Array<[Record<string, string>, boolean]> = [
+      [{ scale: '1', rotate: '0deg' }, true],
+      [{ scale: '1 1', rotate: 'none' }, true],
+      [{ scale: '0.5', rotate: 'none' }, false],
+      [{ scale: 'none', rotate: 'z 45deg' }, false],
+    ];
+    for (const [style, readable] of cases) {
+      const p = makePage('<div id="wrap"></div>');
+      const frame = addFrame(p, '<button>Pay</button>', { left: 0, top: 0, width: 200, height: 200 }, p.doc.getElementById('wrap'));
+      const original = p.win.getComputedStyle.bind(p.win);
+      p.win.getComputedStyle = (el: any) => (el === p.doc.getElementById('wrap') ? { transform: 'none', ...style } : original(el));
+      void frame;
+      const got = light(p);
+      expect({ style, readable: got.actions.map((a: any) => a.label).includes('Pay') }).toEqual({ style, readable });
+      expect(got.frames_blocked).toBe(readable ? undefined : 1);
+    }
+  });
+
+  it('judges the click on the element itself when another handler clicks something else first', () => {
+    for (const [innerCancels, outerCancels, expected] of [[true, false, true], [false, true, undefined]] as const) {
+      const p = makePage('<button id="b">Other</button><a id="l" href="#d" target="_blank">Docs</a>');
+      // an existing window capture handler that reacts to the link by clicking the button
+      p.win.addEventListener('click', (e: any) => {
+        if (e.target.id === 'l') {
+          if (outerCancels) e.preventDefault();
+          p.doc.getElementById('b').click();
+        }
+      }, true);
+      p.doc.getElementById('b').addEventListener('click', (e: any) => { if (innerCancels) e.preventDefault(); });
+      p.snapshot();
+      expect((p.run({ op: 'click', node: p.node('#l'), label: 'Docs' }) as any).opened).toBe(expected);
+    }
+  });
+
+  it('extract excludes text in a display: contents wrapper that is visibility hidden', () => {
+    const p = makePage('<main><div id="w" style="display:contents;visibility:hidden">Invisible invoice</div><div id="v" style="display:contents">Visible invoice</div></main>');
+    for (const id of ['w', 'v']) p.doc.getElementById(id).checkVisibility = () => false;
+    expect(p.evalJson(buildExtractScript(2000)).text).toBe('Visible invoice');
+  });
+
+  it('names a control from several aria-labelledby ids (ids containing the letter s must not be split apart)', () => {
+    const p = makePage('<span id="first-label">First</span><span id="second-label">Second</span><input aria-labelledby="first-label second-label">');
+    expect(light(p).actions.map((a: any) => a.label)).toContain('First Second');
   });
 });
 

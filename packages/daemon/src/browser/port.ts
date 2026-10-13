@@ -24,6 +24,8 @@ export interface BrowserPort {
   find(query: string, limit?: number): Promise<string>;
   do(steps: DoStep[]): Promise<string>;
   extract(maxChars?: number): Promise<string>;
+  /** The tool call that is running was abandoned (timed out): stop acting on its behalf. Optional. */
+  abandon?(): void;
 }
 
 /** `computer_batch` wording for the steps that succeeded before step `n` (1-based). */

@@ -265,6 +265,8 @@ export class FastBrowserEngine implements BrowserPort {
   private readonly autoEnable: FastBrowserEngineDeps['autoEnable'];
   private readonly gate: FastBrowserEngineDeps['gate'];
   private readonly autoFailedAt = new Map<string, number>();
+  /** Bumped by abandon(): a browser_do call that started before it must not act any more. */
+  private epoch = 0;
 
   constructor(deps: FastBrowserEngineDeps) {
     this.autoEnable = deps.autoEnable;
@@ -274,6 +276,11 @@ export class FastBrowserEngine implements BrowserPort {
     this.env = deps.env ?? process.env;
     this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.now = deps.now ?? Date.now;
+  }
+
+  /** The tool call that is running was abandoned (its timeout fired): running browser_do calls act no further. */
+  abandon(): void {
+    this.epoch += 1;
   }
 
   /** Forget the pinned tab, the shown page and the fast-path availability cache. */
@@ -577,11 +584,12 @@ export class FastBrowserEngine implements BrowserPort {
   }
 
   /** Runs one page op; throws the model-facing message on failure. */
-  /** `deadline` belongs to one browser_do call (never shared between calls): no click passes its approval gate after it. */
-  private async act(ctx: Ctx, op: PageOp, index: number | null, deadline: number | null = null): Promise<PageOpResult & { ok: true }> {
+  /** `stop` belongs to one browser_do call (never shared between calls) and says why it may no longer act: no click passes its approval gate after that. */
+  private async act(ctx: Ctx, op: PageOp, index: number | null, stop: (() => string | null) | null = null): Promise<PageOpResult & { ok: true }> {
     if (op.op === 'click') {
       await this.gate?.(op.label);
-      if (deadline !== null && this.now() > deadline) throw new Error(`${OUT_OF_TIME}; the click was not performed`);
+      const why = stop?.();
+      if (why) throw new Error(`${why}; the click was not performed`);
     }
     let text: string;
     try {
@@ -863,6 +871,9 @@ export class FastBrowserEngine implements BrowserPort {
   }
 
   private async doSteps(steps: DoStep[], deadline: number): Promise<string> {
+    const epoch = this.epoch;
+    const stopReason = (): string | null =>
+      this.epoch !== epoch ? 'this call was abandoned after the tool timed out' : this.now() > deadline ? OUT_OF_TIME : null;
     if (this.shown?.mode === 'legacy') return this.legacy.do(steps);
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new Error('browser_do needs at least one step. No steps were run.');
@@ -917,7 +928,9 @@ export class FastBrowserEngine implements BrowserPort {
       if (flags.fellBack) return this.legacy.do(steps);
       shown = this.shown?.mode === 'fast' ? this.shown : null;
     }
-    const plan = steps.map((step, i) => planStep(step, i + 1, shown?.state ?? null));
+    // Numeric ids mean what the model saw (their label guards come from that view); labels are
+    // resolved against the fresh look.
+    const plan = steps.map((step, i) => planStep(step, i + 1, shown?.state ?? null, modelView?.state ?? shown?.state ?? null));
     const totalWait = plan.reduce((sum, p) => sum + p.ms, 0);
     if (totalWait > MAX_TOTAL_WAIT_MS) {
       throw new Error(`browser_do waits add up to ${totalWait} ms; the limit is ${MAX_TOTAL_WAIT_MS} ms per call. No steps were run.`);
@@ -960,7 +973,8 @@ export class FastBrowserEngine implements BrowserPort {
     for (let i = 0; i < plan.length; i += 1) {
       const p = plan[i]!;
       const n = i + 1;
-      if (this.now() > deadline) return fail(n, p.name, new Error(`${OUT_OF_TIME}; remaining steps not run`));
+      const stopped = stopReason();
+      if (stopped) return fail(n, p.name, new Error(`${stopped}; remaining steps not run`));
       if (!p.op) {
         await this.sleep(p.ms);
         focused = null; // a wait gives the page time to move focus itself
@@ -969,7 +983,7 @@ export class FastBrowserEngine implements BrowserPort {
       }
       let res: PageOpResult & { ok: true };
       try {
-        res = await this.act(ctx, this.guarded(p.op, origin), p.index, deadline);
+        res = await this.act(ctx, this.guarded(p.op, origin), p.index, stopReason);
       } catch (err) {
         return fail(n, p.name, err);
       }
@@ -1023,7 +1037,7 @@ interface PlannedStep {
 }
 
 /** Validates one `do` step against the shown page; throws `step N <op> invalid: ...`. */
-function planStep(step: DoStep, n: number, state: PageState | null): PlannedStep {
+function planStep(step: DoStep, n: number, state: PageState | null, indexState: PageState | null = state): PlannedStep {
   const name = String((step as { op?: unknown } | null)?.op ?? '');
   const invalid = (reason: string): Error => new Error(`step ${n} ${name} invalid: ${reason}. No steps were run.`);
   if (!ALL_OPS.has(name)) throw invalid('unknown op');
@@ -1040,7 +1054,7 @@ function planStep(step: DoStep, n: number, state: PageState | null): PlannedStep
       el = r.el;
     } else {
       if (typeof step.index !== 'number' || !Number.isInteger(step.index)) throw invalid('index or target is required');
-      const found = state?.elements.find((e) => e.id === step.index);
+      const found = indexState?.elements.find((e) => e.id === step.index);
       if (!found || typeof found.node !== 'number') {
         throw invalid(`index ${step.index} is not on the page I last showed`);
       }

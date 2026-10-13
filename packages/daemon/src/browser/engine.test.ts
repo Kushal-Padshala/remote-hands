@@ -1467,3 +1467,43 @@ describe('do: documents, deadlines and focus (round 3 fixes)', () => {
   });
 });
 
+describe('do: label guards and abandonment (round 4 fixes)', () => {
+  it('keeps the label the model saw for a numeric step, even if the page now calls that control something else', async () => {
+    const one = (label: string): string => JSON.stringify(page({ page_key: [1], actions: [
+      { node: 1, role: 'button', label, kind: 'click', value: '' },
+      { node: 2, role: 'button', label: 'Menu', kind: 'click', value: '' },
+    ] }));
+    t.snapshots = [one('Open details')];
+    await engine.snapshot();
+    t.snapshots = [one('Delete account')]; // same document, same node, different meaning
+    await engine.do([{ op: 'click', index: 1 }, { op: 'hover', target: 'Menu' }]);
+    expect(t.actionEvals().map(opOf)[0]).toMatchObject({ op: 'click', node: 1, label: 'Open details' }); // the page guard then refuses
+  });
+
+  it('refuses to click after an approval wait when the tool call was abandoned meanwhile', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    const gated = new FastBrowserEngine({
+      transport: t, legacy, env: {}, now: () => clock, sleep: async (ms) => { clock += ms; },
+      gate: async () => { await held; },
+    });
+    await gated.snapshot();
+    const running = gated.do([{ op: 'click', index: 12 }]);
+    await Promise.resolve();
+    gated.abandon(); // the MCP timeout fired
+    release();
+    await expect(running).rejects.toThrow('this call was abandoned after the tool timed out; the click was not performed');
+    expect(t.actionEvals()).toHaveLength(0);
+  });
+
+  it('starts no further step once abandoned, and a call that starts afterwards is not affected', async () => {
+    await engine.snapshot();
+    t.actions = [(): string => { engine.abandon(); return JSON.stringify({ ok: true, label: 'x' }); }];
+    await expect(engine.do([{ op: 'check', index: 9, checked: true }, { op: 'click', index: 12 }])).rejects.toThrow(
+      'step 2 click failed: this call was abandoned after the tool timed out; remaining steps not run (step 1 ok)',
+    );
+    expect(t.actionEvals()).toHaveLength(1);
+    await expect(engine.do([{ op: 'click', index: 12 }])).resolves.toContain('did: click');
+  });
+});
+

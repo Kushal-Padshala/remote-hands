@@ -260,7 +260,11 @@ const CLICK = String.raw`
   // the link opens nothing.
   const view = viewOf(el);
   let clickEvent = null;
-  const record = (ev) => { if (!clickEvent) clickEvent = ev; };
+  // Only the event that targets this element counts: a handler may click something else first.
+  const record = (ev) => {
+    const path = typeof ev.composedPath === 'function' ? ev.composedPath() : [ev.target];
+    if (!clickEvent && path.includes(el)) clickEvent = ev;
+  };
   view.addEventListener('click', record, true);
   try { el.click(); } finally { view.removeEventListener('click', record, true); }
   // If the event could not be observed, or the page cancelled it, make no claim about a new tab.
@@ -462,7 +466,8 @@ export function buildExtractScript(maxChars: number): string {
   const hidden = (e) => e.hasAttribute('hidden') || e.getAttribute('aria-hidden') === 'true' || e.hasAttribute('inert') ||
     (typeof e.checkVisibility === 'function' && !e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) &&
       // an element with display: contents has no box but its children are rendered normally
-      !(typeof getComputedStyle === 'function' && getComputedStyle(e).display === 'contents'));
+      !(typeof getComputedStyle === 'function' && getComputedStyle(e).display === 'contents' &&
+        getComputedStyle(e).visibility !== 'hidden' && getComputedStyle(e).visibility !== 'collapse'));
   const textLen = (e) => (e.textContent || '').length;
   const candidates = Array.from(document.querySelectorAll('main,[role="main"],article')).filter((e) => !hidden(e));
   let root = null;

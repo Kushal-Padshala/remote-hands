@@ -26,6 +26,8 @@ export interface ComputerMcpServerOptions {
    * error is ignored.
    */
   onCall?: ((record: ToolCallRecord) => void) | undefined;
+  /** Called when a call hits the per-call timeout, before the queue moves on, so work that is still running can stop acting. */
+  onTimeout?: (() => void) | undefined;
   /** Monotonic milliseconds for timing a call (default performance.now; wall-clock changes must not skew it). */
   now?: (() => number) | undefined;
 }
@@ -39,7 +41,14 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
   const withTimeout = (work: Promise<Result>): Promise<Result> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<Result>((resolve) => {
-      timer = setTimeout(() => resolve({ isError: true, content: [{ type: 'text', text: formatTimeout(limit) }] }), limit);
+      timer = setTimeout(() => {
+        try {
+          opts.onTimeout?.();
+        } catch {
+          // stopping stray work must never break the queue
+        }
+        resolve({ isError: true, content: [{ type: 'text', text: formatTimeout(limit) }] });
+      }, limit);
     });
     return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
   };
@@ -88,7 +97,7 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
 export async function serveComputerMcp(session: ComputerSession): Promise<void> {
   const server = createComputerMcpServer(
     buildComputerTools(session),
-    process.env.RH_CALL_LOG === '0' ? {} : { onCall: (record) => appendCallRecord(os.homedir(), record) },
+    { onTimeout: () => session.abandon(), ...(process.env.RH_CALL_LOG === '0' ? {} : { onCall: (record: ToolCallRecord) => appendCallRecord(os.homedir(), record) }) },
   );
   await server.connect(new StdioServerTransport());
 }

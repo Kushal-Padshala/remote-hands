@@ -96,6 +96,22 @@ describe('createComputerMcpServer', () => {
     expect(records[0]!.ms).toBe(0);
   });
 
+  it('tells onTimeout when a call is abandoned, then lets the queue move on even if onTimeout throws', async () => {
+    let timeouts = 0;
+    const client = await connect(
+      [
+        { name: 'hang', description: 'd', inputSchema: {}, handler: () => new Promise<string>(() => {}) },
+        { name: 'ok', description: 'd', inputSchema: {}, handler: async () => 'fine' },
+      ],
+      { callTimeoutMs: 20, onTimeout: () => { timeouts += 1; throw new Error('boom'); } },
+    );
+    const hung = await client.callTool({ name: 'hang', arguments: {} });
+    expect(hung.isError).toBe(true);
+    expect(timeouts).toBe(1);
+    expect((await client.callTool({ name: 'ok', arguments: {} })).content).toEqual([{ type: 'text', text: 'fine' }]);
+    expect(timeouts).toBe(1);
+  });
+
   it('a throwing onCall never breaks the tool call', async () => {
     const client = await connect(
       [{ name: 't', description: 'd', inputSchema: {}, handler: async () => 'fine' }],

@@ -191,6 +191,11 @@ export class ComputerSession {
   browserExtract(maxChars?: number): Promise<string> {
     return this.deps.browser.extract(maxChars);
   }
+
+  /** The running tool call timed out: browser calls that are still going must not act any more. */
+  abandon(): void {
+    this.deps.browser.abandon?.();
+  }
 }
 
 export function createDefaultComputerSession(gate?: ActionGate): ComputerSession {

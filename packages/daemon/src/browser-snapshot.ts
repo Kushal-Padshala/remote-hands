@@ -77,7 +77,7 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   const name = (e, seen = new Set()) => {
     if (!e || seen.has(e)) return '';
     seen.add(e);
-    const referenced = (e.getAttribute('aria-labelledby') || '').split(/\s+/)
+    const referenced = (e.getAttribute('aria-labelledby') || '').split(/\\s+/)
       .map((id) => name(byId(e, id), seen)).filter(Boolean).join(' ');
     return referenced || e.getAttribute('aria-label') ||
       [...(e.labels || [])].map((l) => name(l, seen)).filter(Boolean).join(' ') ||
@@ -125,18 +125,25 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   const textRoots = [];
   // Offsets can only be added through a pure translation: any scale, rotation, skew or reflection
   // anywhere above the frame (or a size that differs from its layout size) means we cannot map it.
-  const transformed = (host) => {
-    for (let n = host; n; n = n.parentElement || hostOf(n) || frameOf(n)) {
-      if (typeof getComputedStyle !== 'function') return false;
-      const cs = (n.ownerDocument && n.ownerDocument.defaultView || window).getComputedStyle(n);
-      if ((cs.rotate && cs.rotate !== 'none') || (cs.scale && cs.scale !== 'none')) return true;
-      if (cs.transform && cs.transform !== 'none') {
-        if (typeof DOMMatrixReadOnly !== 'function') return true;
-        const m = new DOMMatrixReadOnly(cs.transform);
-        if (Math.abs(m.a - 1) > 0.001 || Math.abs(m.b) > 0.001 || Math.abs(m.c) > 0.001 || Math.abs(m.d - 1) > 0.001) return true;
-      }
+  const transformMemo = new Map();
+  const ownTransform = (n) => {
+    const cs = (n.ownerDocument && n.ownerDocument.defaultView || window).getComputedStyle(n);
+    const lastNumber = (v) => parseFloat(String(v).trim().split(/\\s+/).pop());
+    if (cs.rotate && cs.rotate !== 'none' && lastNumber(cs.rotate) !== 0) return true;
+    if (cs.scale && cs.scale !== 'none' && !String(cs.scale).trim().split(/\\s+/).every((t) => Number(t) === 1)) return true;
+    if (cs.transform && cs.transform !== 'none') {
+      if (typeof DOMMatrixReadOnly !== 'function') return true;
+      const m = new DOMMatrixReadOnly(cs.transform);
+      if (Math.abs(m.a - 1) > 0.001 || Math.abs(m.b) > 0.001 || Math.abs(m.c) > 0.001 || Math.abs(m.d - 1) > 0.001) return true;
     }
     return false;
+  };
+  const transformed = (n) => {
+    if (!n || typeof getComputedStyle !== 'function') return false;
+    if (transformMemo.has(n)) return transformMemo.get(n);
+    const result = ownTransform(n) || transformed(n.parentElement || hostOf(n) || frameOf(n));
+    transformMemo.set(n, result);
+    return result;
   };
   const intersect = (a, b) => ({ l: Math.max(a.l, b.l), t: Math.max(a.t, b.t), r: Math.min(a.r, b.r), b: Math.min(a.b, b.b) });
   const gather = (root, dx, dy, depth, clip) => {
@@ -210,10 +217,15 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
       optionBudget -= listedOptions.length;
       const cut = eligible.length - listedOptions.length;
       const current = [...e.selectedOptions].map((opt) => opt.label).join(', ');
-      for (const o of listedOptions) {
-        actions.push({ ...base, kind: 'select', value: o.value, current_value: current, label: base.label + ' → ' + o.label,
-          ...(cut > 0 ? { options_omitted: cut } : {}) });
-      }
+      listedOptions.forEach((o, i) => {
+        // Fast engine: only the first choice carries the control's fields; the rest are just the choice,
+        // so a dropdown's label and current value are not repeated hundreds of times.
+        if (light && i > 0) actions.push({ node: base.node, kind: 'select', value: o.value, label: ' → ' + o.label });
+        else {
+          actions.push({ ...base, kind: 'select', value: o.value, current_value: current, label: base.label + ' → ' + o.label,
+            ...(cut > 0 ? { options_omitted: cut } : {}) });
+        }
+      });
     } else {
       const editable = !e.readOnly && e.getAttribute('aria-readonly') !== 'true' &&
         (['textbox', 'searchbox', 'spinbutton'].includes(rname) ||
