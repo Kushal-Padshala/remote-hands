@@ -3,7 +3,6 @@ import {
   HudCoordinator,
   isAutonomousGoal,
   formatContextualTaskPrompt,
-  formatHudStatus,
   formatPreviousTaskSection,
 } from './hud-coordinator.js';
 
@@ -303,40 +302,6 @@ describe('HudCoordinator', () => {
     });
   });
 
-  it('formats hud status from various agent stream events', () => {
-    expect(
-      formatHudStatus({ kind: 'tool_call', payload: { tool: 'desktop', input: { goal: 'Click Submit' } } })
-    ).toEqual({
-      status: 'EXECUTING',
-      text: 'Using desktop: Click Submit',
-      role: 'ACTION',
-    });
-
-    expect(
-      formatHudStatus({ kind: 'thinking', payload: { text: 'Drafting ad copy\nSecond line' } })
-    ).toEqual({
-      status: 'THINKING',
-      text: 'Drafting ad copy',
-      role: 'THINK',
-    });
-
-    expect(
-      formatHudStatus({ kind: 'status', payload: { status: 'running' } })
-    ).toEqual({
-      status: 'WORKING',
-      text: 'Task status: running',
-      role: 'STATUS',
-    });
-
-    expect(
-      formatHudStatus({ kind: 'error', payload: { message: 'Network failed' } })
-    ).toEqual({
-      status: 'ERROR',
-      text: 'Network failed',
-      role: 'ERROR',
-    });
-  });
-
   it('opens interactive prompt on hotkey and streams live updates', async () => {
     let capturedListener: any;
     mockHudRunner.startListener.mockImplementation((cb: any) => {
@@ -381,10 +346,45 @@ describe('HudCoordinator', () => {
         effort: 'low',
       })
     );
-    expect(mockUpdates).toContainEqual({
-      status: 'THINKING',
-      text: 'Analyzing context and initializing agent...',
+    // Starting up is a status word only: no jargon line in the history.
+    expect(mockUpdates).toContainEqual({ status: 'THINKING', text: '' });
+    expect(mockUpdates.some((u) => /Analyzing|initializing/i.test(u.text))).toBe(false);
+  });
+
+  it('shows the user a few plain lines: no streamed answer fragments, no tool plumbing, and a plain final answer', async () => {
+    const updates: Array<{ status: string; text: string; role?: string }> = [];
+    const send = (status: string, text: string, role?: string) => { updates.push({ status, text, ...(role ? { role } : {}) }); };
+    const answer = '### Summary\n\n1. **Opened** the [Credentials page](https://example.com).\n- Checked `Android client 1`';
+    const mockRunner = {
+      run: vi.fn().mockImplementation(async (_task: any, onEvent: any) => {
+        await onEvent({ kind: 'status', payload: { status: 'running' } });
+        await onEvent({ kind: 'thinking', payload: { text: 'Reasoned for 2.0s' } });
+        await onEvent({ kind: 'tool_call', payload: { tool: 'call_mcp_tool', call_id: '2', input: { ServerName: 'rh-computer', ToolName: 'browser_click', Arguments: { index: 72 } } } });
+        await onEvent({ kind: 'tool_result', payload: { call_id: '2', ok: true, output: 'clicked [72] Android client 2\nchanged: page navigated' } });
+        for (const chunk of answer.match(/.{1,12}/gs) ?? []) await onEvent({ kind: 'agent_text', payload: { text: chunk } });
+        return { status: 'done', summary: answer, conversationId: 'c1' };
+      }),
+    };
+    const mockStore = {
+      markTaskRunning: vi.fn().mockResolvedValue({ id: 't1', kind: 'browser' }),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+    };
+    const c = new HudCoordinator({
+      hudRunner: mockHudRunner, intentResolver: mockIntentResolver, guidanceManager: mockGuidanceManager,
+      macosDriver: mockMacOsDriver, store: mockStore as any, runner: mockRunner as any,
     });
+    await c.executeTaskStandalone({ id: 't1', kind: 'browser' } as any, send);
+
+    const lines = updates.filter((u) => u.text);
+    expect(lines.map((u) => [u.status, u.text, u.role])).toEqual([
+      ['WORKING', 'Clicked "Android client 2"', 'ACTION'],
+      ['COMPLETE', 'Summary\n\n1. Opened the Credentials page.\n• Checked Android client 1', 'DONE'],
+    ]);
+    expect(updates.filter((u) => !u.text).map((u) => u.status)).toEqual(['STARTING', 'THINKING', 'CLICKING', 'THINKING', 'WRITING']);
+    expect(JSON.stringify(updates)).not.toMatch(/call_mcp_tool|rh-computer|browser_click|Task status/);
+    // the full, unfiltered stream is still stored
+    expect(mockStore.appendEvent.mock.calls.filter((call: any[]) => call[1].kind === 'agent_text').length).toBeGreaterThan(3);
   });
 
   it('focuses the browser once on macOS and never steals focus on tool call events', async () => {

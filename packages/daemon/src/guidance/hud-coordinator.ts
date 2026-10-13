@@ -13,6 +13,7 @@ import { ProcessAgentRunner, parseAgyStreamLine, HUD_TASK_MODE, type AgentRunner
 import { WarmAgySession } from '../warm-agy-session.js';
 import { SLIM_COMPUTER_PROMPT } from '../computer/prompt.js';
 import { DynamicPowerManager } from '../system/power-manager.js';
+import { HudFeed, plainSummary } from './hud-feed.js';
 
 /** The warm agy process is stopped after this long unused; the hotkey starts a fresh one while the user types. */
 const HUD_AGY_IDLE_MS = Number(process.env.RH_HUD_AGY_IDLE_MS ?? 10 * 60_000);
@@ -186,79 +187,6 @@ export function formatContextualTaskPrompt(
   lines.push('5. ZERO SCREENSHOTS & ZERO PHYSICAL MOUSE MOVEMENTS: Prefer the rh-computer MCP tools (browser_snapshot, browser_click, browser_type, browser_do for forms and multi-step browser sequences, desktop_snapshot, desktop_click, computer_batch) with zero cursor movement. If those tools are unavailable, use these shell commands as a fallback: `rh browser snapshot`, `rh browser click <index>`, `rh browser type <index>`, or `rh desktop ax-action <app> <index> [action]`. Never take screenshots and never simulate physical mouse clicks (except the physical-click fallback that desktop_click reports in its result).');
   lines.push(...formatPreviousTaskSection(previous, Date.now()));
   return lines.join('\n');
-}
-
-export function formatHudStatus(event: any): { status: string; text: string; role?: string } {
-  if (!event) return { status: 'THINKING', text: '' };
-  const kind = event.kind || event.type;
-  const payload = event.payload || event;
-
-  if (kind === 'tool_call') {
-    const tool = payload.tool || 'Action';
-    let detail = '';
-    if (payload.input) {
-      if (typeof payload.input === 'object') {
-        const inp = payload.input as any;
-        detail = inp.toolAction || inp.CommandLine || inp.goal || inp.url || inp.text || inp.app || inp.toolSummary || inp.command || inp.query || '';
-      } else {
-        detail = String(payload.input);
-      }
-    }
-    const cleanDetail = detail ? `: ${detail.slice(0, 80)}` : '';
-    return {
-      status: 'EXECUTING',
-      text: tool === 'run_command' && detail ? detail.slice(0, 90) : `Using ${tool}${cleanDetail}`,
-      role: 'ACTION',
-    };
-  }
-
-  if (kind === 'tool_result') {
-    return {
-      status: 'THINKING',
-      text: 'Processing action results...',
-      role: 'OUTPUT',
-    };
-  }
-
-  if (kind === 'thinking') {
-    const raw = typeof payload.text === 'string' ? payload.text.trim() : '';
-    const clean = raw.split('\n')[0]?.slice(0, 100) || 'Thinking through next step...';
-    return {
-      status: 'THINKING',
-      text: clean,
-      role: 'THINK',
-    };
-  }
-
-  if (kind === 'agent_text') {
-    const raw = typeof payload.text === 'string' ? payload.text.trim() : '';
-    if (!raw) return { status: 'THINKING', text: '' };
-    const clean = raw.split('\n')[0]?.slice(0, 100) || '';
-    return {
-      status: 'WORKING',
-      text: clean,
-      role: 'AGENT',
-    };
-  }
-
-  if (kind === 'status') {
-    const st = payload.status || 'running';
-    return {
-      status: st === 'running' ? 'WORKING' : String(st).toUpperCase(),
-      text: `Task status: ${st}`,
-      role: 'STATUS',
-    };
-  }
-
-  if (kind === 'error') {
-    return {
-      status: 'ERROR',
-      text: payload.message || 'An error occurred',
-      role: 'ERROR',
-    };
-  }
-
-  return { status: 'WORKING', text: '' };
 }
 
 export interface HudCoordinatorOptions {
@@ -489,7 +417,7 @@ export class HudCoordinator {
       await store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
 
       if (sendUpdate) {
-        sendUpdate('WORKING', 'Starting autonomous agent execution...');
+        sendUpdate('STARTING', '');
       }
       if (task.kind === 'browser' && process.platform === 'darwin') {
         this.macosDriver.focusWindow('Google Chrome').catch(() => {});
@@ -517,16 +445,13 @@ export class HudCoordinator {
       }
 
       const runner = this.getRunner();
+      // The full event stream is stored as is; the HUD only gets a few plain sentences from it.
+      const feed = sendUpdate ? new HudFeed(sendUpdate) : null;
       const res = fastLaneResult ?? await runner.run(taskForAgent, async (event) => {
         if (store.appendEvent) {
           await store.appendEvent(running!.id, event as any).catch(() => {});
         }
-        if (sendUpdate) {
-          const formatted = formatHudStatus(event);
-          if (formatted.text) {
-            sendUpdate(formatted.status, formatted.text, formatted.role);
-          }
-        }
+        feed?.event(event);
       }, abortController.signal);
 
       if (res.conversationId) {
@@ -551,7 +476,7 @@ export class HudCoordinator {
       if (res.status === 'failed') {
         await store.failTask(running.id, { error: res.summary || 'Task failed' });
         if (sendUpdate) {
-          sendUpdate('FAILED', res.summary || 'Task failed', 'ERROR');
+          sendUpdate('FAILED', plainSummary(res.summary || '') || 'Task failed', 'ERROR');
         }
       } else {
         await store.completeTask(running.id, { summary: res.summary, conversationId: res.conversationId });
@@ -561,7 +486,7 @@ export class HudCoordinator {
           finishedAt: Date.now(),
         };
         if (sendUpdate) {
-          sendUpdate('COMPLETE', res.summary || 'Task completed successfully', 'DONE');
+          sendUpdate('COMPLETE', plainSummary(res.summary || '') || 'Task completed successfully', 'DONE');
         }
       }
       if (this.onTaskCompleted && !abortController.signal.aborted) {
@@ -591,7 +516,7 @@ export class HudCoordinator {
       }
       await store.failTask(targetId, { error: err?.message || String(err) });
       if (sendUpdate) {
-        sendUpdate('FAILED', err?.message || 'Task failed', 'ERROR');
+        sendUpdate('FAILED', plainSummary(err?.message || '', 400) || 'Task failed', 'ERROR');
       }
     } finally {
       this.powerManager?.endTask();
@@ -623,7 +548,7 @@ export class HudCoordinator {
 
     if (isGoal && this.store && typeof this.store.createTask === 'function') {
       if (sendUpdate) {
-        sendUpdate('THINKING', 'Analyzing context and initializing agent...');
+        sendUpdate('THINKING', '');
       }
       const prompt = formatContextualTaskPrompt(
         result.query,
@@ -655,7 +580,7 @@ export class HudCoordinator {
     }
 
     if (sendUpdate) {
-      sendUpdate('THINKING', 'Resolving visual guidance...');
+      sendUpdate('THINKING', '');
     }
     const resolution = await this.intentResolver.resolve(
       result.query,
@@ -670,7 +595,7 @@ export class HudCoordinator {
     if (resolution.steps.length === 0 || isUnresolvedEcho) {
       if (this.store && typeof this.store.createTask === 'function') {
         if (sendUpdate) {
-          sendUpdate('THINKING', 'Analyzing context and initializing agent...');
+          sendUpdate('THINKING', '');
         }
         const prompt = formatContextualTaskPrompt(
           result.query,

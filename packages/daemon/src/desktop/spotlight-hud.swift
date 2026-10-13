@@ -1133,7 +1133,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                             var color = NSColor.systemCyan
                             var icon = "🧠"
                             let r = role ?? status
-                            if status == "EXECUTING" || status == "ACTION" {
+                            if status == "EXECUTING" || status == "ACTION" || role == "ACTION" {
                                 color = NSColor(red: 1.0, green: 0.78, blue: 0.28, alpha: 1.0)
                                 icon = "⚡"
                             } else if status == "FOCUS" {
@@ -1228,7 +1228,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         panel.makeFirstResponder(textField)
 
         appendHistory(role: "GOAL", text: query, color: .white, icon: "💬")
-        appendHistory(role: "SYSTEM", text: "Task initialized. Preparing execution environment...", color: NSColor(white: 0.6, alpha: 1.0), icon: "⚡")
+        appendHistory(role: "SYSTEM", text: "Getting started…", color: NSColor(white: 0.6, alpha: 1.0), icon: "⚡")
     }
 }
 
