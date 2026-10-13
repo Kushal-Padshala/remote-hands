@@ -196,6 +196,8 @@ namespace RemoteHands
         public string ModelKey = "";
         public string NodePath = "";
         public string CliPath = "";
+        /// <summary>One-shot prompt: print the first request and exit, never reading the daemon's messages.</summary>
+        public bool Once;
 
         public static HudArgs Parse(string[] args)
         {
@@ -206,6 +208,7 @@ namespace RemoteHands
                 if (arg == null) continue;
                 if (arg == "listen") result.Mode = "listen";
                 else if (arg == "supervise") result.Mode = "supervise";
+                else if (arg == "--once") result.Once = true;
                 else if (arg.StartsWith("--app=", StringComparison.Ordinal)) result.App = arg.Substring(6);
                 else if (arg.StartsWith("--window-title=", StringComparison.Ordinal)) result.WindowTitle = arg.Substring(15);
                 else if (arg.StartsWith("--model=", StringComparison.Ordinal)) result.ModelKey = arg.Substring(8);
@@ -254,6 +257,24 @@ namespace RemoteHands
         /// <summary>Tells the daemon which keys the hotkey ended up on (another program may hold the first choice).</summary>
         public static string HotkeyReady(string keys) { return "{\"event\":\"hotkey-ready\",\"keys\":" + Json.Quote(keys) + "}"; }
         public static string HotkeyFailed() { return "{\"event\":\"hotkey-failed\"}"; }
+    }
+
+    /// <summary>The supervisor's settings, written by `rh hud install` so the login entry itself stays short.</summary>
+    public sealed class SupervisorSettings
+    {
+        public string Node = "";
+        public string Cli = "";
+
+        public static SupervisorSettings Parse(string json)
+        {
+            var result = new SupervisorSettings();
+            object parsed = Json.Parse(json);
+            string node = Json.GetString(parsed, "node");
+            string cli = Json.GetString(parsed, "cli");
+            if (!string.IsNullOrEmpty(node)) result.Node = node;
+            if (!string.IsNullOrEmpty(cli)) result.Cli = cli;
+            return result;
+        }
     }
 
     public enum EntryKind { Goal, Step, Attention, Error, Answer, Note }

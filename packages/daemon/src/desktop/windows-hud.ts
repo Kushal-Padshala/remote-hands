@@ -18,6 +18,8 @@ export interface WindowsHudDeps {
   /** Runs the compiler; tests replace it. */
   compile?: ((csc: string, args: string[]) => { status: number | null; stderr: string; stdout: string; error?: Error | undefined }) | undefined;
   sources?: Record<string, string> | undefined;
+  /** Moves a file; tests make it fail. */
+  rename?: ((from: string, to: string) => void) | undefined;
 }
 
 export type WindowsHudBuild = { ok: true; path: string } | { ok: false; error: string };
@@ -107,21 +109,41 @@ export function ensureWindowsHud(deps: WindowsHudDeps = {}): WindowsHudBuild {
       return { ok: false, error: describeBuildFailure(`${result.stdout}\n${result.stderr}`, result.error) };
     }
     // an older copy may be running: move it aside (allowed) instead of overwriting it (not allowed)
+    const rename = deps.rename ?? ((from: string, to: string) => fs.renameSync(from, to));
     const old = `${exe}.old`;
     try {
       fs.rmSync(old, { force: true });
     } catch {
       // a still-running older copy from an earlier update: the rename below replaces what it can
     }
+    let movedAside = false;
     if (exists(exe)) {
       try {
-        fs.renameSync(exe, old);
+        rename(exe, old);
+        movedAside = true;
       } catch {
         fs.rmSync(next, { force: true });
         return { ok: false, error: 'the HUD program is in use and could not be replaced. Close it ("rh hud uninstall") and run "rh setup" again.' };
       }
     }
-    fs.renameSync(next, exe);
+    try {
+      rename(next, exe);
+    } catch (err) {
+      // the program that worked before must still be there: the login entry points at it
+      if (movedAside) {
+        try {
+          rename(old, exe);
+        } catch {
+          // nothing more can be done here
+        }
+      }
+      try {
+        fs.rmSync(next, { force: true });
+      } catch {
+        // left behind: removed at the next build
+      }
+      return { ok: false, error: describeBuildFailure('', err instanceof Error ? err : new Error(String(err))) };
+    }
     try {
       fs.rmSync(old, { force: true });
     } catch {
@@ -134,25 +156,77 @@ export function ensureWindowsHud(deps: WindowsHudDeps = {}): WindowsHudBuild {
   }
 }
 
+const remoteHandsDir = (home: string): string => path.join(home, '.remote-hands');
+
+/** What the hotkey listener last said: it holds the keys, or no key was free. */
+export interface HudStatus {
+  state: 'ready' | 'failed';
+  keys?: string | undefined;
+  at: number;
+}
+
+export function hudStatusPath(home: string = os.homedir()): string {
+  return path.join(remoteHandsDir(home), 'hud-status.json');
+}
+
+export function saveHudStatus(status: { state: 'ready' | 'failed'; keys?: string | undefined }, home: string = os.homedir(), now: number = Date.now()): void {
+  if (status.state === 'ready' && !(typeof status.keys === 'string' && /^[A-Za-z+]{3,40}$/.test(status.keys))) return;
+  try {
+    fs.mkdirSync(remoteHandsDir(home), { recursive: true });
+    fs.writeFileSync(hudStatusPath(home), JSON.stringify({ state: status.state, ...(status.keys ? { keys: status.keys } : {}), at: now }), 'utf-8');
+  } catch {
+    // the label falls back to the default
+  }
+}
+
+export function readHudStatus(home: string = os.homedir()): HudStatus | undefined {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(hudStatusPath(home), 'utf-8')) as { state?: unknown; keys?: unknown; at?: unknown };
+    if (parsed.state !== 'ready' && parsed.state !== 'failed') return undefined;
+    const keys = typeof parsed.keys === 'string' && /^[A-Za-z+]{3,40}$/.test(parsed.keys) ? parsed.keys : undefined;
+    if (parsed.state === 'ready' && !keys) return undefined;
+    return { state: parsed.state, ...(keys ? { keys } : {}), at: typeof parsed.at === 'number' ? parsed.at : 0 };
+  } catch {
+    return undefined;
+  }
+}
+
+export function clearHudStatus(home: string = os.homedir()): void {
+  try {
+    fs.rmSync(hudStatusPath(home), { force: true });
+  } catch {
+    // nothing to clear
+  }
+}
+
 /** The keys that open the HUD, as the person should read them. */
 export function hudHotkeyLabel(platform: NodeJS.Platform = process.platform, home: string = os.homedir()): string {
   if (platform === 'darwin') return 'Shift + Cmd + Space';
-  try {
-    const saved = fs.readFileSync(path.join(home, '.remote-hands', 'hud-hotkey.txt'), 'utf-8').trim();
-    if (/^[A-Za-z+ ]{3,40}$/.test(saved)) return saved.replace(/\+/g, ' + ').replace(/\s+/g, ' ');
-  } catch {
-    // not started yet
-  }
-  return 'Ctrl + Shift + Space';
+  const keys = readHudStatus(home)?.keys;
+  return keys ? keys.replace(/\+/g, ' + ') : 'Ctrl + Shift + Space';
 }
 
-/** Remembers which keys the listener actually got (another program may hold the first choice). */
-export function saveHudHotkey(keys: string, home: string = os.homedir()): void {
-  if (!/^[A-Za-z+]{3,40}$/.test(keys)) return;
+/** Where the supervisor reads which Node and which CLI to run (kept out of the login entry, which has a short limit). */
+export function hudSettingsPath(home: string = os.homedir()): string {
+  return path.join(remoteHandsDir(home), 'hud.json');
+}
+
+export function writeHudSettings(settings: { node: string; cli: string }, home: string = os.homedir()): void {
+  fs.mkdirSync(remoteHandsDir(home), { recursive: true });
+  fs.writeFileSync(hudSettingsPath(home), JSON.stringify({ node: settings.node, cli: settings.cli }), 'utf-8');
+}
+
+/** The supervisor writes its process id here when it starts. */
+export function hudSupervisorPidPath(home: string = os.homedir()): string {
+  return path.join(remoteHandsDir(home), 'hud-supervisor.pid');
+}
+
+export function readHudSupervisorPid(home: string = os.homedir()): number | undefined {
   try {
-    fs.mkdirSync(path.join(home, '.remote-hands'), { recursive: true });
-    fs.writeFileSync(path.join(home, '.remote-hands', 'hud-hotkey.txt'), keys, 'utf-8');
+    const text = fs.readFileSync(hudSupervisorPidPath(home), 'utf-8').trim();
+    const pid = /^\d{1,10}$/.test(text) ? Number.parseInt(text, 10) : Number.NaN;
+    return Number.isInteger(pid) && pid > 4 ? pid : undefined;
   } catch {
-    // the label falls back to the default
+    return undefined;
   }
 }

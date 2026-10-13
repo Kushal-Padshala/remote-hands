@@ -3,7 +3,16 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import type { ExecFunction } from './macos-driver.js';
-import { ensureWindowsHud, type WindowsHudBuild } from './windows-hud.js';
+import {
+  clearHudStatus,
+  ensureWindowsHud,
+  readHudStatus,
+  readHudSupervisorPid,
+  hudSupervisorPidPath,
+  writeHudSettings,
+  type HudStatus,
+  type WindowsHudBuild,
+} from './windows-hud.js';
 
 export interface HudServiceOptions {
   exec?: ExecFunction | undefined;
@@ -17,6 +26,8 @@ export interface HudServiceOptions {
   startDetached?: ((command: string, args: string[]) => void) | undefined;
   /** Windows: the program that runs the CLI (defaults to this one). */
   nodePath?: string | undefined;
+  /** Windows: waits between looks at the listener's status; tests replace it. */
+  sleep?: ((ms: number) => Promise<void>) | undefined;
 }
 
 /** Where Windows keeps "start this when I log in" for the current user (no administrator rights needed). */
@@ -90,12 +101,32 @@ export class HudServiceManager {
   }
 
   isRunning(): boolean {
-    if (this.platform === 'win32') {
-      const res = this.exec('tasklist', ['/FI', `IMAGENAME eq ${WINDOWS_HUD_IMAGE}`, '/FO', 'CSV', '/NH']);
-      return res.status === 0 && res.stdout.toLowerCase().includes(`"${WINDOWS_HUD_IMAGE}"`);
-    }
+    if (this.platform === 'win32') return this.windowsSupervisorAlive();
     const res = this.exec('launchctl', ['list']);
     return res.status === 0 && res.stdout.includes('com.remote-hands.hud');
+  }
+
+  /** The supervisor's process id, but only when that id still belongs to a running rh-hud.exe (ids are reused). */
+  private windowsSupervisorPid(): number | undefined {
+    const pid = readHudSupervisorPid(this.home);
+    if (pid === undefined) return undefined;
+    const res = this.exec('tasklist', ['/FI', `PID eq ${pid}`, '/FI', `IMAGENAME eq ${WINDOWS_HUD_IMAGE}`, '/FO', 'CSV', '/NH']);
+    return res.status === 0 && res.stdout.toLowerCase().includes(`"${WINDOWS_HUD_IMAGE}"`) ? pid : undefined;
+  }
+
+  private windowsSupervisorAlive(): boolean {
+    return this.windowsSupervisorPid() !== undefined;
+  }
+
+  /** Ends the service (the supervisor and what it started), never a prompt window someone opened separately. */
+  private stopWindowsSupervisor(): void {
+    const pid = this.windowsSupervisorPid();
+    if (pid !== undefined) this.exec('taskkill', ['/PID', String(pid), '/T', '/F']);
+    try {
+      fs.rmSync(hudSupervisorPidPath(this.home), { force: true });
+    } catch {
+      // nothing to remove
+    }
   }
 
   /** Windows: builds the HUD program, makes it start at login, and starts it now. */
@@ -120,24 +151,39 @@ export class HudServiceManager {
         cli = source || safeCli;
       }
       const node = this.options.nodePath ?? process.execPath;
-      const args = ['supervise', `--node=${node}`, `--cli=${cli}`];
-      // Each part is quoted so folders with spaces ("C:\\Users\\Ana Lee") survive.
-      const value = `"${built.path}" supervise "--node=${node}" "--cli=${cli}"`;
+      // Which Node and CLI to run live in a settings file: the login entry has a short length limit (260 characters).
+      writeHudSettings({ node, cli }, this.home);
+      const value = `"${built.path}" supervise`;
       const added = this.exec('reg', ['add', WINDOWS_RUN_KEY, '/v', WINDOWS_RUN_VALUE, '/t', 'REG_SZ', '/d', value, '/f']);
       if (added.status !== 0) {
         return { success: false, plistPath: where, error: `could not add the startup entry (${(added.stderr || added.stdout).trim().slice(0, 160) || 'reg.exe failed'})` };
       }
-      // an older copy that is running is replaced by the new one
-      this.exec('taskkill', ['/IM', WINDOWS_HUD_IMAGE, '/T', '/F']);
+      // the older service, if one is running, is replaced; a prompt window opened on its own is left alone
+      this.stopWindowsSupervisor();
+      clearHudStatus(this.home);
       (this.options.startDetached ?? ((command, startArgs) => {
         const child = spawn(command, startArgs, { detached: true, stdio: 'ignore', windowsHide: true });
         child.on('error', () => {});
         child.unref();
-      }))(built.path, args);
+      }))(built.path, ['supervise']);
       return { success: true, plistPath: where };
     } catch (err: any) {
       return { success: false, plistPath: where, error: err?.message || String(err) };
     }
+  }
+
+  /**
+   * Windows: after `install`, waits for the listener to say whether it got its hotkey. `null` when it has said nothing yet
+   * (it may still be starting); the caller then says so instead of claiming the shortcut works.
+   */
+  async waitForHotkey(timeoutMs = 12_000, intervalMs = 300): Promise<HudStatus | null> {
+    const sleep = this.options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    for (let waited = 0; waited <= timeoutMs; waited += intervalMs) {
+      const status = readHudStatus(this.home);
+      if (status) return status;
+      await sleep(intervalMs);
+    }
+    return null;
   }
 
   install(cliPath?: string): { success: boolean; plistPath: string; error?: string } {
@@ -182,7 +228,8 @@ export class HudServiceManager {
   uninstall(): boolean {
     if (this.platform === 'win32') {
       const removed = this.exec('reg', ['delete', WINDOWS_RUN_KEY, '/v', WINDOWS_RUN_VALUE, '/f']).status === 0;
-      this.exec('taskkill', ['/IM', WINDOWS_HUD_IMAGE, '/T', '/F']);
+      this.stopWindowsSupervisor();
+      clearHudStatus(this.home);
       return removed;
     }
     try {

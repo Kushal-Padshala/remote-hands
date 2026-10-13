@@ -7,7 +7,7 @@ import type { ExecFunction } from './macos-driver.js';
 import type { ContextAttachment } from '@remote-hands/shared';
 import { ContextService } from '../context/context-service.js';
 import { SPOTLIGHT_SWIFT_SOURCE } from './spotlight-source.generated.js';
-import { ensureWindowsHud, saveHudHotkey } from './windows-hud.js';
+import { ensureWindowsHud, saveHudStatus } from './windows-hud.js';
 
 export interface SpotlightPromptResult {
   query: string;
@@ -176,6 +176,8 @@ export class SpotlightHudRunner {
       return null;
     }
     const args: string[] = ['prompt'];
+    // this call has no daemon to talk to: the Windows window prints the first request and ends
+    if (process.platform === 'win32') args.push('--once');
     if (activeApp) {
       args.push(`--app=${activeApp}`);
     }
@@ -367,7 +369,8 @@ export class SpotlightHudRunner {
       if (stopped) return;
       try {
         child = spawn(cmd, execArgs, {
-          stdio: ['ignore', 'pipe', 'ignore'],
+          // Windows: the helper ends when this input ends (this program is gone), so it is never left holding the hotkey
+          stdio: [process.platform === 'win32' ? 'pipe' : 'ignore', 'pipe', 'ignore'],
         });
         child.on('error', () => {});
         child.stdout?.on('data', (chunk: Buffer) => {
@@ -376,8 +379,9 @@ export class SpotlightHudRunner {
             try {
               const parsed = JSON.parse(line.trim());
               if (parsed && parsed.event === 'hotkey-ready' && typeof parsed.keys === 'string') {
-                saveHudHotkey(parsed.keys);
+                saveHudStatus({ state: 'ready', keys: parsed.keys });
               } else if (parsed && parsed.event === 'hotkey-failed') {
+                saveHudStatus({ state: 'failed' });
                 console.error('Remote Hands: the HUD hotkey is already used by another program (tried Ctrl+Shift+Space and Ctrl+Alt+Space). Close that program and run "rh hud install" again.');
               } else if (parsed && typeof parsed.app === 'string') {
                 onTrigger(parsed as SpotlightPromptResult);

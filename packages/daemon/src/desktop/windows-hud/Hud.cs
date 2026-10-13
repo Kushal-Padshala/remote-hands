@@ -34,12 +34,13 @@ namespace RemoteHands
         [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-        [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+        [DllImport("user32.dll")] public static extern bool AllowSetForegroundWindow(int processId);
+        [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
         [DllImport("user32.dll")] public static extern bool ReleaseCapture();
         [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
         [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
-        [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+        [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
         [DllImport("gdi32.dll")] public static extern IntPtr CreateRoundRectRgn(int x1, int y1, int x2, int y2, int cx, int cy);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr CreateJobObject(IntPtr attributes, string name);
         [DllImport("kernel32.dll")] public static extern bool SetInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint size);
@@ -52,18 +53,20 @@ namespace RemoteHands
         [StructLayout(LayoutKind.Sequential)]
         public struct ExtendedLimits { public BasicLimits Basic; public IoCounters Io; public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed; }
 
-        /// <summary>Windows only lets the program the person is using take the keyboard; the Alt key press makes the system allow it.</summary>
+        /// <summary>
+        /// Brings the window to the front and gives it the keyboard. The hotkey listener first allows any program to do this
+        /// (AllowSetForegroundWindow); if the system still refuses, one Alt key tap is the documented way to make it accept.
+        /// Nothing here waits on another program's window, so a hung application cannot freeze the prompt.
+        /// </summary>
         public static void ForceForeground(IntPtr handle)
         {
             try
             {
-                IntPtr fg = GetForegroundWindow();
-                uint pid;
-                uint fgThread = GetWindowThreadProcessId(fg, out pid);
-                uint me = GetCurrentThreadId();
-                bool attached = fgThread != 0 && fgThread != me && AttachThreadInput(me, fgThread, true);
                 SetForegroundWindow(handle);
-                if (attached) AttachThreadInput(me, fgThread, false);
+                if (GetForegroundWindow() == handle) return;
+                keybd_event(0x12, 0, 0, UIntPtr.Zero);   // Alt down
+                keybd_event(0x12, 0, 2, UIntPtr.Zero);   // Alt up
+                SetForegroundWindow(handle);
             }
             catch (Exception)
             {
@@ -453,9 +456,13 @@ namespace RemoteHands
             Activate();
             SetPlaceholder("Ask anything\u2026");
             input.Focus();
-            var reader = new Thread(ReadDaemon);
-            reader.IsBackground = true;
-            reader.Start();
+            // A one-shot prompt has no daemon to listen to: it prints the first request and ends.
+            if (!args.Once)
+            {
+                var reader = new Thread(ReadDaemon);
+                reader.IsBackground = true;
+                reader.Start();
+            }
         }
 
         void SetPlaceholder(string text)
@@ -504,6 +511,11 @@ namespace RemoteHands
             if (text.Length == 0) return;
             input.Text = "";
             Wire.Send(Messages.Submit(text, args.App, args.WindowTitle, args.Models.Count > 0 ? modelKey : ""));
+            if (args.Once)
+            {
+                Thread.Sleep(50);
+                Environment.Exit(0);
+            }
             bool first = !state.IsExpanded;
             state.Submitted();
             if (first) TransitionToProgress();
@@ -778,6 +790,15 @@ namespace RemoteHands
         {
             if ((DateTime.UtcNow - last).TotalMilliseconds < 500) return;
             last = DateTime.UtcNow;
+            // This program just received the keypress, so Windows lets it hand the keyboard to the prompt window that follows.
+            try
+            {
+                Native.AllowSetForegroundWindow(-1);
+            }
+            catch (Exception)
+            {
+                // the prompt asks for the keyboard itself, with the Alt-tap fallback
+            }
             string app = "Desktop";
             string title = "";
             try
@@ -807,14 +828,44 @@ namespace RemoteHands
     /// <summary>Starts at login, runs the daemon's listener with no console window, and starts it again if it stops.</summary>
     static class Supervisor
     {
-        static IntPtr job = IntPtr.Zero;
+        static string HomeDir()
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".remote-hands");
+        }
 
-        static void MakeJob()
+        static string LogLine(string text)
+        {
+            return DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + text;
+        }
+
+        static void Log(string text)
         {
             try
             {
+                string dir = Path.Combine(HomeDir(), "logs");
+                Directory.CreateDirectory(dir);
+                string file = Path.Combine(dir, "hud.log");
+                lock (typeof(Supervisor))
+                {
+                    // the log never grows without end: start over once it is large
+                    if (File.Exists(file) && new FileInfo(file).Length > 1000000) File.Delete(file);
+                    File.AppendAllText(file, LogLine(text) + "\n", new UTF8Encoding(false));
+                }
+            }
+            catch (Exception)
+            {
+                // logging must never stop the HUD
+            }
+        }
+
+        /// <summary>A job that ends everything started inside it when it is closed; null when Windows will not make one.</summary>
+        static IntPtr MakeJob()
+        {
+            IntPtr job = IntPtr.Zero;
+            try
+            {
                 job = Native.CreateJobObject(IntPtr.Zero, null);
-                if (job == IntPtr.Zero) return;
+                if (job == IntPtr.Zero) return IntPtr.Zero;
                 var info = new Native.ExtendedLimits();
                 info.Basic.LimitFlags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
                 int size = Marshal.SizeOf(typeof(Native.ExtendedLimits));
@@ -822,47 +873,98 @@ namespace RemoteHands
                 try
                 {
                     Marshal.StructureToPtr(info, ptr, false);
-                    Native.SetInformationJobObject(job, 9, ptr, (uint)size); // JobObjectExtendedLimitInformation
+                    if (!Native.SetInformationJobObject(job, 9, ptr, (uint)size)) // JobObjectExtendedLimitInformation
+                    {
+                        Native.CloseHandle(job);
+                        return IntPtr.Zero;
+                    }
                 }
                 finally
                 {
                     Marshal.FreeHGlobal(ptr);
                 }
+                return job;
             }
             catch (Exception)
             {
-                job = IntPtr.Zero;
+                if (job != IntPtr.Zero) Native.CloseHandle(job);
+                return IntPtr.Zero;
             }
+        }
+
+        static SupervisorSettings ReadSettings(HudArgs args)
+        {
+            var settings = new SupervisorSettings();
+            try
+            {
+                string file = Path.Combine(HomeDir(), "hud.json");
+                if (File.Exists(file)) settings = SupervisorSettings.Parse(File.ReadAllText(file, new UTF8Encoding(false)));
+            }
+            catch (Exception)
+            {
+                // unreadable settings: the arguments (if any) decide
+            }
+            if (args.NodePath.Length > 0) settings.Node = args.NodePath;
+            if (args.CliPath.Length > 0) settings.Cli = args.CliPath;
+            return settings;
         }
 
         public static int Run(HudArgs args)
         {
-            if (args.NodePath.Length == 0 || args.CliPath.Length == 0) return 2;
             bool created;
             using (var mutex = new Mutex(true, "Local\\RemoteHandsHudSupervisor", out created))
             {
                 if (!created) return 0; // already running
-                MakeJob();
+                try
+                {
+                    Directory.CreateDirectory(HomeDir());
+                    File.WriteAllText(Path.Combine(HomeDir(), "hud-supervisor.pid"), Process.GetCurrentProcess().Id.ToString(), new UTF8Encoding(false));
+                }
+                catch (Exception)
+                {
+                    // `rh hud uninstall` then falls back to the registry entry only
+                }
                 int wait = 1000;
                 while (true)
                 {
                     DateTime started = DateTime.UtcNow;
-                    try
+                    SupervisorSettings settings = ReadSettings(args);
+                    if (settings.Node.Length == 0 || settings.Cli.Length == 0)
                     {
-                        var psi = new ProcessStartInfo(args.NodePath);
-                        psi.Arguments = "\"" + args.CliPath + "\" hud listen";
-                        psi.UseShellExecute = false;
-                        psi.CreateNoWindow = true;
-                        psi.WindowStyle = ProcessWindowStyle.Hidden;
-                        using (Process p = Process.Start(psi))
-                        {
-                            if (job != IntPtr.Zero) Native.AssignProcessToJobObject(job, p.Handle);
-                            p.WaitForExit();
-                        }
+                        Log("supervisor: no Node or CLI path is set (run: rh hud install)");
                     }
-                    catch (Exception)
+                    else
                     {
-                        // node could not start: try again after the pause below
+                        // one job for each attempt: whatever the listener left behind is ended before the next one starts
+                        IntPtr job = MakeJob();
+                        try
+                        {
+                            var psi = new ProcessStartInfo(settings.Node);
+                            psi.Arguments = "\"" + settings.Cli + "\" hud listen";
+                            psi.UseShellExecute = false;
+                            psi.CreateNoWindow = true;
+                            psi.WindowStyle = ProcessWindowStyle.Hidden;
+                            psi.RedirectStandardOutput = true;
+                            psi.RedirectStandardError = true;
+                            using (Process p = Process.Start(psi))
+                            {
+                                if (job != IntPtr.Zero) Native.AssignProcessToJobObject(job, p.Handle);
+                                p.OutputDataReceived += delegate(object s, DataReceivedEventArgs e) { if (e.Data != null) Log(e.Data); };
+                                p.ErrorDataReceived += delegate(object s, DataReceivedEventArgs e) { if (e.Data != null) Log("error: " + e.Data); };
+                                p.BeginOutputReadLine();
+                                p.BeginErrorReadLine();
+                                p.WaitForExit();
+                                Log("listener ended with code " + p.ExitCode);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Log("listener could not start: " + ex.Message);
+                        }
+                        finally
+                        {
+                            if (job != IntPtr.Zero) Native.CloseHandle(job); // ends any helper the listener left running
+                        }
                     }
                     // a listener that ran for a while was healthy: start again quickly; one that dies at once waits longer
                     wait = (DateTime.UtcNow - started).TotalSeconds > 60 ? 1000 : Math.Min(wait * 2, 30000);
@@ -899,6 +1001,24 @@ namespace RemoteHands
                     return 3;
                 }
                 Wire.Send(Messages.HotkeyReady(window.Keys));
+                // The daemon keeps this program's input open: when that ends, the daemon is gone and so is the need for the hotkey.
+                var watch = new Thread(delegate()
+                {
+                    try
+                    {
+                        StreamReader reader = Wire.Input();
+                        while (reader.ReadLine() != null)
+                        {
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // treated as the end of the input
+                    }
+                    Environment.Exit(0);
+                });
+                watch.IsBackground = true;
+                watch.Start();
                 Application.Run();
                 return 0;
             }

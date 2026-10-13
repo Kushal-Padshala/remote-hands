@@ -4,6 +4,7 @@ import {
   LocalTaskStore,
   SpotlightHudRunner,
   hudHotkeyLabel,
+  readHudStatus,
   type ActiveWindowContext,
 } from '@remote-hands/daemon';
 import * as path from 'node:path';
@@ -52,6 +53,18 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
     stdout('Installing Remote Hands Desktop Overlay background service...');
     const res = serviceManager.install();
     if (res.success) {
+      // Windows: the shortcut is only reported once the listener has said it holds it
+      if (process.platform === 'win32' && typeof serviceManager.waitForHotkey === 'function') {
+        stdout('Starting the HUD...');
+        const status = await serviceManager.waitForHotkey();
+        if (status?.state === 'failed') {
+          stderr(c.yellow('The HUD started, but its shortcut (Ctrl + Shift + Space, or Ctrl + Alt + Space) is already used by another program. Close that program or change its shortcut, then run "rh hud install" again.'));
+          return 1;
+        }
+        if (!status) {
+          stdout(c.yellow('The HUD is still starting. Check it in a minute with "rh hud status"; the log is ~/.remote-hands/logs/hud.log.'));
+        }
+      }
       stdout(c.brightGreen('✔ Desktop Overlay Assistant installed successfully!'));
       stdout(`  HotKey:      ${c.bold(hudHotkeyLabel())} (available on any screen)`);
       stdout(`  ${process.platform === 'win32' ? 'Starts at login: ' : 'LaunchAgent: '}${res.plistPath}`);
@@ -81,6 +94,9 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
     stdout(c.bold('Remote Hands Desktop Overlay Status:'));
     stdout(`  Installed: ${installed ? c.green('Yes') : c.dim('No')}`);
     stdout(`  Running:   ${running ? c.brightGreen(`Active (listening for ${hudHotkeyLabel().replace(/ /g, '')})`) : c.dim('Inactive')}`);
+    if (process.platform === 'win32' && running && readHudStatus()?.state === 'failed') {
+      stdout(`  Hotkey:    ${c.yellow('not available: another program uses Ctrl + Shift + Space and Ctrl + Alt + Space')}`);
+    }
     if (!installed) {
       stdout(`  To enable: Run "${c.cyan('rh hud install')}" or "${c.cyan('rh setup')}".`);
     }

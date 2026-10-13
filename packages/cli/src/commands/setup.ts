@@ -627,6 +627,17 @@ async function hudSetupFlow(
     const res = hudService.install();
     if (res.success) {
       stdout(renderStepSuccess('Desktop HUD installed and running in the background'));
+      // Windows: say whether the shortcut was really free before telling the person to press it
+      const wait = (hudService as { waitForHotkey?: () => Promise<{ state: string } | null> }).waitForHotkey;
+      if (process.platform === 'win32' && typeof wait === 'function') {
+        const status = await wait.call(hudService);
+        if (status?.state === 'failed') {
+          helperError = 'the shortcut (Ctrl + Shift + Space, or Ctrl + Alt + Space) is already used by another program: close that program or change its shortcut, then run "rh hud install"';
+          stdout(renderStepInfo(`Shortcut: ${helperError}`));
+        } else if (!status) {
+          stdout(renderStepInfo('The HUD is still starting; check it in a minute with "rh hud status".'));
+        }
+      }
     } else {
       stdout(renderStepInfo(`Desktop HUD note: ${res.error || 'could not auto-load the LaunchAgent'}`));
     }
@@ -634,7 +645,7 @@ async function hudSetupFlow(
 
   stdout(renderStepStart(4, TOTAL, 'Done'));
   if (helperError) {
-    stdout(renderStepInfo('Desktop HUD is installed but the hotkey will not work until the helper builds (see above).'));
+    stdout(renderStepInfo('Desktop HUD is installed but the hotkey will not work yet (see above).'));
     return 1;
   }
   stdout(renderStepSuccess('Desktop HUD is ready'));

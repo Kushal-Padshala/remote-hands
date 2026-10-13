@@ -101,6 +101,8 @@ describe('HudServiceManager on Windows', () => {
     for (const dir of homes.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
   });
   const ok = { stdout: '', stderr: '', status: 0 };
+  const EXE = 'C:\\Users\\Ana Lee\\.remote-hands\\bin\\rh-hud.exe';
+  const NODE = 'C:\\Program Files\\nodejs\\node.exe';
 
   function setup(over: { exec?: (cmd: string, args: string[]) => { stdout: string; stderr: string; status: number | null }; built?: { ok: true; path: string } | { ok: false; error: string } } = {}) {
     const home = makeHome();
@@ -112,33 +114,66 @@ describe('HudServiceManager on Windows', () => {
     const manager = new HudServiceManager({
       platform: 'win32',
       home,
-      nodePath: 'C:\\Program Files\\nodejs\\node.exe',
+      nodePath: NODE,
       exec: (cmd, args) => {
         calls.push([cmd, args]);
         return over.exec ? over.exec(cmd, args) : ok;
       },
-      buildWindowsHud: () => over.built ?? { ok: true, path: 'C:\\Users\\Ana Lee\\.remote-hands\\bin\\rh-hud.exe' },
+      buildWindowsHud: () => over.built ?? { ok: true, path: EXE },
       startDetached: (cmd, args) => {
         started.push([cmd, args]);
       },
+      sleep: async () => {},
     });
     return { manager, calls, started, home, cli };
   }
+  const supervisorRow = (pid: number) => ({ stdout: `"rh-hud.exe","${pid}","Console","1","18,000 K"\r\n`, stderr: '', status: 0 });
 
-  it('installs a login entry with every part quoted, copies the CLI to a stable place, replaces a running copy and starts now', () => {
+  it('registers a short login entry, keeps the long paths in a settings file, copies the CLI to a stable place and starts now', () => {
     const { manager, calls, started, home, cli } = setup();
     const res = manager.install(cli);
     expect(res.success).toBe(true);
     const stable = path.join(home, '.remote-hands', 'cli', 'index.js');
     expect(fs.readFileSync(stable, 'utf-8')).toBe('// cli');
+    expect(JSON.parse(fs.readFileSync(path.join(home, '.remote-hands', 'hud.json'), 'utf-8'))).toEqual({ node: NODE, cli: stable });
     const add = calls.find(([c, a]) => c === 'reg' && a[0] === 'add')!;
     expect(add[1].slice(0, 7)).toEqual(['add', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', 'RemoteHandsHud', '/t', 'REG_SZ', '/d']);
-    expect(add[1][7]).toBe(`"C:\\Users\\Ana Lee\\.remote-hands\\bin\\rh-hud.exe" supervise "--node=C:\\Program Files\\nodejs\\node.exe" "--cli=${stable}"`);
-    expect(add[1]).toContain('/f');
-    expect(calls.some(([c, a]) => c === 'taskkill' && a.join(' ') === '/IM rh-hud.exe /T /F')).toBe(true);
-    // the old copy is ended before the new one starts
-    expect(calls.findIndex(([c]) => c === 'taskkill')).toBeGreaterThan(calls.findIndex(([c]) => c === 'reg'));
-    expect(started).toEqual([['C:\\Users\\Ana Lee\\.remote-hands\\bin\\rh-hud.exe', ['supervise', '--node=C:\\Program Files\\nodejs\\node.exe', `--cli=${stable}`]]]);
+    expect(add[1][7]).toBe(`"${EXE}" supervise`);
+    expect(add[1][7]!.length).toBeLessThan(260);
+    expect(started).toEqual([[EXE, ['supervise']]]);
+  });
+
+  it('keeps the login entry short even with a very long Node path', () => {
+    const { manager, calls, cli } = setup();
+    const long = new HudServiceManager({
+      platform: 'win32',
+      home: path.dirname(path.dirname(cli)),
+      nodePath: `C:\\Users\\Alexandra.Catherine.Montgomery-Smith\\AppData\\Local\\fnm_multishells\\1234567890123\\${'x'.repeat(60)}\\node.exe`,
+      exec: (cmd, args) => (calls.push([cmd, args]), ok),
+      buildWindowsHud: () => ({ ok: true, path: EXE }),
+      startDetached: () => {},
+    });
+    expect(long.install(cli).success).toBe(true);
+    const add = calls.filter(([c, a]) => c === 'reg' && a[0] === 'add').pop()!;
+    expect(add[1][7]!.length).toBeLessThan(120);
+  });
+
+  it('ends only the service it started (checked by its process id and program name), never every rh-hud.exe', () => {
+    const { manager, calls, home, cli } = setup({ exec: (cmd, args) => (cmd === 'tasklist' ? supervisorRow(4242) : ok) });
+    fs.mkdirSync(path.join(home, '.remote-hands'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.remote-hands', 'hud-supervisor.pid'), '4242');
+    manager.install(cli);
+    const kills = calls.filter(([c]) => c === 'taskkill').map(([, a]) => a.join(' '));
+    expect(kills).toEqual(['/PID 4242 /T /F']);
+    expect(calls.some(([c, a]) => c === 'taskkill' && a.includes('/IM'))).toBe(false);
+  });
+
+  it('does not end a program that only happens to have the supervisor\'s old process id', () => {
+    const { manager, calls, home, cli } = setup({ exec: (cmd) => (cmd === 'tasklist' ? { stdout: 'INFO: No tasks are running which match the specified criteria.', stderr: '', status: 0 } : ok) });
+    fs.mkdirSync(path.join(home, '.remote-hands'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.remote-hands', 'hud-supervisor.pid'), '4242');
+    manager.install(cli);
+    expect(calls.some(([c]) => c === 'taskkill')).toBe(false);
   });
 
   it('says why when the program cannot be built, and starts nothing', () => {
@@ -158,23 +193,49 @@ describe('HudServiceManager on Windows', () => {
     expect(started).toEqual([]);
   });
 
-  it('knows whether it is installed and running from the registry and the task list', () => {
-    const queried = setup({ exec: (cmd, args) => (cmd === 'reg' && args[0] === 'query' ? ok : { stdout: '"rh-hud.exe","4120","Console","1","18,000 K"\r\n', stderr: '', status: 0 }) });
-    expect(queried.manager.isInstalled()).toBe(true);
-    expect(queried.manager.isRunning()).toBe(true);
+  it('knows whether it is installed and running (the supervisor must still be that program)', () => {
+    const alive = setup({ exec: (cmd, args) => (cmd === 'reg' && args[0] === 'query' ? ok : supervisorRow(4242)) });
+    fs.mkdirSync(path.join(alive.home, '.remote-hands'), { recursive: true });
+    fs.writeFileSync(path.join(alive.home, '.remote-hands', 'hud-supervisor.pid'), '4242');
+    expect(alive.manager.isInstalled()).toBe(true);
+    expect(alive.manager.isRunning()).toBe(true);
     const none = setup({ exec: (cmd) => (cmd === 'reg' ? { stdout: '', stderr: 'not found', status: 1 } : { stdout: 'INFO: No tasks are running which match the specified criteria.', stderr: '', status: 0 }) });
     expect(none.manager.isInstalled()).toBe(false);
     expect(none.manager.isRunning()).toBe(false);
   });
 
-  it('removes the login entry and ends the program on uninstall', () => {
-    const { manager, calls } = setup();
+  it('removes the login entry and ends the service by its process id on uninstall', () => {
+    const { manager, calls, home } = setup({ exec: (cmd) => (cmd === 'tasklist' ? supervisorRow(4242) : ok) });
+    fs.mkdirSync(path.join(home, '.remote-hands'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.remote-hands', 'hud-supervisor.pid'), '4242');
     expect(manager.uninstall()).toBe(true);
     expect(calls.map(([c, a]) => `${c} ${a.join(' ')}`)).toEqual([
       'reg delete HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v RemoteHandsHud /f',
-      'taskkill /IM rh-hud.exe /T /F',
+      expect.stringMatching(/^tasklist /),
+      'taskkill /PID 4242 /T /F',
     ]);
+    expect(fs.existsSync(path.join(home, '.remote-hands', 'hud-supervisor.pid'))).toBe(false);
     const missing = setup({ exec: (cmd) => (cmd === 'reg' ? { stdout: '', stderr: '', status: 1 } : ok) });
     expect(missing.manager.uninstall()).toBe(false);
+  });
+
+  it('waits for the listener to say whether it got its hotkey, and reports silence instead of guessing', async () => {
+    const { manager, home } = setup();
+    const status = path.join(home, '.remote-hands', 'hud-status.json');
+    fs.mkdirSync(path.dirname(status), { recursive: true });
+    expect(await manager.waitForHotkey(900, 300)).toBeNull();
+    fs.writeFileSync(status, JSON.stringify({ state: 'ready', keys: 'Ctrl+Alt+Space', at: 1 }));
+    expect(await manager.waitForHotkey(900, 300)).toMatchObject({ state: 'ready', keys: 'Ctrl+Alt+Space' });
+    fs.writeFileSync(status, JSON.stringify({ state: 'failed', at: 2 }));
+    expect(await manager.waitForHotkey(900, 300)).toMatchObject({ state: 'failed' });
+  });
+
+  it('clears the old status before starting, so an earlier "ready" is never mistaken for this start', () => {
+    const { manager, home, cli } = setup();
+    const status = path.join(home, '.remote-hands', 'hud-status.json');
+    fs.mkdirSync(path.dirname(status), { recursive: true });
+    fs.writeFileSync(status, JSON.stringify({ state: 'ready', keys: 'Ctrl+Shift+Space', at: 1 }));
+    manager.install(cli);
+    expect(fs.existsSync(status)).toBe(false);
   });
 });

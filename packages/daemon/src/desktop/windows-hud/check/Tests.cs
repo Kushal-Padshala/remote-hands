@@ -77,6 +77,13 @@ static class Tests
         Eq("Desktop", empty.App, "empty app becomes Desktop");
         Eq(0, HudArgs.Parse(new string[] { "--models=not json" }).Models.Count, "bad models json is ignored");
         Eq("prompt", HudArgs.Parse(null).Mode, "no args");
+        True(HudArgs.Parse(new string[] { "prompt", "--once" }).Once, "one-shot prompt");
+        True(!HudArgs.Parse(new string[] { "prompt" }).Once, "not one-shot by default");
+        var cfg = SupervisorSettings.Parse("{\"node\":\"C:\\\\Program Files\\\\nodejs\\\\node.exe\",\"cli\":\"C:\\\\Users\\\\Ana Lee\\\\.remote-hands\\\\cli\\\\index.js\"}");
+        Eq("C:\\Program Files\\nodejs\\node.exe", cfg.Node, "settings: node path");
+        Eq("C:\\Users\\Ana Lee\\.remote-hands\\cli\\index.js", cfg.Cli, "settings: cli path");
+        Eq("", SupervisorSettings.Parse("not json").Node, "bad settings are empty");
+        Eq("", SupervisorSettings.Parse("{\"node\":5}").Node, "non-string node is ignored");
     }
 
     static void MessageTests()
