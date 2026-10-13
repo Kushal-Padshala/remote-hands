@@ -1160,7 +1160,7 @@ describe('do: label targets, hover and limits', () => {
     await engine.do([
       { op: 'type', target: 'email', text: 'a@b.c' },
       { op: 'select', target: 'country', value: 'Canada' },
-      { op: 'check', target: 'agree', checked: true },
+      { op: 'check', target: 'I agree', checked: true },
       { op: 'click', target: 'Next' },
     ]);
     expect(t.actionEvals().map(opOf)).toEqual([
@@ -1259,5 +1259,85 @@ describe('action hints', () => {
     const lines = out.split('\n');
     expect(lines.filter((l) => l === NOTE)).toHaveLength(1);
     expect(lines.at(-1)).toBe('focus now on: "Go \\"now\\""');
+  });
+});
+
+describe('do: label safety (review fixes)', () => {
+  const buttons = (n: number, extra: Record<string, unknown> = {}): string =>
+    JSON.stringify(page({ actions: Array.from({ length: n }, (_, i) => ({ node: 100 + i, role: 'button', label: i === 0 ? 'Remove' : `Other ${i}`, kind: 'click', value: '' })), ...extra }));
+
+  it('never rebinds numeric ids through an implicit snapshot when the batch also uses index', async () => {
+    await expect(engine.do([{ op: 'type', target: 'Email', text: 'x' }, { op: 'click', index: 2 }])).rejects.toThrow(
+      'step 1 type invalid: no page has been shown yet; call browser_snapshot first. No steps were run.',
+    );
+    await expect(engine.do([{ op: 'click', index: 2 }, { op: 'click', target: 'Next' }])).rejects.toThrow('step 1 click invalid: index 2 is not on the page I last showed');
+    expect(t.evals).toHaveLength(0);
+    expect(t.actionEvals()).toHaveLength(0);
+  });
+
+  it('refuses a label when the snapshot left controls out, so a hidden duplicate cannot be clicked by mistake', async () => {
+    t.snapshots = [buttons(5, { omitted_actions: 1 })];
+    await engine.snapshot();
+    await expect(engine.do([{ op: 'click', target: 'Remove' }])).rejects.toThrow('a label cannot be proven unique');
+    expect(t.actionEvals()).toHaveLength(0);
+    await engine.do([{ op: 'click', index: 100 }]);
+    expect(t.actionEvals().map(opOf)).toEqual([{ op: 'click', node: 100, label: 'Remove' }]);
+  });
+
+  it('refuses an exact label of the wrong kind, running nothing (no typing into a lookalike field, no Save)', async () => {
+    t.snapshots = [JSON.stringify(page({ actions: [
+      { node: 31, role: 'button', label: 'Email', kind: 'click', value: '' },
+      { node: 32, role: 'textbox', label: 'Recovery email', kind: 'fill', value: '' },
+      { node: 33, role: 'textbox', label: 'Recovery email', kind: 'click', value: '' },
+      { node: 34, role: 'button', label: 'Save', kind: 'click', value: '' },
+    ] }))];
+    await engine.snapshot();
+    await expect(engine.do([{ op: 'type', target: 'Email', text: 'new@example.test' }, { op: 'click', target: 'Save' }])).rejects.toThrow(
+      'step 1 type invalid: target "Email" is not a text field here',
+    );
+    expect(t.actionEvals()).toHaveLength(0);
+  });
+
+  it('limits the total wait time of one call', async () => {
+    await engine.snapshot();
+    const wait = (ms: number) => ({ op: 'wait' as const, ms });
+    await expect(engine.do(Array.from({ length: 7 }, () => wait(5000)))).rejects.toThrow(
+      'browser_do waits add up to 35000 ms; the limit is 30000 ms per call. No steps were run.',
+    );
+    await expect(engine.do(Array.from({ length: 6 }, () => wait(5000)))).resolves.toContain('did: wait');
+  });
+
+  it('forgets an earlier Tab report once a later step moves focus itself', async () => {
+    await engine.snapshot();
+    t.actions = [JSON.stringify({ ok: true, focused: 'Second' }), JSON.stringify({ ok: true, label: 'Next' })];
+    const out = await engine.do([{ op: 'press', key: 'Tab' }, { op: 'click', index: 12 }]);
+    expect(out).not.toContain('focus now on');
+    t.actions = [JSON.stringify({ ok: true, label: 'Next' }), JSON.stringify({ ok: true, focused: 'Second' })];
+    expect(await engine.do([{ op: 'click', index: 12 }, { op: 'press', key: 'Tab' }])).toContain('focus now on: "Second"');
+  });
+
+  it('a first label call goes through the same automatic setup as browser_snapshot', async () => {
+    const heal = vi.fn(async () => {
+      t.fail = null;
+      return { ok: true as const };
+    });
+    const healing = new FastBrowserEngine({
+      transport: t, legacy, env: {}, now: () => clock, sleep: async (ms) => { clock += ms; }, autoEnable: heal,
+    });
+    t.fail = new BrowserAutomationError('js_disabled', 'Google Chrome', 'JS off in Chrome.');
+    const out = await healing.do([{ op: 'click', target: 'Next' }]);
+    expect(heal).toHaveBeenCalledTimes(1);
+    expect(t.actionEvals().map(opOf)).toEqual([{ op: 'click', node: 12, label: 'Next' }]);
+    expect(out.split('\n')[0]).toBe('did: click');
+  });
+
+  it('a first label call falls back to the slower path when setup is refused', async () => {
+    const refuse = vi.fn(async () => ({ ok: false as const, message: 'declined' }));
+    const stuck = new FastBrowserEngine({
+      transport: t, legacy, env: {}, now: () => clock, sleep: async (ms) => { clock += ms; }, autoEnable: refuse,
+    });
+    t.fail = new BrowserAutomationError('js_disabled', 'Google Chrome', 'JS off in Chrome.');
+    expect(await stuck.do([{ op: 'click', target: 'Next' }])).toBe('legacy:do');
+    expect(t.actionEvals()).toHaveLength(0);
   });
 });

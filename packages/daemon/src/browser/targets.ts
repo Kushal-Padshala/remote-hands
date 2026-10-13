@@ -37,15 +37,31 @@ function listed(list: PageElement[]): string {
   return more > 0 ? `${shown.join(', ')} and ${more} more` : shown.join(', ');
 }
 
+const BOUNDARY = /[\p{L}\p{N}]/u;
+
+/** `label` starts with `want` and the match ends at a word boundary ("email" in "email address", not "emailing"). */
+function startsWithWord(label: string, want: string): boolean {
+  return label.startsWith(want) && !BOUNDARY.test(label.charAt(want.length));
+}
+
 /**
- * Resolves a visible label to one element of the shown page: an exact label match first, then
- * a substring match, among elements that fit the op. Zero or several matches fail with the
- * candidates so the caller can pick an index; nothing is ever guessed.
+ * Resolves a visible label to one element of the shown page. An exact label match wins; failing
+ * that, a unique label that starts with the target at a word boundary. Zero or several matches,
+ * an exact match of the wrong kind (a button called "Email" when typing), or a page the snapshot
+ * could not list completely all fail with the candidates, so nothing is ever guessed.
  */
 export function resolveTarget(state: PageState, op: TargetOp, target: string): TargetResult {
   const want = norm(target);
   if (!want) return { ok: false, reason: 'target is empty' };
-  const pool = state.elements.filter((e): e is PageElement & { node: number } => fits(op, e));
+  if (state.omitted || state.scanTruncated) {
+    const missing = state.omitted ? ` (${state.omitted} not listed)` : '';
+    return {
+      ok: false,
+      reason: `the page has more controls than could be listed${missing}, so a label cannot be proven unique; use browser_find to get an index`,
+    };
+  }
+  const real = state.elements.filter((e): e is PageElement & { node: number } => typeof e.node === 'number');
+  const pool = real.filter((e) => fits(op, e));
   const pick = (matches: Array<PageElement & { node: number }>): TargetResult | null => {
     if (matches.length === 1) return { ok: true, el: matches[0]! };
     if (matches.length > 1) {
@@ -53,10 +69,17 @@ export function resolveTarget(state: PageState, op: TargetOp, target: string): T
     }
     return null;
   };
-  const exact = pick(pool.filter((e) => norm(e.label) === want));
+  const exactAll = real.filter((e) => norm(e.label) === want);
+  const exact = pick(exactAll.filter((e) => fits(op, e)));
   if (exact) return exact;
-  const partial = pick(pool.filter((e) => norm(e.label).includes(want)));
-  if (partial) return partial;
+  if (exactAll.length > 0) {
+    return {
+      ok: false,
+      reason: `target "${clean(target, 80)}" is not a ${NOUN[op]} here (it matches ${listed(exactAll)}); use index`,
+    };
+  }
+  const prefix = pick(pool.filter((e) => startsWithWord(norm(e.label), want)));
+  if (prefix) return prefix;
   const near = findElements({ ...state, elements: pool }, target, SHOWN_CANDIDATES);
   const hint = near.length > 0 ? `; closest: ${listed(near)}` : '';
   return { ok: false, reason: `no ${NOUN[op]} matches target "${clean(target, 80)}"${hint}` };

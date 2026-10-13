@@ -13,6 +13,7 @@ export type LegacyBrowserDriver = Pick<
 
 const MAX_LINES = 120;
 const MAX_STEPS = 30;
+const MAX_TOTAL_WAIT_MS = 30_000;
 const LEGACY_OPS = new Set(['click', 'type', 'wait']);
 
 function words(s: string): string[] {
@@ -138,6 +139,7 @@ export class LegacyBrowserPort implements BrowserPort {
     if (steps.length > MAX_STEPS) {
       throw new Error(`browser_do accepts at most ${MAX_STEPS} steps (got ${steps.length}). No steps were run.`);
     }
+    let totalWait = 0;
     steps.forEach((step, i) => {
       const invalid = (reason: string): Error =>
         new Error(`step ${i + 1} ${String(step?.op)} invalid: ${reason}. No steps were run.`);
@@ -145,6 +147,8 @@ export class LegacyBrowserPort implements BrowserPort {
       if (step.target !== undefined) throw invalid('target is not supported on the slower fallback; use index from browser_snapshot');
       if (step.op === 'wait') {
         if (typeof step.ms !== 'number' || !(step.ms >= 0 && step.ms <= 5000)) throw invalid('ms must be between 0 and 5000');
+        totalWait += step.ms;
+        if (totalWait > MAX_TOTAL_WAIT_MS) throw invalid(`waits add up to more than ${MAX_TOTAL_WAIT_MS} ms per call`);
         return;
       }
       if (typeof step.index !== 'number' || !Number.isInteger(step.index)) throw invalid('index is required');

@@ -54,6 +54,8 @@ const STABLE_CAP_MS = 3000;
 const MAX_PROBES = 30;
 const PROBE_TIMEOUT_MS = 2000;
 const MAX_STEPS = 30;
+/** Total `wait` time per browser_do call: a batch must finish well inside the 90 s tool timeout. */
+const MAX_TOTAL_WAIT_MS = 30_000;
 const INDEX_OPS = new Set<DoStep['op']>(['click', 'type', 'select', 'check', 'hover']);
 const ALL_OPS = new Set<string>(['click', 'type', 'select', 'check', 'hover', 'press', 'scroll', 'wait']);
 const STILL_LOADING = 'note: page still loading';
@@ -857,23 +859,32 @@ export class FastBrowserEngine implements BrowserPort {
       throw new Error(`browser_do accepts at most ${MAX_STEPS} steps (got ${steps.length}). No steps were run.`);
     }
     let shown = this.shown?.mode === 'fast' ? this.shown : null;
-    if (!shown && steps.some((s) => s !== null && typeof s === 'object' && s.target !== undefined)) {
-      // Label targets need a page to resolve against: look at the page first.
-      const r = await this.resolve();
-      if (r.kind === 'legacy') return this.useLegacy(() => this.legacy.do(steps), r.reason, true);
-      try {
-        const { ctx: front } = await this.target(r.ctx);
-        await this.show(front);
-      } catch (err) {
-        if (err instanceof BrowserAutomationError) {
-          this.transportFailed(r.ctx, err);
-          throw new Error(`${err.message} Call browser_snapshot to continue on the slower fallback.`);
-        }
-        throw err;
-      }
+    const named = (s: DoStep | null | undefined): s is DoStep => s !== null && typeof s === 'object';
+    // Label targets need a page to resolve against, so look at the page first. Never when a step
+    // also uses a numeric id: those ids belong to a page the model saw, and a fresh snapshot of
+    // whatever tab is in front could give the same numbers to different elements.
+    if (!shown && steps.some((s) => named(s) && s.target !== undefined) && !steps.some((s) => named(s) && s.index !== undefined)) {
+      const flags = { fellBack: false };
+      await this.run(
+        async (resolved) => {
+          const { ctx: front } = await this.target(resolved);
+          await this.show(front);
+          return '';
+        },
+        async () => {
+          flags.fellBack = true;
+          return '';
+        },
+        true,
+      );
+      if (flags.fellBack) return this.legacy.do(steps);
       shown = this.shown?.mode === 'fast' ? this.shown : null;
     }
     const plan = steps.map((step, i) => planStep(step, i + 1, shown?.state ?? null));
+    const totalWait = plan.reduce((sum, p) => sum + p.ms, 0);
+    if (totalWait > MAX_TOTAL_WAIT_MS) {
+      throw new Error(`browser_do waits add up to ${totalWait} ms; the limit is ${MAX_TOTAL_WAIT_MS} ms per call. No steps were run.`);
+    }
     let ctx: Ctx;
     if (shown) {
       ctx = { browser: shown.browser, target: shown.target };
@@ -925,7 +936,9 @@ export class FastBrowserEngine implements BrowserPort {
       }
       if (res.verified === false) unverified = true;
       if (res.opened) opened = true;
-      if (typeof res.focused === 'string') focused = res.focused;
+      // A later click/type/select/check moves focus itself, so an earlier Tab's report is stale.
+      if (p.op.op === 'click' || p.op.op === 'type' || p.op.op === 'select' || p.op.op === 'check') focused = null;
+      else if (typeof res.focused === 'string') focused = res.focused;
       done.push(p.name);
       if (p.confirm === 'note' || (p.confirm === 'quiet' && confirm === null)) confirm = p.confirm;
       const op = p.op;
@@ -941,6 +954,7 @@ export class FastBrowserEngine implements BrowserPort {
         }
         if (probe && navigatedAway(probe, startUrl, origin)) {
           navigated = `step ${n} ${p.name} ok but the page navigated; remaining steps not run`;
+          focused = null;
           break;
         }
       }
@@ -980,7 +994,7 @@ function planStep(step: DoStep, n: number, state: PageState | null): PlannedStep
     if (hasIndex && hasTarget) throw invalid('give either index or target, not both');
     if (hasTarget) {
       if (typeof step.target !== 'string') throw invalid('target must be text');
-      if (!state) throw invalid('no page has been shown yet');
+      if (!state) throw invalid('no page has been shown yet; call browser_snapshot first');
       const r = resolveTarget(state, step.op as TargetOp, step.target);
       if (!r.ok) throw invalid(r.reason);
       el = r.el;

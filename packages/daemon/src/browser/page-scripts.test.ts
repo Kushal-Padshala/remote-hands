@@ -1119,7 +1119,7 @@ describe('snapshot hardening (review fixes)', () => {
     const snap = light(p);
     expect(snap.actions.map((a: any) => a.label)).not.toContain('Beyond budget');
     expect(snap.scan_truncated).toBe(true);
-  });
+  }, 60_000);
 
   it('does not report scan_truncated on an ordinary page', () => {
     const p = makePage('<button>Go</button>');

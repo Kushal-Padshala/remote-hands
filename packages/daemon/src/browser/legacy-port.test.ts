@@ -128,4 +128,13 @@ describe('LegacyBrowserPort (previous ComputerSession behaviour)', () => {
     );
     await expect(p.do([{ op: 'hover', index: 1 }])).rejects.toThrow('step 1 hover invalid: not supported on the legacy path');
   });
+
+  it('limits the total wait time of one call and accepts up to 30 steps', async () => {
+    const p = port();
+    await expect(p.do(Array.from({ length: 7 }, () => ({ op: 'wait' as const, ms: 5000 })))).rejects.toThrow(
+      'step 7 wait invalid: waits add up to more than 30000 ms per call. No steps were run.',
+    );
+    await expect(p.do(Array.from({ length: 30 }, () => ({ op: 'wait' as const, ms: 1 })))).resolves.toContain('did: wait');
+    await expect(p.do(Array.from({ length: 31 }, () => ({ op: 'wait' as const, ms: 1 })))).rejects.toThrow('at most 30 steps');
+  });
 });
