@@ -82,8 +82,8 @@ describe('DesktopEngine.snapshot', () => {
 describe('DesktopEngine zoom', () => {
   const LIST: AxNode = { id: 3, parent: 1, role: 'AXList', label: 'Changes', x: 0, y: 0, width: 200, height: 300 };
   const ROW: AxNode = { id: 4, parent: 3, role: 'AXButton', label: 'a.ts', actions: ['AXPress'], x: 0, y: 0, width: 100, height: 20 };
-  const full = (): AxSnapshot => snapshotOf([WIN, BTN, LIST, ROW], { epoch: 9 });
-  const part = (): AxSnapshot => snapshotOf([LIST, ROW], { epoch: 9 });
+  const full = (): AxSnapshot => snapshotOf([WIN, BTN, LIST, ROW], { epoch: 9, frontWindow: 1 });
+  const part = (): AxSnapshot => snapshotOf([LIST, ROW], { epoch: 9, frontWindow: 1 });
 
   it('reads only the named part with the helper, names it in the header and forgets ids from outside it', async () => {
     const helper = fake((op) => (op.root === undefined ? full() : part()));
@@ -150,13 +150,41 @@ describe('DesktopEngine zoom', () => {
 
     // another window in front (a dialog): the whole window is read
     let dialog = false;
-    const second = new DesktopEngine(fake((op) => (op.root !== undefined ? snapshotOf([LIST, ROW], { epoch: 9, ...(dialog ? { window: { title: 'Save' } } : {}) }) : full())));
+    const second = new DesktopEngine(fake((op) => (op.root !== undefined ? snapshotOf([LIST, ROW], { epoch: 9, frontWindow: dialog ? 2 : 1 }) : full())));
     await second.snapshot('Notes');
     await second.snapshot('', { index: 3 });
     dialog = true;
     const text = await second.settle('Notes', second.current()!.view, { firstMs: 0, gapMs: 0 });
     expect(text).toContain('[2] button "New Note"');
     expect(second.current()?.zoom).toBeUndefined();
+  });
+
+  it('tells windows apart by identity, not by title', async () => {
+    // a document renamed in the same window keeps the zoom
+    let title = 'All Notes';
+    const same = new DesktopEngine(fake((op) => (op.root === undefined ? full() : snapshotOf([LIST, ROW], { epoch: 9, frontWindow: 1, window: { title } }))));
+    await same.snapshot('Notes');
+    await same.snapshot('', { index: 3 });
+    title = 'All Notes — Edited';
+    expect(await same.settle('Notes', same.current()!.view, { firstMs: 0, gapMs: 0 })).toContain('inside: [3] list "Changes"');
+
+    // another window with the very same title is a different window
+    let front = 1;
+    const twin = new DesktopEngine(fake((op) => (op.root === undefined ? snapshotOf([WIN, BTN, LIST, ROW], { epoch: 9, frontWindow: front }) : snapshotOf([LIST, ROW], { epoch: 9, frontWindow: front }))));
+    await twin.snapshot('Notes');
+    await twin.snapshot('', { index: 3 });
+    front = 2;
+    const text = await twin.settle('Notes', twin.current()!.view, { firstMs: 0, gapMs: 0 });
+    expect(text).toContain('[2] button "New Note"');
+    expect(text).not.toContain('inside:');
+
+    // another window in front before the first zoom: refused, nothing is mixed up
+    front = 1;
+    const early = new DesktopEngine(fake((op) => (op.root === undefined ? snapshotOf([WIN, BTN, LIST, ROW], { epoch: 9, frontWindow: front }) : snapshotOf([LIST, ROW], { epoch: 9, frontWindow: front }))));
+    await early.snapshot('Notes');
+    front = 2;
+    await expect(early.snapshot('', { index: 3 })).rejects.toThrow(/window in front changed/);
+    expect(early.current()?.zoom).toBeUndefined();
   });
 
   it('reads the whole window again when the helper says the zoomed part belongs to another app or is scrolled away', async () => {

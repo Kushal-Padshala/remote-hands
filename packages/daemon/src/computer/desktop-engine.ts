@@ -13,6 +13,8 @@ export interface Zoom {
   id: number;
   /** `[12] list "Changes"`: what the view header says it is inside. */
   text: string;
+  /** The window that was in front when it was taken. */
+  front: number | undefined;
 }
 
 export interface EngineSnapshot {
@@ -85,12 +87,15 @@ export class DesktopEngine {
       if (!region && !item) throw new Error(`Index ${opts.index} not in last snapshot. Call desktop_snapshot again.`);
       const role = region?.role ?? item!.role;
       const label = region?.label ?? item!.label;
-      zoom = { id: opts.index, text: `[${opts.index}] ${role === 'hint' ? 'scroll area' : role}${label ? ` "${label}"` : ''}` };
+      zoom = { id: opts.index, text: `[${opts.index}] ${role === 'hint' ? 'scroll area' : role}${label ? ` "${label}"` : ''}`, front: last.snapshot.frontWindow };
       target = last.app;
     }
     const inherited = this.last?.view.menuNoise;
     const taken = await this.take(target, zoom?.id);
     if (!taken) return null;
+    if (zoom && taken.snapshot.frontWindow !== zoom.front) {
+      throw new Error('The window in front changed since that snapshot. Call desktop_snapshot again.');
+    }
     const viewOpts = zoom ? { zoom: zoom.text, zoomId: zoom.id, ...(inherited !== undefined ? { menuNoise: inherited } : {}) } : {};
     const view = buildView(taken.snapshot, opts.filter ? { filter: opts.filter, ...viewOpts } : viewOpts);
     // A filtered view hides lines, so the ids the model may use are those of the whole window.
@@ -244,7 +249,6 @@ export class DesktopEngine {
     // a part of the window that was zoomed into stays the view while it is still there
     const lastApp = this.last?.app ?? '';
     let zoom = app === '' || app.toLowerCase() === lastApp.toLowerCase() ? this.last?.zoom : undefined;
-    const zoomWindow = this.last?.snapshot.window?.title;
     const menuNoise = this.last?.view.menuNoise;
     for (;;) {
       let taken: { app: string; snapshot: AxSnapshot } | null;
@@ -257,7 +261,7 @@ export class DesktopEngine {
         taken = await this.take(app);
       }
       if (!taken) return null;
-      if (zoom && taken.snapshot.window?.title !== zoomWindow) {
+      if (zoom && taken.snapshot.frontWindow !== zoom.front) {
         // another window is in front now (a dialog, a different document): the whole window is the view
         zoom = undefined;
         previous = null;

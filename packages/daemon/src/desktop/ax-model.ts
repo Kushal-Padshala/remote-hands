@@ -433,8 +433,20 @@ function fingerprintOf(text: string): string {
  * window are not the ones lost. Headings stay (they are what desktop_snapshot index=N zooms into) and each
  * part that lost lines ends with a line saying where the rest is.
  */
+const hintItem = (key: string, id: number, line: string, region: number): ViewItem => ({
+  key, id, role: 'hint', label: '', gateLabel: '', line,
+  interactive: false, editable: false, secure: false, disabled: false, actionTargets: {}, members: [], region, container: false,
+});
+
+/** One part of a window, listed so it can be read on its own. */
+const regionEntry = (r: Region, count: number): ViewItem =>
+  hintItem(`r${r.id}`, r.id, `[${r.id}] ${r.role}${r.label ? ` ${quote(r.label)}` : ''}${count > 0 ? ` · ${count} elements` : ''} (desktop_snapshot index=${r.id})`, 0);
+
+const overviewMarker = (elements: number, moreParts: number): ViewItem =>
+  hintItem('t0', 0, `… ${elements} elements not shown; zoom into a part above (desktop_snapshot index=N)${moreParts > 0 ? ` or pass filter to narrow (${moreParts} more parts not listed)` : ''}`, 0);
+
 /** The line that says a part of the window has more than is shown, and how to see it. */
-function moreMarker(region: number, left: number, info: Region | undefined, zoomId: number | undefined, overview = false): ViewItem {
+function moreMarker(region: number, left: number, info: Region | undefined, zoomId: number | undefined): ViewItem {
   // reading the part again would show the same lines: only a filter narrows it further
   const here = region === 0 || !info || region === zoomId;
   return {
@@ -444,7 +456,7 @@ function moreMarker(region: number, left: number, info: Region | undefined, zoom
     label: '',
     gateLabel: '',
     line: here
-      ? `… ${left} more elements hidden; ${overview ? 'zoom into a part above (desktop_snapshot index=N) or ' : ''}pass filter to narrow`
+      ? `… ${left} more elements hidden; pass filter to narrow`
       : `… ${left} more in [${region}] ${info.role}${info.label ? ` ${quote(info.label)}` : ''} (desktop_snapshot index=${region})`,
     interactive: false,
     editable: false,
@@ -483,9 +495,11 @@ function fairTrim(list: ViewItem[], max: number, regions: Map<number, Region>, z
   while (q > 0 && total(q) > max) q -= 1;
   if (q === 0) {
     // more parts than lines: list the parts themselves (each can be read on its own), then say the rest is hidden
-    const headings = list.filter((i) => i.container).slice(0, max - 1);
-    if (headings.length === 0) return { items: list.slice(0, max), markers: 0 };
-    return { items: [...headings, moreMarker(0, list.length - headings.length, undefined, zoomId, true)], markers: 1 };
+    const parts = [...regions.values()].filter((r) => r.id !== zoomId);
+    if (parts.length === 0) return { items: list.slice(0, max), markers: 0 };
+    const listed = parts.slice(0, max - 1);
+    const entries = listed.map((r) => regionEntry(r, groups.get(r.id)?.length ?? 0));
+    return { items: [...entries, overviewMarker(list.length, parts.length - listed.length)], markers: 1 };
   }
 
   const quota = new Map<number, number>();

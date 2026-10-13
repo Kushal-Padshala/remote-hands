@@ -410,39 +410,50 @@ func snapshot(_ id: Any?, _ request: [String: Any]) {
     func walkOnce() -> (Walker, AXUIElement?, [String: Any]?) {
         let walker = Walker(maxNodes: maxNodes, budgetMs: budgetMs)
         let window = chooseWindow(appElement, title: windowTitle)
+        // A part read on its own is described by the window it is in, which need not be the one in front.
+        var owner = window
+        if let root = zoomRoot, let w = attribute(root, kAXWindowAttribute), CFGetTypeID(w) == AXUIElementGetTypeID() {
+            owner = (w as! AXUIElement)
+        }
         var windowInfo: [String: Any]? = nil
-        if let w = window {
+        var windowFrame: CGRect? = nil
+        if let w = owner {
             let v = fetch(w, [kAXTitleAttribute, kAXPositionAttribute, kAXSizeAttribute])
             var info: [String: Any] = ["title": clip(text(v[0]) ?? "", 200)]
-            var frame: CGRect? = nil
             if let o = point(v[1]), let s = size(v[2]) {
-                frame = CGRect(origin: o, size: s)
+                windowFrame = CGRect(origin: o, size: s)
                 info["x"] = Int(o.x.rounded()); info["y"] = Int(o.y.rounded())
                 info["width"] = Int(s.width.rounded()); info["height"] = Int(s.height.rounded())
             }
             windowInfo = info
-            // Children of the window are limited to the window's own area.
-            if zoomRoot == nil { walker.visit(w, parent: 0, clip: frame, owner: nil, depth: 0) }
+        }
+        // Open menus and popovers hang off the app, not the window.
+        func appOverlays() {
+            for extra in (attribute(appElement, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
+                if walker.truncated || walker.timedOut { break }
+                let role = text(attribute(extra, kAXRoleAttribute)) ?? ""
+                if role == "AXMenu" || role == "AXPopover" || role == "AXDrawer" {
+                    let f = fetch(extra, [kAXPositionAttribute, kAXSizeAttribute])
+                    var frame: CGRect? = nil
+                    if let o = point(f[0]), let s = size(f[1]) { frame = CGRect(origin: o, size: s) }
+                    walker.visit(extra, parent: 0, clip: frame, owner: nil, depth: 0)
+                }
+            }
         }
         if let root = zoomRoot {
-            walker.visit(root, parent: 0, clip: zoomClipRect, owner: nil, depth: 0)
-            // a sheet opened by an action hangs off the window, outside the part being read
-            if let w = window {
+            // What an action opened (a sheet, a menu) is read before the part itself, so a big part cannot use up the
+            // budget first.
+            if let w = owner {
                 for kid in (attribute(w, kAXChildrenAttribute) as? [AXUIElement]) ?? [] where text(attribute(kid, kAXRoleAttribute)) == "AXSheet" {
                     walker.visit(kid, parent: 0, clip: frameOf(kid), owner: nil, depth: 0)
                 }
             }
-        }
-        // Open menus and popovers hang off the app, not the window.
-        for extra in (attribute(appElement, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
-            if walker.truncated || walker.timedOut { break }
-            let role = text(attribute(extra, kAXRoleAttribute)) ?? ""
-            if role == "AXMenu" || role == "AXPopover" || role == "AXDrawer" {
-                let f = fetch(extra, [kAXPositionAttribute, kAXSizeAttribute])
-                var frame: CGRect? = nil
-                if let o = point(f[0]), let s = size(f[1]) { frame = CGRect(origin: o, size: s) }
-                walker.visit(extra, parent: 0, clip: frame, owner: nil, depth: 0)
-            }
+            appOverlays()
+            walker.visit(root, parent: 0, clip: zoomClipRect, owner: nil, depth: 0)
+        } else {
+            // Children of the window are limited to the window's own area.
+            if let w = owner { walker.visit(w, parent: 0, clip: windowFrame, owner: nil, depth: 0) }
+            appOverlays()
         }
         return (walker, window, windowInfo)
     }
@@ -476,6 +487,8 @@ func snapshot(_ id: Any?, _ request: [String: Any]) {
     ]
     if let info = windowInfo { out["window"] = info }
     if window == nil && zoomRoot == nil { out["noWindow"] = true }
+    // which window is in front, by identity: what a zoom is checked against (titles are not unique and change)
+    if let w = window { out["frontWindow"] = handles.handle(for: w) }
     reply(id, out)
 }
 
@@ -541,22 +554,35 @@ func visibleFrame(_ element: AXUIElement) -> CGRect? {
 }
 
 /// The area of the screen a zoomed-into element can show in: its own frame cut down to the scroll areas, sheets and
-/// window around it. `gone` when it is known to be entirely outside them (scrolled away). Without a frame of its own,
-/// only the surrounding areas limit it.
+/// window around it. `gone` when it is known to be entirely outside them (scrolled away, or inside an area with no
+/// size) or when nothing bounds it at all, so the caller reads the whole window instead of an unrestricted subtree.
 func zoomClip(_ element: AXUIElement) -> (CGRect?, Bool) {
     var frame: CGRect? = frameOf(element)
     var current: AXUIElement = element
-    for _ in 0..<16 {
+    var visited = Set<Int>()
+    var bounded = false
+    for _ in 0..<64 {
         guard let parent = attribute(current, kAXParentAttribute), CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
         let p = parent as! AXUIElement
+        let key = Int(CFHash(p))
+        if visited.contains(key) { break }
+        visited.insert(key)
         let role = text(attribute(p, kAXRoleAttribute)) ?? ""
-        if viewportRoles.contains(role) || role == "AXWindow" || role == "AXSheet", let f = frameOf(p) {
-            let next = frame.map { $0.intersection(f) } ?? f
-            if next.isNull || next.width < 1 || next.height < 1 { return (nil, true) }
-            frame = next
+        if viewportRoles.contains(role) || role == "AXWindow" || role == "AXSheet" {
+            let v = fetch(p, [kAXPositionAttribute, kAXSizeAttribute])
+            if let o = point(v[0]), let s = size(v[1]) {
+                // an area with no size shows nothing
+                if s.width < 1 || s.height < 1 { return (nil, true) }
+                let f = CGRect(origin: o, size: s)
+                let next = frame.map { $0.intersection(f) } ?? f
+                if next.isNull || next.width < 1 || next.height < 1 { return (nil, true) }
+                frame = next
+                bounded = true
+            }
         }
         current = p
     }
+    if frame == nil || (!bounded && frameOf(element) == nil) { return (nil, true) }
     return (frame, false)
 }
 

@@ -38,6 +38,8 @@ export interface AxSnapshot {
   app: { name: string; pid: number; bundle?: string };
   window?: { title: string; x?: number; y?: number; width?: number; height?: number };
   noWindow?: boolean;
+  /** The window in front, by identity (titles are not unique and change). */
+  frontWindow?: number;
   nodes: AxNode[];
   truncated: boolean;
   timedOut: boolean;

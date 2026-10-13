@@ -370,9 +370,28 @@ describe('big windows and web-based apps', () => {
     expect(view.lines.length).toBeLessThanOrEqual(150);
     // every pane that fits is named with the id that zooms into it, including the last ones shown
     for (const id of listIds.slice(0, 30)) expect(view.text).toContain(`[${id}] list`);
-    expect(view.text).toContain('zoom into a part above (desktop_snapshot index=N) or pass filter to narrow');
+    expect(view.text).toContain('elements not shown; zoom into a part above (desktop_snapshot index=N)');
     // none of the ids is lost
     for (const id of listIds) expect(view.byId.has(id)).toBe(true);
+  });
+
+  it('lists scroll areas too, and says how many parts do not fit when there are more parts than lines', () => {
+    reset();
+    const win = node('AXWindow', 0);
+    const nodes: AxNode[] = [win];
+    const areas: number[] = [];
+    for (let a = 0; a < 160; a++) {
+      const area = node('AXScrollArea', win.id);
+      areas.push(area.id);
+      nodes.push(area, ...Array.from({ length: 5 }, (_, i) => node('AXButton', area.id, { label: `A${a} b${i}` })));
+    }
+    const view = buildView(snap(nodes));
+    expect(view.lines.length).toBeLessThanOrEqual(150);
+    expect(view.text).toContain(`[${areas[0]}] scroll area · 5 elements (desktop_snapshot index=${areas[0]})`);
+    expect(view.text).not.toContain('A0 b0');
+    expect(view.text).toMatch(/\(11 more parts not listed\)/);
+    // the ones not listed can still be read by id
+    expect(view.regions.has(areas[159]!)).toBe(true);
   });
 
   it('cuts a window without panes to the cap, ending with one line saying the rest is hidden', () => {
