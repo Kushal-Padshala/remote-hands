@@ -1285,3 +1285,28 @@ describe('page scripts across shadow roots and frames (review fixes)', () => {
     });
   });
 });
+
+describe('extract: slots and budget (review fixes)', () => {
+  it('shows assigned slot content once and uses fallback content only when nothing is assigned', () => {
+    const p = makePage('<main><x-a id="a">Delete account</x-a><x-a id="b"></x-a></main>');
+    for (const id of ['a', 'b']) {
+      p.doc.getElementById(id).attachShadow({ mode: 'open' }).innerHTML = '<button><slot>Save</slot></button>';
+    }
+    const text = p.evalJson(buildExtractScript(2000)).text as string;
+    expect(text).toBe('Delete account Save');
+  });
+
+  it('does not show light children of a shadow host that no slot places', () => {
+    const p = makePage('<main><x-a id="a">Never rendered</x-a></main>');
+    p.doc.getElementById('a').attachShadow({ mode: 'open' }).innerHTML = '<p>Shadow only</p>';
+    expect(p.evalJson(buildExtractScript(2000)).text).toBe('Shadow only');
+  });
+
+  it('stops after a fixed number of nodes and marks the result truncated', () => {
+    const p = makePage(`<main><p>start</p>${'<i></i>'.repeat(200_050)}<p>end</p></main>`);
+    const text = p.evalJson(buildExtractScript(2000)).text as string;
+    expect(text.startsWith('start')).toBe(true);
+    expect(text.endsWith('\u2026')).toBe(true);
+    expect(text).not.toContain('end');
+  }, 60_000);
+});

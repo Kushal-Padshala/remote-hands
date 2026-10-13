@@ -449,17 +449,30 @@ export function buildExtractScript(maxChars: number): string {
     text = text ? text + ' ' + t : t;
     if (text.length >= max) full = true;
   };
+  let visits = 0;
   const walk = (n, depth) => {
     if (truncated) return;
+    if (++visits > 200000) { truncated = true; return; }
     if (n.nodeType === 3) { add(n.textContent || ''); return; }
-    if (n.nodeType !== 1 || SKIP.includes(n.tagName) || hidden(n)) return;
+    if (n.nodeType !== 1 || SKIP.includes(n.tagName)) return;
+    if (n.tagName === 'SLOT' && typeof n.assignedNodes === 'function') {
+      // A slot has no box of its own: show what is assigned to it, or its fallback content.
+      const assigned = n.assignedNodes({ flatten: true });
+      for (const c of (assigned.length > 0 ? assigned : n.childNodes)) walk(c, depth);
+      return;
+    }
+    if (hidden(n)) return;
     if (n.tagName === 'INPUT') {
       const type = String(n.type || 'text').toLowerCase();
       if (VALUE_TYPES.includes(type) && n.value) add(n.value);
       return;
     }
     if (n.tagName === 'TEXTAREA') { if (n.value) add(n.value); return; }
-    if (n.shadowRoot && depth < 3) for (const c of n.shadowRoot.childNodes) walk(c, depth + 1);
+    if (n.shadowRoot && depth < 3) {
+      // The shadow tree is what is rendered; light children only appear where a slot places them.
+      for (const c of n.shadowRoot.childNodes) walk(c, depth + 1);
+      return;
+    }
     if ((n.tagName === 'IFRAME' || n.tagName === 'FRAME') && depth < 3) {
       let d = null;
       try { d = n.contentDocument; } catch (e) { d = null; }
