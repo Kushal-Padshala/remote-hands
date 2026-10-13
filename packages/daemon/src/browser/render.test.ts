@@ -212,14 +212,37 @@ describe('blocked frames', () => {
 
   it('renders one note line, singular and plural, after the element lines', () => {
     const one = renderFull(normalizeSnapshot({ ...base, frames_blocked: 1 }), { text: false }).split('\n');
-    expect(one.at(-1)).toBe('note: 1 embedded frame from another website cannot be read here; use desktop_snapshot for that part');
+    expect(one.at(-1)).toBe('note: 1 embedded frame cannot be read here (from another website or sandboxed); use desktop_snapshot for that part');
     const two = renderFull(normalizeSnapshot({ ...base, frames_blocked: 2 }), { text: false }).split('\n');
-    expect(two.at(-1)).toBe('note: 2 embedded frames from another website cannot be read here; use desktop_snapshot for that part');
+    expect(two.at(-1)).toBe('note: 2 embedded frames cannot be read here (from another website or sandboxed); use desktop_snapshot for that part');
     expect(renderFull(normalizeSnapshot(base), { text: false })).not.toContain('embedded frame');
   });
 
   it('keeps the element lines in the exact existing format', () => {
     const lines = renderFull(normalizeSnapshot({ ...base, frames_blocked: 1 }), { text: false }).split('\n');
     expect(lines[1]).toBe('[1] button "Go"');
+  });
+
+  it('announces a frame that appears in a delta even when nothing else changed', () => {
+    const before = normalizeSnapshot(base);
+    const after = normalizeSnapshot({ ...base, frames_blocked: 1 });
+    const out = renderDelta(before, after);
+    expect(out).not.toContain('no visible change');
+    expect(out.split('\n').at(-1)).toBe('note: 1 embedded frame cannot be read here (from another website or sandboxed); use desktop_snapshot for that part');
+  });
+
+  it('announces a changed frame count, and stays quiet when it did not change or went away', () => {
+    const one = normalizeSnapshot({ ...base, frames_blocked: 1 });
+    const two = normalizeSnapshot({ ...base, frames_blocked: 2 });
+    expect(renderDelta(one, two).split('\n').at(-1)).toContain('2 embedded frames');
+    expect(renderDelta(one, one)).toMatch(/no visible change$/);
+    expect(renderDelta(two, normalizeSnapshot(base))).toMatch(/no visible change$/);
+  });
+
+  it('notes a page too large to read fully, in full renders only', () => {
+    const state = normalizeSnapshot({ ...base, scan_truncated: true });
+    expect(state.scanTruncated).toBe(true);
+    expect(renderFull(state, { text: false }).split('\n').at(-1)).toBe('note: this page is very large; some nested content was not read');
+    expect(normalizeSnapshot({ ...base, scan_truncated: 'yes' }).scanTruncated).toBeUndefined();
   });
 });

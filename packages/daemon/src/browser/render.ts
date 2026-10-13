@@ -24,8 +24,10 @@ export interface PageState {
   omitted?: number;
   /** Browser the page was read from (shown in the header). */
   browser?: string;
-  /** Visible frames from another site that the page script cannot read. */
+  /** Visible frames the page script cannot read (cross-origin or sandboxed). */
   blockedFrames?: number;
+  /** The page script stopped early (very large page): some nested content was not read. */
+  scanTruncated?: boolean;
 }
 
 export interface RenderOpts {
@@ -41,6 +43,12 @@ const DEFAULT_MAX_LINES = 120;
 const DEFAULT_TEXT_CHARS = 1200;
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+export function framesNote(n: number): string {
+  return `note: ${n} embedded ${n === 1 ? 'frame' : 'frames'} cannot be read here (from another website or sandboxed); use desktop_snapshot for that part`;
+}
+
+const SCAN_TRUNCATED_NOTE = 'note: this page is very large; some nested content was not read';
 
 function baseLabel(label: string): string {
   const i = label.lastIndexOf(ARROW);
@@ -95,6 +103,7 @@ export function normalizeSnapshot(raw: unknown): PageState {
   if (typeof obj.frames_blocked === 'number' && Number.isFinite(obj.frames_blocked) && obj.frames_blocked >= 1) {
     state.blockedFrames = Math.floor(obj.frames_blocked);
   }
+  if (obj.scan_truncated === true) state.scanTruncated = true;
   return state;
 }
 
@@ -158,12 +167,8 @@ export function renderFull(state: PageState, opts: RenderOpts): string {
   if (state.omitted) {
     lines.push(`(${state.omitted} more elements not listed: only the first 250 are captured; use browser_find or scroll)`);
   }
-  if (state.blockedFrames) {
-    const n = state.blockedFrames;
-    lines.push(
-      `note: ${n} embedded ${n === 1 ? 'frame' : 'frames'} from another website cannot be read here; use desktop_snapshot for that part`,
-    );
-  }
+  if (state.blockedFrames) lines.push(framesNote(state.blockedFrames));
+  if (state.scanTruncated) lines.push(SCAN_TRUNCATED_NOTE);
   return lines.join('\n');
 }
 
@@ -194,13 +199,16 @@ export function renderDelta(prev: PageState | null, next: PageState, opts: Rende
   const union = new Set([...before.keys(), ...after]).size;
   if (added.length + changed.length + removed.length > union / 2) return full();
   const textChanged = prev.text !== next.text;
+  // An unreadable frame that appeared (or changed count) is news the agent must hear even when
+  // nothing else moved; one that went away needs no announcement.
+  const framesChanged = (next.blockedFrames ?? 0) > 0 && next.blockedFrames !== prev.blockedFrames;
   const out = [`${header(next)} (same page)`];
-  if (lines.length === 0 && !textChanged) return `${out[0]}\nno visible change`;
+  if (lines.length === 0 && !textChanged && !framesChanged) return `${out[0]}\nno visible change`;
   if (textChanged) {
     const t = textLine(next.text, opts.textChars ?? DEFAULT_TEXT_CHARS);
     if (t) out.push(t);
   }
-  return [...out, ...lines, `(${unchanged} unchanged)`].join('\n');
+  return [...out, ...lines, `(${unchanged} unchanged)`, ...(framesChanged ? [framesNote(next.blockedFrames!)] : [])].join('\n');
 }
 
 function words(s: string): string[] {

@@ -36,8 +36,17 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
     if (!e.isConnected) cache.nodes.delete(id);
   }
   const safe = (e) => !['file', 'hidden'].includes(e.type);
+  // Light mode (window.__rhLight, set by the fast engine): no guards/marker and a page_key
+  // of [timeOrigin] only, so no input values (password plaintext included) leave the page.
+  // Only light mode reads open shadow roots and same-origin frames: the legacy driver
+  // (full mode) keeps seeing exactly the top document it always did.
+  const light = window.__rhLight === true;
   const MAX_NEST = 3;
   const MAX_SCAN = 100000;
+  const MAX_NESTED_CONTROLS = 2000;
+  const MAX_NESTED_TEXT_VISITS = 20000;
+  const MAX_CONTROLS = 250;
+  const MAX_OPTIONS_PER_SELECT = 120;
   const hostOf = (e) => { const r = e.getRootNode && e.getRootNode(); return r && r.host ? r.host : null; };
   const frameOf = (e) => {
     const view = e.ownerDocument && e.ownerDocument.defaultView;
@@ -56,6 +65,13 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   };
   const visible = (e) => !closestDeep(e, '[aria-hidden="true"],[inert]') &&
     (typeof e.checkVisibility === 'function' ? e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) : true);
+  const kidsOf = (e) => {
+    if (e.tagName === 'SLOT' && typeof e.assignedNodes === 'function') {
+      const assigned = e.assignedNodes({ flatten: true });
+      if (assigned.length > 0) return assigned;
+    }
+    return [...e.childNodes];
+  };
   const name = (e, seen = new Set()) => {
     if (!e || seen.has(e)) return '';
     seen.add(e);
@@ -64,7 +80,7 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
     return referenced || e.getAttribute('aria-label') ||
       [...(e.labels || [])].map((l) => name(l, seen)).filter(Boolean).join(' ') ||
       (['button', 'submit', 'reset'].includes(e.type) ? e.value : '') || e.getAttribute('alt') ||
-      (e.tagName === 'INPUT' ? '' : [...e.childNodes].map((n) => n.nodeType === 3 ? n.textContent :
+      (e.tagName === 'INPUT' ? '' : kidsOf(e).map((n) => n.nodeType === 3 ? n.textContent :
         n.nodeType === 1 && n.getAttribute('aria-hidden') !== 'true' ? name(n, seen) : '').join(' ').trim()) ||
       e.getAttribute('title') || e.getAttribute('placeholder') || '';
   };
@@ -101,39 +117,56 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
       e.getAttribute('href'), scope?.innerText?.slice(0, 6000) || ''];
   };
   let blocked = 0;
+  let budget = MAX_SCAN;
+  let scanTruncated = false;
+  let nestedControls = 0;
   const textRoots = [];
-  const gather = (root, dx, dy, depth, sel, found, track) => {
-    for (const e of root.querySelectorAll(sel)) found.push({ e, dx, dy });
-    if (track) textRoots.push({ root: root.body || root, dx, dy });
-    if (depth >= MAX_NEST) return;
+  const intersect = (a, b) => ({ l: Math.max(a.l, b.l), t: Math.max(a.t, b.t), r: Math.min(a.r, b.r), b: Math.min(a.b, b.b) });
+  const gather = (root, dx, dy, depth, clip) => {
+    for (const e of root.querySelectorAll(selector)) {
+      if (depth > 0) {
+        if (nestedControls >= MAX_NESTED_CONTROLS) { scanTruncated = true; break; }
+        nestedControls++;
+      }
+      found.push({ e, dx, dy, clip });
+    }
+    textRoots.push({ root: root.body || root, dx, dy, clip, depth });
+    if (!light) return;
+    if (budget <= 0) { scanTruncated = true; return; }
     const all = root.querySelectorAll('*');
-    const count = Math.min(all.length, MAX_SCAN);
+    const count = Math.min(all.length, budget);
+    if (all.length > budget) scanTruncated = true;
+    budget -= count;
     for (let i = 0; i < count; i++) {
       const host = all[i];
-      if (host.shadowRoot) { gather(host.shadowRoot, dx, dy, depth + 1, sel, found, track); continue; }
+      if (host.shadowRoot) {
+        if (depth < MAX_NEST) gather(host.shadowRoot, dx, dy, depth + 1, clip);
+        continue;
+      }
       if (host.tagName !== 'IFRAME' && host.tagName !== 'FRAME') continue;
-      let doc = null;
-      try { doc = host.contentDocument; } catch (err) { doc = null; }
       const r = host.getBoundingClientRect();
+      const box = intersect(clip, { l: dx + r.left, t: dy + r.top, r: dx + r.right, b: dy + r.bottom });
+      if (box.r <= box.l || box.b <= box.t || !visible(host)) continue;
+      let doc = null;
+      if (depth < MAX_NEST) {
+        try { doc = host.contentDocument; } catch (err) { doc = null; }
+      }
       if (doc && doc.body) {
-        if (visible(host)) gather(doc, dx + r.left + (host.clientLeft || 0), dy + r.top + (host.clientTop || 0), depth + 1, sel, found, track);
-      } else if (!doc && track && r.width >= 50 && r.height >= 50 && visible(host)) {
+        gather(doc, dx + r.left + (host.clientLeft || 0), dy + r.top + (host.clientTop || 0), depth + 1, box);
+      } else if (r.width >= 50 && r.height >= 50) {
         blocked++;
       }
     }
   };
-  cache.deepAll = (sel) => { const list = []; gather(document, 0, 0, 0, sel, list, false); return list.map((f) => f.e); };
   const actions = [];
   const found = [];
-  gather(document, 0, 0, 0, selector, found, true);
-  for (const { e, dx, dy } of found) {
+  gather(document, 0, 0, 0, { l: 0, t: 0, r: innerWidth, b: innerHeight });
+  for (const { e, dx, dy, clip } of found) {
     if (!safe(e) || !visible(e) || e.matches(':disabled') || closestDeep(e, '[aria-disabled="true"]')) continue;
     const r = typeof e.getBoundingClientRect === 'function' ? e.getBoundingClientRect() : { x: 0, y: 0, width: 10, height: 10 };
-    const win = (e.ownerDocument && e.ownerDocument.defaultView) || window;
-    const lx = r.x + (r.width || 10) / 2, ly = r.y + (r.height || 10) / 2;
-    const x = lx + dx, y = ly + dy, rname = role(e);
+    const x = r.x + dx + (r.width || 10) / 2, y = r.y + dy + (r.height || 10) / 2, rname = role(e);
     const isNodeEnv = typeof window.CSS === 'undefined';
-    const outside = lx < 0 || ly < 0 || lx >= win.innerWidth || ly >= win.innerHeight || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight;
+    const outside = x < clip.l || y < clip.t || x >= clip.r || y >= clip.b;
     if (!rname || (!isNodeEnv && (r.width <= 0 || r.height <= 0 || outside))) continue;
     if (rname === 'gridcell' && e.querySelector('button,[role="button"]')) continue;
     const base = { node: identity(e), role: rname, label: name(e) || rname, type: e.type,
@@ -144,8 +177,10 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
     }
     if (['checkbox', 'radio'].includes(e.type)) base.checked = String(e.checked);
     if (e.tagName === 'SELECT') {
+      let shownOptions = 0;
       for (const o of e.options) {
         if (!o.selected && !o.disabled && !o.closest('optgroup[disabled]')) {
+          if (light && ++shownOptions > MAX_OPTIONS_PER_SELECT) break;
           actions.push({ ...base, kind: 'select', value: o.value,
             current_value: [...e.selectedOptions].map((opt) => opt.label).join(', '), label: base.label + ' → ' + o.label });
         }
@@ -165,19 +200,18 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   for (const tr of textRoots) {
     if (length >= 6000) break;
     const tdoc = tr.root.ownerDocument || tr.root;
-    const twin = tdoc.defaultView || window;
     const walker = tdoc.createTreeWalker(tr.root, NodeFilter.SHOW_TEXT);
     const range = tdoc.createRange();
     let node;
+    let visits = 0;
     while ((node = walker.nextNode()) && length < 6000) {
+      if (tr.depth > 0 && ++visits > MAX_NESTED_TEXT_VISITS) { scanTruncated = true; break; }
       const value = node.textContent.trim();
-      const parent = node.parentElement;
+      const parent = node.parentElement || (node.parentNode && node.parentNode.host) || null;
       if (!value || !parent || parent.closest('script,style,noscript,template') || !visible(parent)) continue;
       range.selectNodeContents(node);
       const r = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect() : { width: 10, height: 10, bottom: 10, top: 1, right: 10, left: 1 };
-      const inOwn = r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < twin.innerHeight && r.right > 0 && r.left < twin.innerWidth;
-      const inTop = r.bottom + tr.dy > 0 && r.top + tr.dy < innerHeight && r.right + tr.dx > 0 && r.left + tr.dx < innerWidth;
-      if (inOwn && inTop) {
+      if (r.width > 0 && r.height > 0 && r.bottom + tr.dy > tr.clip.t && r.top + tr.dy < tr.clip.b && r.right + tr.dx > tr.clip.l && r.left + tr.dx < tr.clip.r) {
         words.push(value);
         length += value.length;
       }
@@ -185,9 +219,6 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   }
   const text = words.join('\\n').slice(0, 6000);
   const height = document.documentElement.scrollHeight;
-  // Light mode (window.__rhLight, set by the fast engine): no guards/marker and a page_key
-  // of [timeOrigin] only, so no input values (password plaintext included) leave the page.
-  const light = window.__rhLight === true;
   const page_key = light ? [performance.timeOrigin] : cache.pageKey();
   const guards = {};
   let marker;
@@ -199,8 +230,25 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
     marker = [performance.timeOrigin, location.href, scrollX, scrollY, innerWidth, innerHeight,
       document.title, text, semantics, page_key[6]];
   }
-  const omitted_actions = Math.max(0, actions.length - 250);
-  actions.splice(250);
+  // Fast engine: the cap counts controls, not select options, so one long dropdown cannot push
+  // other controls out of the list. Legacy keeps the original action-count cap.
+  let omitted_actions;
+  if (light) {
+    const listed = new Set();
+    const skipped = new Set();
+    const kept = [];
+    for (const a of actions) {
+      if (!listed.has(a.node) && listed.size >= MAX_CONTROLS) { skipped.add(a.node); continue; }
+      listed.add(a.node);
+      kept.push(a);
+    }
+    actions.length = 0;
+    for (const a of kept) actions.push(a);
+    omitted_actions = skipped.size;
+  } else {
+    omitted_actions = Math.max(0, actions.length - 250);
+    actions.splice(250);
+  }
   actions.forEach((a, i) => a.id = 'e' + (i + 1));
   if (scrollY + innerHeight < height - 2) actions.push({ id: 'scroll_down', kind: 'scroll', label: 'Scroll down', delta: 560 });
   if (scrollY > 0) actions.push({ id: 'scroll_up', kind: 'scroll', label: 'Scroll up', delta: -560 });
@@ -208,6 +256,7 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   const out = { url: location.href, title: document.title, w: innerWidth, h: innerHeight, text,
     scroll: { y: scrollY, height }, actions, elements: actions, marker, page_key, guards, omitted_actions };
   if (blocked > 0) out.frames_blocked = blocked;
+  if (scanTruncated) out.scan_truncated = true;
   if (light) { delete out.marker; delete out.guards; }
   return out;
 })()`;

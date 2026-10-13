@@ -48,19 +48,38 @@ export function embed(value: unknown): string {
 const PRELUDE = String.raw`
   const out = (r) => JSON.stringify(r);
   const fail = (error, extra) => out(Object.assign({ ok: false, error: error }, extra || {}));
-  const fire = (el, type, init) => el.dispatchEvent(new Event(type, Object.assign({ bubbles: true }, init || {})));
+  const viewOf = (el) => (el.ownerDocument && el.ownerDocument.defaultView) || window;
+  const fire = (el, type, init) => {
+    const W = viewOf(el);
+    return el.dispatchEvent(new (W.Event || Event)(type, Object.assign({ bubbles: true, composed: type === 'input' }, init || {})));
+  };
   const mouse = (el, type, pointer) => {
-    const init = { bubbles: true, cancelable: true, view: window };
+    const W = viewOf(el);
+    const init = { bubbles: true, cancelable: true, composed: true, view: W };
     if (pointer) {
-      if (typeof window.PointerEvent === 'function') el.dispatchEvent(new PointerEvent(type, init));
+      if (typeof W.PointerEvent === 'function') el.dispatchEvent(new W.PointerEvent(type, init));
       return;
     }
-    el.dispatchEvent(new MouseEvent(type, init));
+    el.dispatchEvent(new (W.MouseEvent || MouseEvent)(type, init));
   };
   const key = (el, type, k, shift) => {
-    const init = { key: k, code: k.length === 1 ? '' : k, shiftKey: shift === true, bubbles: true, cancelable: true, view: window };
+    const W = viewOf(el);
+    const init = { key: k, code: k.length === 1 ? '' : k, shiftKey: shift === true, bubbles: true, cancelable: true, composed: true, view: W };
     if (k === 'Enter') Object.assign(init, { keyCode: 13, which: 13 });
-    return el.dispatchEvent(new KeyboardEvent(type, init));
+    return el.dispatchEvent(new (W.KeyboardEvent || KeyboardEvent)(type, init));
+  };
+  const composedClosest = (e, sel) => {
+    for (let n = e; n; ) {
+      if (n.matches && n.matches(sel)) return n;
+      let next = n.parentElement;
+      if (!next) { const r = n.getRootNode && n.getRootNode(); next = r && r.host ? r.host : null; }
+      if (!next) {
+        const v = n.ownerDocument && n.ownerDocument.defaultView;
+        try { next = v && v !== window ? v.frameElement : null; } catch (err) { next = null; }
+      }
+      n = next;
+    }
+    return null;
   };
   const pressKey = (el, k, shift) => {
     const allowed = key(el, 'keydown', k, shift);
@@ -100,30 +119,59 @@ const PRELUDE = String.raw`
     }
     return a;
   };
-  const FOCUSABLE = 'a[href],button,input,select,textarea,summary,[tabindex],[contenteditable="true"]';
-  const tabbables = () => {
-    const c = window.__rhFast || window.__jevFast;
-    const all = c && typeof c.deepAll === 'function' ? c.deepAll(FOCUSABLE) : Array.from(document.querySelectorAll(FOCUSABLE));
-    const ok = all.filter((e) => {
-      if (e.matches(':disabled') || (e.closest && e.closest('[aria-disabled="true"]'))) return false;
-      if (e.tagName === 'INPUT' && e.type === 'hidden') return false;
-      const ti = e.getAttribute('tabindex');
-      if (ti !== null && Number(ti) < 0) return false;
-      if (c && typeof c.visible === 'function' && !c.visible(e)) return false;
-      return true;
-    });
-    const positive = (e) => Number(e.getAttribute('tabindex')) > 0;
-    const first = ok.filter(positive).sort((a, b) => Number(a.getAttribute('tabindex')) - Number(b.getAttribute('tabindex')));
-    return first.concat(ok.filter((e) => !positive(e)));
+  const FOCUSABLE = 'a[href],area[href],button,input,select,textarea,summary,[tabindex],[contenteditable="true"]';
+  const visibleNow = (e) => !composedClosest(e, '[aria-hidden="true"],[inert]') &&
+    (typeof e.checkVisibility === 'function' ? e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) : true);
+  // Focusable controls in the order the page's flat tree presents them: a shadow host's
+  // children come from its shadow root (slots expand to what is assigned), a same-origin
+  // frame's controls sit at the frame's position. Bounded in depth and in nodes visited.
+  const flatFocusables = () => {
+    const found = [];
+    let visits = 0;
+    const walk = (node, depth) => {
+      if (node.nodeType !== 1 || ++visits > 100000) return;
+      if (node.matches(FOCUSABLE)) found.push(node);
+      if (node.shadowRoot && depth < 3) {
+        for (const c of node.shadowRoot.childNodes) walk(c, depth + 1);
+        return;
+      }
+      if (node.tagName === 'SLOT' && typeof node.assignedNodes === 'function') {
+        const assigned = node.assignedNodes({ flatten: true });
+        for (const c of (assigned.length > 0 ? assigned : node.childNodes)) walk(c, depth);
+        return;
+      }
+      if ((node.tagName === 'IFRAME' || node.tagName === 'FRAME') && depth < 3) {
+        let d = null;
+        try { d = node.contentDocument; } catch (err) { d = null; }
+        if (d && d.body) walk(d.body, depth + 1);
+        return;
+      }
+      for (const c of node.childNodes) walk(c, depth);
+    };
+    walk(document.documentElement || document.body, 0);
+    return found;
   };
+  const tabbables = () => {
+    const ok = flatFocusables().filter((e) =>
+      e.tabIndex >= 0 && !e.matches(':disabled') && !composedClosest(e, '[aria-disabled="true"]') &&
+      !(e.tagName === 'INPUT' && e.type === 'hidden') && visibleNow(e));
+    const positive = ok.filter((e) => e.tabIndex > 0).sort((a, b) => a.tabIndex - b.tabIndex);
+    return positive.concat(ok.filter((e) => e.tabIndex === 0));
+  };
+  // Moves focus to the next (or previous) control that actually accepts it and returns that
+  // control; a candidate the browser refuses is skipped. Null when focus could not move.
   const moveFocus = (from, backwards) => {
     const list = tabbables();
-    if (list.length === 0) return null;
+    const n = list.length;
+    if (n === 0) return null;
     const i = list.indexOf(from);
-    const j = i < 0 ? (backwards ? list.length - 1 : 0) : (backwards ? (i - 1 + list.length) % list.length : (i + 1) % list.length);
-    const next = list[j];
-    try { next.focus(); } catch (e) { return null; }
-    return next;
+    for (let k = 1; k <= n; k++) {
+      const idx = i < 0 ? (backwards ? n - k : k - 1) : (backwards ? ((i - k) % n + n) % n : (i + k) % n);
+      const candidate = list[idx];
+      try { candidate.focus(); } catch (err) { continue; }
+      if (deepActive() === candidate) return candidate;
+    }
+    return null;
   };
 `;
 
@@ -170,19 +218,24 @@ const RESOLVE = String.raw`
   }
   if (cache.visible && !cache.visible(el)) return fail('stale');
   const disabled = (typeof el.matches === 'function' && el.matches(':disabled')) ||
-    !!(el.closest && el.closest('[aria-disabled="true"]'));
+    !!composedClosest(el, '[aria-disabled="true"]');
   if (disabled) return fail('unsupported', { message: 'element is disabled' });
 `;
 
 const CLICK = String.raw`
   const link = el.closest ? el.closest('a[href],area[href]') : null;
-  const opened = !!link && String(link.getAttribute('target') || '').toLowerCase() === '_blank' && !link.hasAttribute('download');
+  let opened = !!link && String(link.getAttribute('target') || '').toLowerCase() === '_blank' && !link.hasAttribute('download');
   reveal(el);
   mouse(el, 'pointerdown', true);
   mouse(el, 'mousedown', false);
   mouse(el, 'pointerup', true);
   mouse(el, 'mouseup', false);
-  el.click();
+  // A window-level bubble listener runs after the page's own handlers: if one of them
+  // cancelled the click, the link does not open anything.
+  const view = viewOf(el);
+  const watch = (ev) => { if (ev.defaultPrevented) opened = false; };
+  view.addEventListener('click', watch);
+  try { el.click(); } finally { view.removeEventListener('click', watch); }
   const result = { ok: true, label: current, navigated: false };
   if (opened) result.opened = true;
   return out(result);
@@ -193,12 +246,13 @@ const HOVER = String.raw`
     try { el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); } catch (e) {}
   }
   const emit = (target, type, pointer, bubbles) => {
-    const init = { bubbles: bubbles, cancelable: true, view: window };
+    const W = viewOf(target);
+    const init = { bubbles: bubbles, cancelable: true, composed: bubbles, view: W };
     if (pointer) {
-      if (typeof window.PointerEvent === 'function') target.dispatchEvent(new PointerEvent(type, init));
+      if (typeof W.PointerEvent === 'function') target.dispatchEvent(new W.PointerEvent(type, init));
       return;
     }
-    target.dispatchEvent(new MouseEvent(type, init));
+    target.dispatchEvent(new (W.MouseEvent || MouseEvent)(type, init));
   };
   const chain = [];
   for (let n = el; n && n.nodeType === 1; n = n.parentElement || (n.getRootNode && n.getRootNode().host) || null) chain.unshift(n);

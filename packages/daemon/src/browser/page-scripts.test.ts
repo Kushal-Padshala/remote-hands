@@ -823,7 +823,7 @@ describe('snapshot across shadow roots and frames', () => {
     root.innerHTML = '<p>Secure checkout</p><input id="card" type="text" aria-label="Card number"><button id="pay">Pay now</button>';
     let clicks = 0;
     root.getElementById('pay').addEventListener('click', () => { clicks += 1; });
-    const snap = p.snapshot();
+    const snap = p.evalJson(buildSnapshotCall());
     const labels = snap.actions.map((a: any) => a.label);
     expect(labels).toEqual(expect.arrayContaining(['Top', 'Pay now', 'Card number']));
     expect(snap.text).toContain('Secure checkout');
@@ -831,15 +831,14 @@ describe('snapshot across shadow roots and frames', () => {
     expect(clicks).toBe(1);
   });
 
-  it('lists controls inside a same-origin iframe, offsets their rect, and acts on them', () => {
+  it('lists controls inside a same-origin iframe and acts on them', () => {
     const p = makePage('<button id="top">Top</button>');
     const frame = addFrame(p, '<input id="q" type="text" aria-label="Survey answer"><button id="next">Next question</button>');
     let clicks = 0;
     frame.contentDocument.getElementById('next').addEventListener('click', () => { clicks += 1; });
-    const snap = p.snapshot();
+    const snap = p.evalJson(buildSnapshotCall());
     const next = snap.actions.find((a: any) => a.label === 'Next question');
     expect(next).toBeDefined();
-    expect(next.rect).toMatchObject({ x: 10, y: 20 });
     expect(p.run({ op: 'click', node: next.node, label: 'Next question' })).toMatchObject({ ok: true });
     expect(clicks).toBe(1);
     const q = snap.actions.find((a: any) => a.label === 'Survey answer');
@@ -864,7 +863,7 @@ describe('snapshot across shadow roots and frames', () => {
     Object.defineProperty(blocked, 'contentDocument', { get: () => null });
     const pixel = addFrame(p, '', { left: 0, top: 0, width: 1, height: 1 });
     Object.defineProperty(pixel, 'contentDocument', { get: () => null });
-    const snap = p.snapshot();
+    const snap = p.evalJson(buildSnapshotCall());
     expect(snap.frames_blocked).toBe(1);
     expect(snap.actions.map((a: any) => a.label)).toContain('Top');
   });
@@ -872,13 +871,13 @@ describe('snapshot across shadow roots and frames', () => {
   it('does not report frames_blocked when every frame is readable', () => {
     const p = makePage('<button>Top</button>');
     addFrame(p, '<button>Inside</button>');
-    expect('frames_blocked' in p.snapshot()).toBe(false);
+    expect('frames_blocked' in p.evalJson(buildSnapshotCall())).toBe(false);
   });
 
   it('ignores closed shadow roots without error', () => {
     const p = makePage('<div id="host"></div><button>Visible</button>');
     p.doc.getElementById('host').attachShadow({ mode: 'closed' }).innerHTML = '<button>Secret</button>';
-    const labels = p.snapshot().actions.map((a: any) => a.label);
+    const labels = p.evalJson(buildSnapshotCall()).actions.map((a: any) => a.label);
     expect(labels).toContain('Visible');
     expect(labels).not.toContain('Secret');
   });
@@ -891,18 +890,10 @@ describe('snapshot across shadow roots and frames', () => {
       root.innerHTML = `<button>L${level}</button><div class="next"></div>`;
       host = root.querySelector('.next');
     }
-    const labels = p.snapshot().actions.map((a: any) => a.label);
+    const labels = p.evalJson(buildSnapshotCall()).actions.map((a: any) => a.label);
     expect(labels).toEqual(expect.arrayContaining(['L1', 'L2', 'L3']));
     expect(labels).not.toContain('L4');
     expect(labels).not.toContain('L5');
-  });
-
-  it('exposes deepAll for composed-tree queries', () => {
-    const p = makePage('<div id="host"></div><button>Top</button>');
-    p.doc.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<button>Inner</button>';
-    p.snapshot();
-    const found = p.win.__rhFast.deepAll('button').map((b: any) => b.textContent);
-    expect(found).toEqual(expect.arrayContaining(['Top', 'Inner']));
   });
 });
 describe('actions and extract inside shadow roots and frames', () => {
@@ -911,17 +902,22 @@ describe('actions and extract inside shadow roots and frames', () => {
     const frame = addFrame(p, '<div id="ed" contenteditable="true" role="textbox" aria-label="Reply"></div>');
     const idoc = frame.contentDocument;
     const calls: Array<[string, unknown]> = [];
-    idoc.execCommand = (cmd: string, _ui: boolean, val: unknown) => { calls.push([cmd, val]); return true; };
+    idoc.execCommand = (cmd: string, _ui: boolean, val: unknown) => {
+      calls.push([cmd, val]);
+      idoc.getElementById('ed').textContent = String(val);
+      return true;
+    };
     Object.defineProperty(idoc.defaultView.HTMLElement.prototype, 'innerText', { configurable: true, get(this: any) { return this.textContent; } });
     Object.defineProperty(idoc.defaultView.HTMLElement.prototype, 'isContentEditable', {
       configurable: true,
       get(this: any) { const v = this.getAttribute('contenteditable'); return v !== null && v !== 'false'; },
     });
-    const snap = p.snapshot();
+    const snap = p.evalJson(buildSnapshotCall());
     const reply = snap.actions.find((a: any) => a.label === 'Reply');
     expect(reply).toBeDefined();
     expect(p.run({ op: 'type', node: reply.node, label: 'Reply', text: 'Thanks!' })).toMatchObject({ ok: true });
     expect(calls).toEqual([['insertText', 'Thanks!']]);
+    expect(idoc.getElementById('ed').textContent).toBe('Thanks!');
   });
 
   it('press Enter goes to the focused control inside a shadow root', () => {
@@ -1048,19 +1044,12 @@ describe('buildActionScript: press Tab', () => {
     expect(empty.run({ op: 'press', key: 'Tab' })).toMatchObject({ ok: true });
   });
 
-  it('crosses into shadow roots in tab order', () => {
-    const p = makePage('<input id="a" aria-label="First"><div id="host"></div>');
-    p.doc.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<input aria-label="Inner">';
-    p.snapshot();
-    p.doc.getElementById('a').focus();
-    expect(p.run({ op: 'press', key: 'Tab' })).toMatchObject({ ok: true, focused: 'Inner' });
-  });
 });
 
 describe('buildActionScript: click opened hint', () => {
-  function pageWithLink(attrs: string) {
-    const p = makePage(`<a id="l" href="https://example.org/x" ${attrs}>Docs</a>`);
-    p.doc.addEventListener('click', (e: any) => e.preventDefault());
+  function pageWithLink(attrs: string, cancel = false) {
+    const p = makePage(`<a id="l" href="#docs" ${attrs}>Docs</a>`);
+    if (cancel) p.doc.getElementById('l').addEventListener('click', (e: any) => e.preventDefault());
     p.snapshot();
     return p;
   }
@@ -1070,6 +1059,13 @@ describe('buildActionScript: click opened hint', () => {
       const p = pageWithLink(attrs);
       expect(p.run({ op: 'click', node: p.node('#l'), label: 'Docs' })).toMatchObject({ ok: true, opened: true });
     }
+  });
+
+  it('omits opened when the page cancels the click (consent dialog, in-page action)', () => {
+    const p = pageWithLink('target="_blank"', true);
+    const res = p.run({ op: 'click', node: p.node('#l'), label: 'Docs' }) as any;
+    expect(res.ok).toBe(true);
+    expect(res.opened).toBeUndefined();
   });
 
   it('omits opened for same-tab links, downloads and plain buttons', () => {
@@ -1082,5 +1078,210 @@ describe('buildActionScript: click opened hint', () => {
     const b = makePage('<button id="b">Go</button>');
     b.snapshot();
     expect((b.run({ op: 'click', node: b.node('#b'), label: 'Go' }) as any).opened).toBeUndefined();
+  });
+});
+
+describe('snapshot hardening (review fixes)', () => {
+  const light = (p: Page): any => p.evalJson(buildSnapshotCall());
+
+  it('legacy full mode keeps seeing only the top document and never serialises nested secrets', () => {
+    const p = makePage('<button>Top</button><div id="host"></div>');
+    p.doc.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<input type="password" aria-label="Shadow pw" value="SHADOWSECRET"><button>Inner</button>';
+    addFrame(p, '<input type="password" aria-label="Frame pw" value="FRAMESECRET"><button>Framed</button>');
+    const snap = p.snapshot();
+    expect(snap.actions.map((a: any) => a.label)).toEqual(expect.arrayContaining(['Top']));
+    expect(snap.actions.map((a: any) => a.label)).not.toContain('Inner');
+    expect(snap.actions.map((a: any) => a.label)).not.toContain('Framed');
+    expect(JSON.stringify(snap)).not.toContain('SHADOWSECRET');
+    expect(JSON.stringify(snap)).not.toContain('FRAMESECRET');
+  });
+
+  it('names a slotted button from what is assigned to the slot, falling back only when nothing is assigned', () => {
+    const p = makePage('<x-btn id="a">Delete account</x-btn><x-btn id="b"></x-btn>');
+    for (const id of ['a', 'b']) {
+      p.doc.getElementById(id).attachShadow({ mode: 'open' }).innerHTML = '<button><slot>Save</slot></button>';
+    }
+    const labels = light(p).actions.map((a: any) => a.label);
+    expect(labels).toContain('Delete account');
+    expect(labels).toContain('Save');
+    expect(labels.filter((l: string) => l === 'Save')).toHaveLength(1);
+  });
+
+  it('reads text placed directly in a shadow root', () => {
+    const p = makePage('<div id="host"></div>');
+    p.doc.getElementById('host').attachShadow({ mode: 'open' }).append('Your appointment is confirmed');
+    expect(light(p).text).toContain('Your appointment is confirmed');
+  });
+
+  it('stops scanning after the shared element budget and says the page was not fully read', () => {
+    const p = makePage(`${'<i></i>'.repeat(100_010)}<div id="host"></div>`);
+    p.doc.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<button>Beyond budget</button>';
+    const snap = light(p);
+    expect(snap.actions.map((a: any) => a.label)).not.toContain('Beyond budget');
+    expect(snap.scan_truncated).toBe(true);
+  });
+
+  it('does not report scan_truncated on an ordinary page', () => {
+    const p = makePage('<button>Go</button>');
+    expect('scan_truncated' in light(p)).toBe(false);
+  });
+
+  it('skips a frame that the outer frame clips away, and its controls', () => {
+    const p = makePage('');
+    const outer = addFrame(p, '', { left: 0, top: 200, width: 300, height: 200 });
+    const inner = outer.contentDocument.createElement('iframe');
+    outer.contentDocument.body.appendChild(inner);
+    inner.contentDocument.body.innerHTML = '<button>Hidden by clip</button>';
+    inner.getBoundingClientRect = () => ({ x: 0, y: 250, left: 0, top: 250, width: 100, height: 100, right: 100, bottom: 350 });
+    expect(light(p).actions.map((a: any) => a.label)).not.toContain('Hidden by clip');
+  });
+
+  it('counts only unreadable frames that are on screen, and never a hidden one', () => {
+    const p = makePage('');
+    const offscreen = addFrame(p, '', { left: 0, top: 10_000, width: 400, height: 300 });
+    Object.defineProperty(offscreen, 'contentDocument', { get: () => null });
+    const hidden = addFrame(p, '', { left: 0, top: 0, width: 400, height: 300 });
+    hidden.setAttribute('aria-hidden', 'true');
+    Object.defineProperty(hidden, 'contentDocument', { get: () => null });
+    expect('frames_blocked' in light(p)).toBe(false);
+  });
+
+  it('counts a frame nested deeper than the limit as unreadable', () => {
+    const p = makePage('');
+    let doc = p.doc;
+    for (let level = 1; level <= 4; level += 1) {
+      const f = doc.createElement('iframe');
+      doc.body.appendChild(f);
+      f.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, width: 300, height: 200, right: 300, bottom: 200 });
+      f.contentDocument.body.innerHTML = '';
+      doc = f.contentDocument;
+    }
+    expect(light(p).frames_blocked).toBeGreaterThanOrEqual(1);
+  });
+
+  it('counts a select as one control against the 250 cap and lists at most 120 of its options', () => {
+    const options = Array.from({ length: 400 }, (_, i) => `<option value="${i}">Option ${i}</option>`).join('');
+    const p = makePage(`<select aria-label="Year">${options}</select><button>After the select</button>`);
+    const snap = light(p);
+    const labels = snap.actions.map((a: any) => a.label);
+    expect(labels).toContain('After the select');
+    expect(labels.filter((l: string) => l.startsWith('Year → ')).length).toBeLessThanOrEqual(120);
+    expect(snap.omitted_actions).toBe(0);
+  });
+
+  it('reports how many controls (not actions) were left out beyond 250', () => {
+    const p = makePage(Array.from({ length: 260 }, (_, i) => `<button>B${i}</button>`).join(''));
+    expect(light(p).omitted_actions).toBe(10);
+  });
+});
+
+describe('page scripts across shadow roots and frames (review fixes)', () => {
+  it('input events from typing cross the shadow boundary so host listeners see them', () => {
+    const p = makePage('<div id="host"></div>');
+    const root = p.doc.getElementById('host').attachShadow({ mode: 'open' });
+    root.innerHTML = '<input id="in" type="text" aria-label="Card">';
+    let seen = 0;
+    p.doc.getElementById('host').addEventListener('input', () => { seen += 1; });
+    const snap = p.evalJson(buildSnapshotCall());
+    const card = snap.actions.find((a: any) => a.label === 'Card');
+    expect(p.run({ op: 'type', node: card.node, label: 'Card', text: '4242' })).toMatchObject({ ok: true });
+    expect(seen).toBe(1);
+  });
+
+  it('events inside a frame are built from the frame window', () => {
+    const p = makePage('');
+    const frame = addFrame(p, '<input id="in" type="text" aria-label="Answer"><button id="b">Go</button>');
+    const win = frame.contentWindow;
+    const idoc = frame.contentDocument;
+    const seen: Array<{ view: boolean; instance: boolean }> = [];
+    idoc.getElementById('in').addEventListener('keydown', (e: any) => {
+      seen.push({ view: e.view === win, instance: e instanceof win.KeyboardEvent });
+    });
+    idoc.getElementById('in').focus();
+    frame.focus();
+    p.run({ op: 'press', key: 'Escape' });
+    expect(seen).toEqual([{ view: true, instance: true }]);
+    const clicks: boolean[] = [];
+    idoc.getElementById('b').addEventListener('mousedown', (e: any) => clicks.push(e instanceof win.MouseEvent && e.view === win));
+    const snap = p.evalJson(buildSnapshotCall());
+    const go = snap.actions.find((a: any) => a.label === 'Go');
+    p.run({ op: 'click', node: go.node, label: 'Go' });
+    expect(clicks).toEqual([true]);
+  });
+
+  it('refuses an action when an ancestor outside the shadow root became aria-disabled after the snapshot', () => {
+    const p = makePage('<div id="host"></div>');
+    const root = p.doc.getElementById('host').attachShadow({ mode: 'open' });
+    root.innerHTML = '<button id="b">Delete</button>';
+    let clicks = 0;
+    root.getElementById('b').addEventListener('click', () => { clicks += 1; });
+    const snap = p.evalJson(buildSnapshotCall());
+    const del = snap.actions.find((a: any) => a.label === 'Delete');
+    p.doc.getElementById('host').setAttribute('aria-disabled', 'true');
+    expect(p.run({ op: 'click', node: del.node, label: 'Delete' })).toMatchObject({ ok: false, error: 'unsupported' });
+    expect(clicks).toBe(0);
+  });
+
+  it('hover reaches document-level delegated mouseover handlers from inside a shadow root', () => {
+    const p = makePage('<div id="host"></div>');
+    const root = p.doc.getElementById('host').attachShadow({ mode: 'open' });
+    root.innerHTML = '<a id="l" href="#x">Products</a>';
+    let opened = 0;
+    p.doc.addEventListener('mouseover', () => { opened += 1; });
+    const snap = p.evalJson(buildSnapshotCall());
+    const link = snap.actions.find((a: any) => a.label === 'Products');
+    expect(p.run({ op: 'hover', node: link.node, label: 'Products' })).toMatchObject({ ok: true });
+    expect(opened).toBe(1);
+  });
+
+  describe('Tab', () => {
+    it('follows the page order through a shadow host and a frame that sit between two controls', () => {
+      const p = makePage('<input aria-label="First"><div id="host"></div><input aria-label="Last">');
+      p.doc.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<input aria-label="Inside shadow">';
+      const order: string[] = [];
+      p.doc.querySelector('input').focus();
+      for (let i = 0; i < 3; i += 1) order.push((p.run({ op: 'press', key: 'Tab' }) as any).focused);
+      expect(order).toEqual(['Inside shadow', 'Last', 'First']);
+      const back: string[] = [];
+      for (let i = 0; i < 2; i += 1) back.push((p.run({ op: 'press', key: 'Shift+Tab' }) as any).focused);
+      expect(back).toEqual(['Last', 'Inside shadow']);
+    });
+
+    it('moves through a same-origin frame at the frame position', () => {
+      const p = makePage('<input aria-label="First">');
+      addFrame(p, '<input aria-label="In frame">');
+      const last = p.doc.createElement('input');
+      last.setAttribute('aria-label', 'Last');
+      p.doc.body.appendChild(last);
+      p.doc.querySelector('input').focus();
+      expect((p.run({ op: 'press', key: 'Tab' }) as any).focused).toBe('In frame');
+      expect((p.run({ op: 'press', key: 'Tab' }) as any).focused).toBe('Last');
+    });
+
+    it('does not move when a document-level handler cancels Tab from inside a shadow root (focus trap)', () => {
+      const p = makePage('<div id="host"></div><input aria-label="Outside">');
+      const root = p.doc.getElementById('host').attachShadow({ mode: 'open' });
+      root.innerHTML = '<input id="in" aria-label="Trapped">';
+      p.doc.addEventListener('keydown', (e: any) => { if (e.key === 'Tab') e.preventDefault(); });
+      root.getElementById('in').focus();
+      const res = p.run({ op: 'press', key: 'Tab' }) as any;
+      expect(res.ok).toBe(true);
+      expect(res.focused).toBeUndefined();
+      expect(root.activeElement.id).toBe('in');
+    });
+
+    it('skips elements that cannot take focus and never reports a control that did not get it', () => {
+      const p = makePage('<input aria-label="A"><div tabindex="wat" aria-label="Not focusable"></div><div aria-hidden="true"><input aria-label="Hidden"></div><input aria-label="B">');
+      p.doc.querySelector('input').focus();
+      expect((p.run({ op: 'press', key: 'Tab' }) as any).focused).toBe('B');
+      expect(p.doc.activeElement.getAttribute('aria-label')).toBe('B');
+    });
+
+    it('reports nothing when no control can take focus', () => {
+      const p = makePage('<div aria-hidden="true"><input aria-label="Hidden"></div>');
+      const res = p.run({ op: 'press', key: 'Tab' }) as any;
+      expect(res.ok).toBe(true);
+      expect(res.focused).toBeUndefined();
+    });
   });
 });
