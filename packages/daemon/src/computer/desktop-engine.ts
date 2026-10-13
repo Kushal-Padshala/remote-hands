@@ -33,7 +33,7 @@ export function describeHelperError(err: AxHelperError, app: string): Error | nu
   switch (err.code) {
     case 'not_trusted':
       return new Error(
-        'Accessibility permission is missing for Remote Hands. Allow it in System Settings > Privacy & Security > Accessibility, then try again.',
+        `Accessibility permission is missing, so apps cannot be read or controlled. Tell the user to open System Settings > Privacy & Security > Accessibility and turn on "node" (${process.execPath}; add it with the + button if it is not listed), then try again. Do not try to work around it.`,
       );
     case 'no_app':
       return new Error(app ? `No running app matches "${app}". Use desktop_open to start it.` : 'No app is in front.');
