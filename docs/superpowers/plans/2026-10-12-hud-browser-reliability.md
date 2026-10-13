@@ -920,10 +920,10 @@ describe('resolveTarget', () => {
   });
 
   it('refuses an ambiguous label and lists the candidates', () => {
-    const r = resolveTarget(page, 'click', 'email');
+    const r = resolveTarget(page, 'click', 'ema');
     expect(r).toMatchObject({ ok: false });
     expect((r as { reason: string }).reason).toBe(
-      'target "email" is ambiguous (matches [1] textbox "Email address", [2] button "Email"); use index',
+      'target "ema" is ambiguous (matches [1] textbox "Email address", [2] button "Email"); use index',
     );
   });
 

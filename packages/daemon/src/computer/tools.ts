@@ -13,25 +13,29 @@ const app = z.string().optional().describe('Application name. Omit for the front
 const stableId = z.number().int().min(1).describe('Stable id from the last page state.');
 
 // Flat on purpose: oneOf/anyOf/const unions are not reliably accepted by every MCP client's schema dialect.
-const DO_OPS = ['click', 'type', 'select', 'check', 'press', 'scroll', 'wait'] as const;
+const DO_OPS = ['click', 'type', 'select', 'check', 'hover', 'press', 'scroll', 'wait'] as const;
 
 const doStepSchema = z.object({
   op: z.enum(DO_OPS),
   index: stableId.optional(),
+  target: z.string().min(1).max(200).optional().describe('Visible label of the element, instead of index. Exact label preferred.'),
   text: z.string().optional(),
   value: z.string().optional(),
   checked: z.boolean().optional(),
-  key: z.string().optional().describe('Key name such as Enter, Tab, Escape.'),
+  key: z.string().optional().describe('Key name such as Enter, Tab, Shift+Tab, Escape.'),
   delta: z.number().optional().describe('Pixels to scroll; negative scrolls up.'),
   ms: z.number().int().min(0).max(5000).optional(),
   submit: z.boolean().optional().describe('type only: press Enter after typing.'),
 });
 
+const ELEMENT_OPS = new Set<(typeof DO_OPS)[number]>(['click', 'type', 'select', 'check', 'hover']);
+
 const REQUIRED_BY_OP: Record<(typeof DO_OPS)[number], Array<keyof z.infer<typeof doStepSchema>>> = {
-  click: ['index'],
-  type: ['index', 'text'],
-  select: ['index', 'value'],
-  check: ['index', 'checked'],
+  click: [],
+  type: ['text'],
+  select: ['value'],
+  check: ['checked'],
+  hover: [],
   press: ['key'],
   scroll: ['delta'],
   wait: ['ms'],
@@ -40,9 +44,16 @@ const REQUIRED_BY_OP: Record<(typeof DO_OPS)[number], Array<keyof z.infer<typeof
 const doStepsSchema = z
   .array(doStepSchema)
   .min(1)
-  .max(15)
+  .max(30)
   .superRefine((steps, ctx) => {
     steps.forEach((step, i) => {
+      if (ELEMENT_OPS.has(step.op)) {
+        if (step.index === undefined && step.target === undefined) {
+          ctx.addIssue({ code: 'custom', path: [i, 'index'], message: `step ${i + 1} ${step.op} needs index or target` });
+        } else if (step.index !== undefined && step.target !== undefined) {
+          ctx.addIssue({ code: 'custom', path: [i, 'index'], message: `step ${i + 1} ${step.op} takes index or target, not both` });
+        }
+      }
       for (const field of REQUIRED_BY_OP[step.op]) {
         if (step[field] === undefined) {
           ctx.addIssue({ code: 'custom', path: [i, field], message: `step ${i + 1} ${step.op} needs ${field}` });
@@ -162,7 +173,7 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
     {
       name: 'browser_do',
       description:
-        'Run up to 15 browser steps in ONE call, stopping at the first failure. Prefer this for forms and multi-step sequences, using stable ids from the last state you saw. Required fields per op: click/type/select/check need index; type needs text (optional submit); select needs value; check needs checked; press needs key; scroll needs delta; wait needs ms (0-5000). Example: [{"op":"type","index":3,"text":"me@x.com"},{"op":"click","index":7}]. A click, Enter or submit that navigates ends the batch (remaining steps not run) and the new page state is returned; otherwise the final page state is returned, so do not call browser_snapshot again. Pseudo lines [scroll_down], [scroll_up] and [wait] map to {op:"scroll",delta:560|-560} (down|up) and {op:"wait",ms:...}. press dispatches synthetic key events only: Enter submits forms, but Tab and typed keys do not move focus or type (use type for text). On the slower fallback path only click, type and wait are supported.',
+        'Run up to 30 browser steps in ONE call, stopping at the first failure. Prefer this for forms and multi-step sequences, using stable ids from the last state you saw. Required fields per op: click/type/select/check need index; type needs text (optional submit); select needs value; check needs checked; press needs key; scroll needs delta; wait needs ms (0-5000). Example: [{"op":"type","index":3,"text":"me@x.com"},{"op":"click","index":7}]. A click, Enter or submit that navigates ends the batch (remaining steps not run) and the new page state is returned; otherwise the final page state is returned, so do not call browser_snapshot again. Pseudo lines [scroll_down], [scroll_up] and [wait] map to {op:"scroll",delta:560|-560} (down|up) and {op:"wait",ms:...}. press dispatches synthetic key events only: Enter submits forms, but Tab and typed keys do not move focus or type (use type for text). On the slower fallback path only click, type and wait are supported.',
       inputSchema: { steps: doStepsSchema },
       handler: (a) => session.browserDo(a.steps),
     },

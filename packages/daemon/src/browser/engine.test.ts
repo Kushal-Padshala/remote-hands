@@ -535,8 +535,8 @@ describe('do', () => {
     await expect(engine.do([{ op: 'check', index: 9 }])).rejects.toThrow('step 1 check invalid: checked is required');
     await expect(engine.do([{ op: 'press' }])).rejects.toThrow('step 1 press invalid: key is required');
     await expect(engine.do([{ op: 'scroll' }])).rejects.toThrow('step 1 scroll invalid: delta is required');
-    await expect(engine.do([{ op: 'hover' as DoStep['op'] }])).rejects.toThrow('step 1 hover invalid: unknown op');
-    await expect(engine.do(Array.from({ length: 16 }, () => ({ op: 'wait' as const, ms: 1 })))).rejects.toThrow('at most 15 steps');
+    await expect(engine.do([{ op: 'drag' as DoStep['op'] }])).rejects.toThrow('step 1 drag invalid: unknown op');
+    await expect(engine.do(Array.from({ length: 31 }, () => ({ op: 'wait' as const, ms: 1 })))).rejects.toThrow('at most 30 steps');
     expect(t.evals).toHaveLength(before);
   });
 
@@ -1143,5 +1143,85 @@ describe('self-healing at task time (autoEnable)', () => {
     const plain = make();
     t.fail = off();
     expect(await plain.snapshot()).toContain('legacy:snapshot');
+  });
+});
+
+describe('do: label targets, hover and limits', () => {
+  const twoSaves = (): string =>
+    JSON.stringify(page({ actions: [
+      { node: 21, role: 'button', label: 'Save', kind: 'click', value: '' },
+      { node: 22, role: 'button', label: 'Save', kind: 'click', value: '' },
+      { node: 23, role: 'button', label: 'Next steps', kind: 'click', value: '' },
+      { node: 24, role: 'button', label: 'Next', kind: 'click', value: '' },
+    ] }));
+
+  it('resolves labels against the last shown page and sends the stable ids', async () => {
+    await engine.snapshot();
+    await engine.do([
+      { op: 'type', target: 'email', text: 'a@b.c' },
+      { op: 'select', target: 'country', value: 'Canada' },
+      { op: 'check', target: 'agree', checked: true },
+      { op: 'click', target: 'Next' },
+    ]);
+    expect(t.actionEvals().map(opOf)).toEqual([
+      { op: 'type', node: 7, label: 'Email', text: 'a@b.c' },
+      { op: 'select', node: 3, label: 'Country', value: 'Canada' },
+      { op: 'check', node: 9, label: 'I agree', checked: true },
+      { op: 'click', node: 12, label: 'Next' },
+    ]);
+  });
+
+  it('takes its own snapshot first when no page has been shown yet', async () => {
+    const out = await engine.do([{ op: 'click', target: 'Next' }]);
+    expect(t.actionEvals().map(opOf)).toEqual([{ op: 'click', node: 12, label: 'Next' }]);
+    expect(t.snapshotEvals()).toBeGreaterThanOrEqual(2);
+    expect(out.split('\n')[0]).toBe('did: click');
+  });
+
+  it('prefers the exact label over a longer one', async () => {
+    t.snapshots = [twoSaves()];
+    await engine.snapshot();
+    await engine.do([{ op: 'click', target: 'next' }]);
+    expect(t.actionEvals().map(opOf)).toEqual([{ op: 'click', node: 24, label: 'Next' }]);
+  });
+
+  it('refuses an ambiguous or unknown label before running any step', async () => {
+    t.snapshots = [twoSaves()];
+    await engine.snapshot();
+    const before = t.actionEvals().length;
+    await expect(engine.do([{ op: 'click', target: 'Save' }])).rejects.toThrow(
+      'step 1 click invalid: target "Save" is ambiguous (matches [21] button "Save", [22] button "Save"); use index. No steps were run.',
+    );
+    await expect(engine.do([{ op: 'click', target: 'Pay' }])).rejects.toThrow('step 1 click invalid: no element matches target "Pay"');
+    expect(t.actionEvals()).toHaveLength(before);
+  });
+
+  it('rejects index together with target, and a step with neither', async () => {
+    await engine.snapshot();
+    await expect(engine.do([{ op: 'click', index: 12, target: 'Next' }])).rejects.toThrow(
+      'step 1 click invalid: give either index or target, not both. No steps were run.',
+    );
+    await expect(engine.do([{ op: 'click' }])).rejects.toThrow('step 1 click invalid: index or target is required. No steps were run.');
+  });
+
+  it('sends hover with the stable id', async () => {
+    await engine.snapshot();
+    await engine.do([{ op: 'hover', index: 12 }, { op: 'hover', target: 'Next' }]);
+    expect(t.actionEvals().map(opOf)).toEqual([
+      { op: 'hover', node: 12, label: 'Next' },
+      { op: 'hover', node: 12, label: 'Next' },
+    ]);
+  });
+
+  it('accepts 30 steps', async () => {
+    await engine.snapshot();
+    const out = await engine.do(Array.from({ length: 30 }, () => ({ op: 'wait' as const, ms: 0 })));
+    expect(out.split('\n')[0]!.startsWith('did: wait, wait')).toBe(true);
+  });
+
+  it('uses the legacy port (no snapshot of its own) when no supported browser runs', async () => {
+    t.env = { frontmost: 'Finder', running: [] };
+    expect(await engine.do([{ op: 'click', target: 'Next' }])).toBe('legacy:do');
+    expect(t.evals).toHaveLength(0);
   });
 });

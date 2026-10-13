@@ -13,6 +13,7 @@ import {
 } from './page-scripts.js';
 import { clean, findElements, normalizeSnapshot, renderDelta, renderElement, renderFull, type PageElement, type PageState } from './render.js';
 import { okSoFar, type BrowserPort, type DoStep } from './port.js';
+import { resolveTarget, type TargetOp } from './targets.js';
 import type { ActionGate } from '../action-gate.js';
 
 export type BrowserTransportLike = Pick<
@@ -52,9 +53,9 @@ const PROBE_EVERY_MS = 120;
 const STABLE_CAP_MS = 3000;
 const MAX_PROBES = 30;
 const PROBE_TIMEOUT_MS = 2000;
-const MAX_STEPS = 15;
-const INDEX_OPS = new Set<DoStep['op']>(['click', 'type', 'select', 'check']);
-const ALL_OPS = new Set<string>(['click', 'type', 'select', 'check', 'press', 'scroll', 'wait']);
+const MAX_STEPS = 30;
+const INDEX_OPS = new Set<DoStep['op']>(['click', 'type', 'select', 'check', 'hover']);
+const ALL_OPS = new Set<string>(['click', 'type', 'select', 'check', 'hover', 'press', 'scroll', 'wait']);
 const STILL_LOADING = 'note: page still loading';
 const FIND_MAX_OPTIONS = 40;
 const STILL_NAVIGATING = 'note: page is still navigating';
@@ -849,7 +850,23 @@ export class FastBrowserEngine implements BrowserPort {
     if (steps.length > MAX_STEPS) {
       throw new Error(`browser_do accepts at most ${MAX_STEPS} steps (got ${steps.length}). No steps were run.`);
     }
-    const shown = this.shown?.mode === 'fast' ? this.shown : null;
+    let shown = this.shown?.mode === 'fast' ? this.shown : null;
+    if (!shown && steps.some((s) => s !== null && typeof s === 'object' && s.target !== undefined)) {
+      // Label targets need a page to resolve against: look at the page first.
+      const r = await this.resolve();
+      if (r.kind === 'legacy') return this.useLegacy(() => this.legacy.do(steps), r.reason, true);
+      try {
+        const { ctx: front } = await this.target(r.ctx);
+        await this.show(front);
+      } catch (err) {
+        if (err instanceof BrowserAutomationError) {
+          this.transportFailed(r.ctx, err);
+          throw new Error(`${err.message} Call browser_snapshot to continue on the slower fallback.`);
+        }
+        throw err;
+      }
+      shown = this.shown?.mode === 'fast' ? this.shown : null;
+    }
     const plan = steps.map((step, i) => planStep(step, i + 1, shown?.state ?? null));
     let ctx: Ctx;
     if (shown) {
@@ -942,12 +959,23 @@ function planStep(step: DoStep, n: number, state: PageState | null): PlannedStep
   if (!ALL_OPS.has(name)) throw invalid('unknown op');
   let el: (PageElement & { node: number }) | undefined;
   if (INDEX_OPS.has(step.op)) {
-    if (typeof step.index !== 'number' || !Number.isInteger(step.index)) throw invalid('index is required');
-    const found = state?.elements.find((e) => e.id === step.index);
-    if (!found || typeof found.node !== 'number') {
-      throw invalid(`index ${step.index} is not on the page I last showed`);
+    const hasIndex = step.index !== undefined;
+    const hasTarget = step.target !== undefined;
+    if (hasIndex && hasTarget) throw invalid('give either index or target, not both');
+    if (hasTarget) {
+      if (typeof step.target !== 'string') throw invalid('target must be text');
+      if (!state) throw invalid('no page has been shown yet');
+      const r = resolveTarget(state, step.op as TargetOp, step.target);
+      if (!r.ok) throw invalid(r.reason);
+      el = r.el;
+    } else {
+      if (typeof step.index !== 'number' || !Number.isInteger(step.index)) throw invalid('index or target is required');
+      const found = state?.elements.find((e) => e.id === step.index);
+      if (!found || typeof found.node !== 'number') {
+        throw invalid(`index ${step.index} is not on the page I last showed`);
+      }
+      el = found as PageElement & { node: number };
     }
-    el = found as PageElement & { node: number };
   }
   const confirm: Confirm =
     step.op === 'click' && el
@@ -955,7 +983,7 @@ function planStep(step: DoStep, n: number, state: PageState | null): PlannedStep
       : (step.op === 'type' && step.submit === true) || (step.op === 'press' && typeof step.key === 'string' && step.key.toLowerCase() === 'enter')
         ? 'quiet'
         : null;
-  const base = { name, index: el ? (step.index as number) : null, ms: 0, masked: step.op === 'type' && el?.value === PASSWORD_MASK, confirm };
+  const base = { name, index: el ? (el.id as number) : null, ms: 0, masked: step.op === 'type' && el?.value === PASSWORD_MASK, confirm };
   switch (step.op) {
     case 'click':
       return { ...base, op: { op: 'click', node: el!.node, label: el!.label } };
@@ -972,6 +1000,8 @@ function planStep(step: DoStep, n: number, state: PageState | null): PlannedStep
     case 'check':
       if (typeof step.checked !== 'boolean') throw invalid('checked is required');
       return { ...base, op: { op: 'check', node: el!.node, label: el!.label, checked: step.checked } };
+    case 'hover':
+      return { ...base, op: { op: 'hover', node: el!.node, label: el!.label } };
     case 'press':
       if (typeof step.key !== 'string' || !step.key.trim()) throw invalid('key is required');
       return { ...base, op: { op: 'press', key: step.key.toLowerCase() === 'enter' ? 'Enter' : step.key } };

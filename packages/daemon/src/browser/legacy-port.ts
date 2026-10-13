@@ -12,7 +12,7 @@ export type LegacyBrowserDriver = Pick<
   Partial<Pick<BrowserDriver, 'executeScript'>>;
 
 const MAX_LINES = 120;
-const MAX_STEPS = 15;
+const MAX_STEPS = 30;
 const LEGACY_OPS = new Set(['click', 'type', 'wait']);
 
 function words(s: string): string[] {
@@ -142,6 +142,7 @@ export class LegacyBrowserPort implements BrowserPort {
       const invalid = (reason: string): Error =>
         new Error(`step ${i + 1} ${String(step?.op)} invalid: ${reason}. No steps were run.`);
       if (!LEGACY_OPS.has(step?.op)) throw invalid('not supported on the legacy path');
+      if (step.target !== undefined) throw invalid('target is not supported on the slower fallback; use index from browser_snapshot');
       if (step.op === 'wait') {
         if (typeof step.ms !== 'number' || !(step.ms >= 0 && step.ms <= 5000)) throw invalid('ms must be between 0 and 5000');
         return;

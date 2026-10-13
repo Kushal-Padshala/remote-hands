@@ -205,7 +205,7 @@ describe('buildComputerTools', () => {
     });
 
     it('browser_do rejects bad ops, missing fields and bad values', () => {
-      expect(doOk([{ op: 'hover', index: 1 }])).toBe(false);
+      expect(doOk([{ op: 'drag', index: 1 }])).toBe(false);
       expect(doOk([{ op: 'click' }])).toBe(false);
       expect(doOk([{ op: 'click', index: 0 }])).toBe(false);
       expect(doOk([{ op: 'click', index: -2 }])).toBe(false);
@@ -219,8 +219,8 @@ describe('buildComputerTools', () => {
       expect(doOk([{ op: 'wait', ms: 5001 }])).toBe(false);
       expect(doOk([{ op: 'wait', ms: -1 }])).toBe(false);
       expect(doOk([])).toBe(false);
-      expect(doOk(Array.from({ length: 16 }, () => ({ op: 'press', key: 'Tab' })))).toBe(false);
-      expect(doOk(Array.from({ length: 15 }, () => ({ op: 'press', key: 'Tab' })))).toBe(true);
+      expect(doOk(Array.from({ length: 31 }, () => ({ op: 'press', key: 'Tab' })))).toBe(false);
+      expect(doOk(Array.from({ length: 30 }, () => ({ op: 'press', key: 'Tab' })))).toBe(true);
       expect(schema('browser_do').safeParse({}).success).toBe(false);
     });
 
@@ -282,6 +282,18 @@ describe('buildComputerTools', () => {
     });
   });
 
+  it('browser_do steps take index or target (not both) and know hover', () => {
+    const tool = buildComputerTools(fakeSession()).find((t) => t.name === 'browser_do')!;
+    const schema = z.object(tool.inputSchema);
+    expect(schema.safeParse({ steps: [{ op: 'click', target: 'Next' }] }).success).toBe(true);
+    expect(schema.safeParse({ steps: [{ op: 'hover', index: 3 }] }).success).toBe(true);
+    expect(schema.safeParse({ steps: [{ op: 'click', index: 3, target: 'Next' }] }).success).toBe(false);
+    expect(schema.safeParse({ steps: [{ op: 'type', text: 'x' }] }).success).toBe(false);
+    expect(schema.safeParse({ steps: [{ op: 'click', target: '' }] }).success).toBe(false);
+    expect(schema.safeParse({ steps: Array.from({ length: 30 }, () => ({ op: 'wait', ms: 1 })) }).success).toBe(true);
+    expect(schema.safeParse({ steps: Array.from({ length: 31 }, () => ({ op: 'wait', ms: 1 })) }).success).toBe(false);
+  });
+
   it('batch validates browser_do steps up front and passes them through', async () => {
     const session = fakeSession();
     const batch = buildComputerTools(session).find((t) => t.name === 'computer_batch')!;
@@ -291,7 +303,7 @@ describe('buildComputerTools', () => {
     expect(session.browserDo).not.toHaveBeenCalled();
     await expect(
       batch.handler({ steps: [{ tool: 'browser_do', args: { steps: [{ op: 'click' }] } }] }),
-    ).rejects.toThrow('step 1 browser_do invalid args: steps.0.index: step 1 click needs index. No steps were run.');
+    ).rejects.toThrow('step 1 browser_do invalid args: steps.0.index: step 1 click needs index or target. No steps were run.');
     const steps = [{ op: 'click', index: 1 }];
     await batch.handler({ steps: [{ tool: 'browser_do', args: { steps } }] });
     expect(session.browserDo).toHaveBeenCalledWith(steps);
@@ -361,10 +373,10 @@ describe('buildComputerTools', () => {
     const { tools } = await client.listTools();
     const items = (tools.find((t) => t.name === 'browser_do')!.inputSchema as any).properties.steps.items;
     expect(items.type).toBe('object');
-    expect(items.properties.op).toMatchObject({ type: 'string', enum: ['click', 'type', 'select', 'check', 'press', 'scroll', 'wait'] });
+    expect(items.properties.op).toMatchObject({ type: 'string', enum: ['click', 'type', 'select', 'check', 'hover', 'press', 'scroll', 'wait'] });
     expect(items.required).toEqual(['op']);
     expect(Object.keys(items.properties).sort()).toEqual(
-      ['checked', 'delta', 'index', 'key', 'ms', 'op', 'submit', 'text', 'value'],
+      ['checked', 'delta', 'index', 'key', 'ms', 'op', 'submit', 'target', 'text', 'value'],
     );
   });
 

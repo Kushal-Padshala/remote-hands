@@ -1,7 +1,9 @@
 /** One step of a `browser_do` batch. Index ops address the ids of the last shown page. */
 export interface DoStep {
-  op: 'click' | 'type' | 'select' | 'check' | 'press' | 'scroll' | 'wait';
+  op: 'click' | 'type' | 'select' | 'check' | 'hover' | 'press' | 'scroll' | 'wait';
   index?: number;
+  /** Visible label of the element, instead of index (fast path only). */
+  target?: string;
   text?: string;
   value?: string;
   checked?: boolean;

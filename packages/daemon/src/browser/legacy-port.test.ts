@@ -120,4 +120,12 @@ describe('LegacyBrowserPort (previous ComputerSession behaviour)', () => {
     await expect(port(d).do([{ op: 'type', index: 1 }])).rejects.toThrow('step 1 type invalid: text is required. No steps were run.');
     expect(d.clickIndex).not.toHaveBeenCalled();
   });
+
+  it('rejects target steps and hover with a message that names the fix', async () => {
+    const p = port();
+    await expect(p.do([{ op: 'click', target: 'Next' }])).rejects.toThrow(
+      'step 1 click invalid: target is not supported on the slower fallback; use index from browser_snapshot. No steps were run.',
+    );
+    await expect(p.do([{ op: 'hover', index: 1 }])).rejects.toThrow('step 1 hover invalid: not supported on the legacy path');
+  });
 });
