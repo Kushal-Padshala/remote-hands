@@ -2,6 +2,31 @@ import AppKit
 import Foundation
 import Carbon
 
+/// One palette for the whole HUD: a solid black window, white text in three strengths, and a few accents.
+enum Theme {
+    static let background = NSColor.black
+    static let border = NSColor(white: 1.0, alpha: 0.14)
+    static let divider = NSColor(white: 1.0, alpha: 0.10)
+    static let field = NSColor(white: 0.09, alpha: 1.0)
+    static let text = NSColor(white: 0.96, alpha: 1.0)
+    static let secondary = NSColor(white: 0.64, alpha: 1.0)
+    static let tertiary = NSColor(white: 0.44, alpha: 1.0)
+    static let accent = NSColor(red: 0.38, green: 0.64, blue: 1.0, alpha: 1.0)
+    static let success = NSColor(red: 0.32, green: 0.86, blue: 0.56, alpha: 1.0)
+    static let warning = NSColor(red: 1.0, green: 0.76, blue: 0.30, alpha: 1.0)
+    static let danger = NSColor(red: 1.0, green: 0.44, blue: 0.44, alpha: 1.0)
+}
+
+/// What a line in the progress feed is, which decides how it is drawn.
+enum EntryKind {
+    case goal       // what the user asked
+    case step       // something the agent did
+    case attention  // the agent needs the user
+    case error
+    case answer     // the final result
+    case note       // quiet system text
+}
+
 class HudActionButton: NSButton {
     override var mouseDownCanMoveWindow: Bool { false }
 }
@@ -11,7 +36,7 @@ class ContextTableRowView: NSTableRowView {
         if isSelected {
             let selectionRect = bounds.insetBy(dx: 4, dy: 2)
             let path = NSBezierPath(roundedRect: selectionRect, xRadius: 8, yRadius: 8)
-            NSColor(red: 0.15, green: 0.38, blue: 0.95, alpha: 0.90).setFill()
+            NSColor(white: 1.0, alpha: 0.12).setFill()
             path.fill()
         }
     }
@@ -43,7 +68,7 @@ class ContextTableCell: NSTableCellView {
 
         titleField = NSTextField(labelWithString: "")
         titleField.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-        titleField.textColor = .white
+        titleField.textColor = Theme.text
         titleField.lineBreakMode = .byTruncatingTail
         titleField.frame = NSRect(x: 38, y: 17, width: bounds.width - 90, height: 18)
         titleField.autoresizingMask = [.width]
@@ -51,7 +76,7 @@ class ContextTableCell: NSTableCellView {
 
         subtitleField = NSTextField(labelWithString: "")
         subtitleField.font = NSFont.systemFont(ofSize: 11, weight: .regular)
-        subtitleField.textColor = NSColor(white: 0.60, alpha: 1.0)
+        subtitleField.textColor = Theme.secondary
         subtitleField.lineBreakMode = .byTruncatingTail
         subtitleField.frame = NSRect(x: 38, y: 3, width: bounds.width - 90, height: 15)
         subtitleField.autoresizingMask = [.width]
@@ -59,7 +84,7 @@ class ContextTableCell: NSTableCellView {
 
         badgeField = NSTextField(labelWithString: "")
         badgeField.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        badgeField.textColor = NSColor(white: 0.50, alpha: 1.0)
+        badgeField.textColor = Theme.tertiary
         badgeField.alignment = .right
         badgeField.frame = NSRect(x: bounds.width - 65, y: 10, width: 55, height: 18)
         badgeField.autoresizingMask = [.minXMargin]
@@ -78,10 +103,8 @@ class SpotlightPanel: NSPanel {
                     delegate.hideContextPanel()
                     return true
                 }
-                if delegate.isExpanded {
-                    if delegate.isWorking {
-                        delegate.onStopClicked()
-                    }
+                if delegate.isExpanded && delegate.isWorking {
+                    delegate.onStopClicked()
                     return true
                 }
                 delegate.onCancelClicked()
@@ -141,10 +164,8 @@ class SpotlightPanel: NSPanel {
                 delegate.hideContextPanel()
                 return
             }
-            if delegate.isExpanded {
-                if delegate.isWorking {
-                    delegate.onStopClicked()
-                }
+            if delegate.isExpanded && delegate.isWorking {
+                delegate.onStopClicked()
                 return
             }
             delegate.onCancelClicked()
@@ -154,7 +175,7 @@ class SpotlightPanel: NSPanel {
 
 class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
     var panel: SpotlightPanel!
-    var visualEffect: NSVisualEffectView!
+    var rootView: NSView!
     var textField: NSTextField!
     var badge: NSTextField!
     var attachmentChipsLabel: NSTextField!
@@ -165,9 +186,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
     var bottomDividerLine: NSBox!
     var historyScrollView: NSScrollView!
     var historyTextView: NSTextView!
+    var spinner: NSProgressIndicator!
+    var copyButton: HudActionButton!
+    var inputBox: NSView!
+    var answerText: String = ""
+    var answerStart: Int = -1
+    var copyResetWork: DispatchWorkItem?
+    var statusLeft: CGFloat = 0
     var targetApp: String = "Desktop"
     var targetWindowTitle: String = ""
-    var isWorking: Bool = false
+    var isWorking: Bool = false {
+        didSet { updateWorkingChrome() }
+    }
     var isExpanded: Bool = false
 
     var initialContext: [String: Any]?
@@ -193,7 +223,47 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             loadHierarchy(ctx)
         }
         setupInputReader()
+        #if RH_UI_SNAPSHOT
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.runSnapshotScript() }
+        #endif
     }
+
+    #if RH_UI_SNAPSHOT
+    /// Developer tool, compiled only with -D RH_UI_SNAPSHOT (never in the shipped helper): replays a
+    /// JSON-lines script of daemon updates (RH_UI_SCRIPT) and writes PNGs of the window (RH_UI_OUT-<name>.png)
+    /// so the layout can be checked without screen-recording permission.
+    ///   {"submit":"..."}  act like the user pressed Return    {"type":"..."} type into the field
+    ///   {"snap":"name"}   write a PNG                          anything else is a daemon update
+    func runSnapshotScript() {
+        let env = ProcessInfo.processInfo.environment
+        guard let script = env["RH_UI_SCRIPT"], let text = try? String(contentsOfFile: script, encoding: .utf8) else { exit(2) }
+        let out = env["RH_UI_OUT"] ?? "/tmp/rh-ui"
+        for line in text.split(separator: "\n") {
+            guard let d = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { continue }
+            if let q = d["submit"] as? String {
+                selectedAttachments = []
+                transitionToProgress(query: q)
+            } else if let t = d["type"] as? String {
+                textField.stringValue = t
+            } else if let q = d["picker"] as? String {
+                showContextPanel(query: q)
+            } else if let name = d["snap"] as? String {
+                panel.displayIfNeeded()
+                let view: NSView = (d["of"] as? String) == "picker" ? (contextPanel?.contentView ?? rootView) : rootView
+                view.layoutSubtreeIfNeeded()
+                if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                    view.cacheDisplay(in: view.bounds, to: rep)
+                    if let data = rep.representation(using: .png, properties: [:]) {
+                        try? data.write(to: URL(fileURLWithPath: "\(out)-\(name).png"))
+                    }
+                }
+            } else {
+                handleUpdate(d)
+            }
+        }
+        exit(0)
+    }
+    #endif
 
     func setupMainMenu() {
         let mainMenu = NSMenu()
@@ -216,8 +286,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         let screenRect = screen.frame
         let width: CGFloat = 680
         let height: CGFloat = 84
-        let x = (screenRect.width - width) / 2
-        let y = screenRect.height * 0.65
+        let x = screenRect.origin.x + (screenRect.width - width) / 2
+        let y = screenRect.origin.y + screenRect.height * 0.65
 
         let rect = NSRect(x: x, y: y, width: width, height: height)
         panel = SpotlightPanel(
@@ -231,90 +301,129 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.isMovableByWindowBackground = true
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        visualEffect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: width, height: height))
-        visualEffect.material = .hudWindow
-        visualEffect.blendingMode = .behindWindow
-        visualEffect.state = .active
-        visualEffect.wantsLayer = true
-        visualEffect.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.07, alpha: 0.98).cgColor
-        visualEffect.layer?.cornerRadius = 16
-        visualEffect.layer?.masksToBounds = true
-        visualEffect.layer?.borderWidth = 1
-        visualEffect.layer?.borderColor = NSColor(white: 1.0, alpha: 0.12).cgColor
+        // Solid black, no blur and no see-through: what is behind the window never shows.
+        rootView = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        rootView.wantsLayer = true
+        rootView.layer?.backgroundColor = Theme.background.cgColor
+        rootView.layer?.cornerRadius = 18
+        rootView.layer?.masksToBounds = true
+        rootView.layer?.borderWidth = 1
+        rootView.layer?.borderColor = Theme.border.cgColor
 
-        badge = NSTextField(labelWithString: targetApp.uppercased())
-        badge.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
-        badge.textColor = NSColor(red: 0.25, green: 0.70, blue: 1.0, alpha: 1.0)
-        badge.frame = NSRect(x: 24, y: height - 26, width: 130, height: 16)
-        visualEffect.addSubview(badge)
+        badge = NSTextField(labelWithString: "")
+        badge.attributedStringValue = badgeText(targetApp)
+        badge.frame = NSRect(x: 24, y: height - 28, width: 220, height: 16)
+        rootView.addSubview(badge)
 
         attachmentChipsLabel = NSTextField(labelWithString: "")
-        attachmentChipsLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        attachmentChipsLabel.textColor = NSColor(red: 0.35, green: 0.75, blue: 1.0, alpha: 1.0)
-        attachmentChipsLabel.frame = NSRect(x: 160, y: height - 26, width: width - 300, height: 16)
+        attachmentChipsLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        attachmentChipsLabel.textColor = Theme.accent
+        attachmentChipsLabel.frame = NSRect(x: 250, y: height - 28, width: width - 330, height: 16)
         attachmentChipsLabel.lineBreakMode = .byTruncatingTail
         attachmentChipsLabel.isHidden = true
-        visualEffect.addSubview(attachmentChipsLabel)
+        rootView.addSubview(attachmentChipsLabel)
 
-        closeButton = HudActionButton(frame: NSRect(x: width - 44, y: height - 30, width: 26, height: 24))
-        closeButton.title = "✕"
-        closeButton.bezelStyle = .regularSquare
-        closeButton.isBordered = false
-        closeButton.wantsLayer = true
-        closeButton.layer?.cornerRadius = 12
-        closeButton.layer?.masksToBounds = true
-        closeButton.layer?.backgroundColor = NSColor(white: 0.20, alpha: 0.8).cgColor
-        closeButton.font = NSFont.systemFont(ofSize: 12, weight: .bold)
-        closeButton.contentTintColor = NSColor(white: 0.75, alpha: 1.0)
-        closeButton.target = self
-        closeButton.action = #selector(onCancelClicked)
-        visualEffect.addSubview(closeButton)
+        closeButton = makePillButton(title: "✕", frame: NSRect(x: width - 44, y: height - 32, width: 26, height: 24), tint: Theme.secondary, fill: NSColor(white: 1.0, alpha: 0.10), action: #selector(onCancelClicked))
+        closeButton.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        rootView.addSubview(closeButton)
 
-        stopButton = HudActionButton(frame: NSRect(x: width - 130, y: height - 32, width: 78, height: 24))
-        stopButton.title = "⏹ Stop"
-        stopButton.bezelStyle = .regularSquare
-        stopButton.isBordered = false
-        stopButton.wantsLayer = true
-        stopButton.layer?.cornerRadius = 12
-        stopButton.layer?.masksToBounds = true
-        stopButton.layer?.backgroundColor = NSColor(red: 0.85, green: 0.25, blue: 0.25, alpha: 0.25).cgColor
-        stopButton.font = NSFont.systemFont(ofSize: 11, weight: .bold)
-        stopButton.contentTintColor = NSColor(red: 1.0, green: 0.45, blue: 0.45, alpha: 1.0)
-        stopButton.target = self
-        stopButton.action = #selector(onStopClicked)
+        stopButton = makePillButton(title: "Stop", frame: NSRect(x: width - 118, y: height - 32, width: 64, height: 24), tint: Theme.danger, fill: NSColor(red: 1.0, green: 0.44, blue: 0.44, alpha: 0.16), action: #selector(onStopClicked))
         stopButton.isHidden = true
-        visualEffect.addSubview(stopButton)
+        rootView.addSubview(stopButton)
 
-        statusPill = NSTextField(labelWithString: "● THINKING")
-        statusPill.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
-        statusPill.textColor = NSColor.systemCyan
-        statusPill.frame = NSRect(x: width - 265, y: height - 32, width: 125, height: 18)
+        copyButton = makePillButton(title: "Copy", frame: NSRect(x: width - 118, y: height - 32, width: 64, height: 24), tint: Theme.text, fill: NSColor(white: 1.0, alpha: 0.12), action: #selector(onCopyClicked))
+        copyButton.isHidden = true
+        rootView.addSubview(copyButton)
+
+        spinner = NSProgressIndicator(frame: NSRect(x: width - 160, y: height - 30, width: 16, height: 16))
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isIndeterminate = true
+        spinner.isDisplayedWhenStopped = false
+        spinner.isHidden = true
+        rootView.addSubview(spinner)
+
+        statusPill = NSTextField(labelWithString: "")
+        statusPill.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        statusPill.textColor = Theme.accent
+        statusPill.frame = NSRect(x: width - 330, y: height - 30, width: 164, height: 18)
         statusPill.alignment = .right
         statusPill.isHidden = true
-        visualEffect.addSubview(statusPill)
+        rootView.addSubview(statusPill)
 
-        textField = NSTextField(frame: NSRect(x: 22, y: 14, width: width - 44, height: 40))
+        textField = NSTextField(frame: NSRect(x: 24, y: 16, width: width - 48, height: 28))
         textField.isBordered = false
         textField.drawsBackground = false
         textField.focusRingType = .none
-        textField.font = NSFont.systemFont(ofSize: 17, weight: .regular)
-        textField.textColor = .white
-        let pAttr: [NSAttributedString.Key: Any] = [
-            .foregroundColor: NSColor(white: 0.45, alpha: 1.0),
-            .font: NSFont.systemFont(ofSize: 17, weight: .regular)
-        ]
-        textField.placeholderAttributedString = NSAttributedString(string: "Ask anything or type @ to attach context...", attributes: pAttr)
+        textField.font = NSFont.systemFont(ofSize: 18, weight: .regular)
+        textField.textColor = Theme.text
+        setPlaceholder("Ask anything, or type @ to attach context…", size: 18)
         textField.isEditable = true
         textField.isSelectable = true
         textField.delegate = self
-        visualEffect.addSubview(textField)
+        rootView.addSubview(textField)
 
-        panel.contentView = visualEffect
+        panel.contentView = rootView
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         panel.makeFirstResponder(textField)
+    }
+
+    func badgeText(_ app: String) -> NSAttributedString {
+        let out = NSMutableAttributedString(string: "●  ", attributes: [.font: NSFont.systemFont(ofSize: 8, weight: .bold), .foregroundColor: Theme.accent, .baselineOffset: 1.5])
+        out.append(NSAttributedString(string: app, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: Theme.secondary]))
+        return out
+    }
+
+    func setPlaceholder(_ text: String, size: CGFloat) {
+        textField.placeholderAttributedString = NSAttributedString(string: text, attributes: [
+            .foregroundColor: Theme.tertiary,
+            .font: NSFont.systemFont(ofSize: size, weight: .regular)
+        ])
+    }
+
+    func makePillButton(title: String, frame: NSRect, tint: NSColor, fill: NSColor, action: Selector) -> HudActionButton {
+        let b = HudActionButton(frame: frame)
+        b.title = title
+        b.bezelStyle = .regularSquare
+        b.isBordered = false
+        b.wantsLayer = true
+        b.layer?.cornerRadius = frame.height / 2
+        b.layer?.masksToBounds = true
+        b.layer?.backgroundColor = fill.cgColor
+        b.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        b.contentTintColor = tint
+        b.attributedTitle = NSAttributedString(string: title, attributes: [.foregroundColor: tint, .font: NSFont.systemFont(ofSize: 12, weight: .semibold)])
+        b.target = self
+        b.action = action
+        return b
+    }
+
+    /// One place that sets the status word and its colour.
+    func setStatus(_ word: String, color: NSColor) {
+        statusPill.stringValue = word
+        statusPill.textColor = color
+    }
+
+    func updateWorkingChrome() {
+        guard spinner != nil else { return }
+        if isWorking && isExpanded {
+            spinner.isHidden = false
+            spinner.startAnimation(nil)
+        } else {
+            spinner.stopAnimation(nil)
+            spinner.isHidden = true
+        }
+        // The status word sits right after the spinner while working, and takes its place when done.
+        if isExpanded, statusLeft > 0 {
+            statusPill.frame.origin.x = isWorking ? statusLeft + 22 : statusLeft
+        }
+        if isExpanded, textField != nil {
+            setPlaceholder(isWorking ? "Type a follow-up, or press Esc to stop" : "Ask a follow-up, or press Esc to close", size: 14.5)
+        }
     }
 
     func discoverNativeContext() {
@@ -747,14 +856,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             p.isOpaque = false
             p.backgroundColor = .clear
             p.hasShadow = true
+            p.appearance = NSAppearance(named: .darkAqua)
 
             let effect = NSView(frame: NSRect(origin: .zero, size: popoverRect.size))
             effect.wantsLayer = true
-            effect.layer?.backgroundColor = NSColor(red: 0.07, green: 0.07, blue: 0.09, alpha: 0.98).cgColor
+            effect.layer?.backgroundColor = Theme.background.cgColor
             effect.layer?.cornerRadius = 14
             effect.layer?.masksToBounds = true
             effect.layer?.borderWidth = 1
-            effect.layer?.borderColor = NSColor(white: 1.0, alpha: 0.14).cgColor
+            effect.layer?.borderColor = Theme.border.cgColor
 
             let scroll = NSScrollView(frame: NSRect(x: 6, y: 6, width: popoverRect.width - 12, height: targetHeight - 12))
             scroll.drawsBackground = false
@@ -964,10 +1074,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         isWorking = false
         print("{\"event\":\"stop\"}")
         fflush(stdout)
-        statusPill.stringValue = "⏹ STOPPED"
-        statusPill.textColor = .systemOrange
+        setStatus("Stopped", color: Theme.warning)
         stopButton.isHidden = true
-        appendHistory(role: "SYSTEM", text: "Task stopped by user.", color: .systemOrange, icon: "⏹")
+        appendEntry(.note, "Stopped.")
         if let tf = textField {
             panel.makeFirstResponder(tf)
         }
@@ -1030,21 +1139,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                     if !isExpanded {
                         transitionToProgress(query: text)
                     } else {
-                        appendHistory(role: "YOU", text: text, color: NSColor(red: 0.35, green: 0.75, blue: 1.0, alpha: 1.0), icon: "💬")
+                        appendEntry(.goal, text)
                         isWorking = true
-                        statusPill.stringValue = "● WORKING"
-                        statusPill.textColor = .systemCyan
+                        setStatus("Working", color: Theme.accent)
                         stopButton.isHidden = false
+                        copyButton.isHidden = true
                     }
                     return true
                 }
             }
             return true
         } else if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-            if isExpanded {
-                if isWorking {
-                    onStopClicked()
-                }
+            if isExpanded && isWorking {
+                onStopClicked()
             } else {
                 onCancelClicked()
             }
@@ -1053,36 +1160,144 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         return false
     }
 
-    func appendHistory(role: String, text: String, color: NSColor, icon: String) {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        let timestamp = formatter.string(from: Date())
+    // MARK: - Progress feed
 
-        let fullString = NSMutableAttributedString()
+    func paragraphStyle(before: CGFloat = 0, after: CGFloat = 0, lineSpacing: CGFloat = 2, first: CGFloat = 0, head: CGFloat = 0, tab: CGFloat? = nil) -> NSMutableParagraphStyle {
+        let ps = NSMutableParagraphStyle()
+        ps.paragraphSpacingBefore = before
+        ps.paragraphSpacing = after
+        ps.lineSpacing = lineSpacing
+        ps.firstLineHeadIndent = first
+        ps.headIndent = head
+        if let t = tab { ps.tabStops = [NSTextTab(textAlignment: .left, location: t, options: [:])] }
+        return ps
+    }
 
-        let timeAttr: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-            .foregroundColor: NSColor(white: 0.45, alpha: 1.0)
-        ]
-        fullString.append(NSAttributedString(string: "[\(timestamp)] ", attributes: timeAttr))
+    /// A small uppercase caption such as YOU or RESULT.
+    func caption(_ text: String, color: NSColor, before: CGFloat) -> NSAttributedString {
+        return NSAttributedString(string: text + "\n", attributes: [
+            .font: NSFont.systemFont(ofSize: 10.5, weight: .semibold),
+            .foregroundColor: color,
+            .kern: 1.2,
+            .paragraphStyle: paragraphStyle(before: before, after: 5)
+        ])
+    }
 
-        let roleAttr: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .bold),
-            .foregroundColor: color
-        ]
-        fullString.append(NSAttributedString(string: "\(icon) \(role.uppercased()): ", attributes: roleAttr))
+    /// Plain text as paragraphs: blank lines become a gap, bullets and numbers get a hanging indent so wrapped lines line up.
+    func body(_ text: String, font: NSFont, color: NSColor, lineSpacing: CGFloat, after: CGFloat) -> NSMutableAttributedString {
+        let out = NSMutableAttributedString()
+        let lines = text.components(separatedBy: "\n")
+        for (n, raw) in lines.enumerated() {
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            let isLast = n == lines.count - 1
+            if trimmed.isEmpty {
+                if !out.string.isEmpty && !isLast {
+                    out.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 6), .paragraphStyle: paragraphStyle()]))
+                }
+                continue
+            }
+            let leading = raw.prefix(while: { $0 == " " }).count
+            let indent = CGFloat(min(leading / 2, 4)) * 18
+            var head = indent
+            if trimmed.hasPrefix("• ") {
+                head = indent + 15
+            } else if trimmed.range(of: "^[0-9]{1,2}[.)] ", options: .regularExpression) != nil {
+                head = indent + 22
+            }
+            let spacing = isLast ? after : 4
+            out.append(NSAttributedString(string: trimmed + "\n", attributes: [
+                .font: font,
+                .foregroundColor: color,
+                .paragraphStyle: paragraphStyle(after: spacing, lineSpacing: lineSpacing, first: indent, head: head)
+            ]))
+        }
+        return out
+    }
 
-        let textAttr: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 12, weight: .regular),
-            .foregroundColor: NSColor(white: 0.94, alpha: 1.0)
-        ]
-        fullString.append(NSAttributedString(string: "\(text)\n\n", attributes: textAttr))
+    /// One short line with a symbol in the margin, for steps, notes and problems.
+    func marginLine(symbol: String, symbolColor: NSColor, text: String, color: NSColor, weight: NSFont.Weight, size: CGFloat, before: CGFloat, after: CGFloat) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        let ps = paragraphStyle(before: before, after: after, lineSpacing: 2, first: 0, head: 20, tab: 20)
+        out.append(NSAttributedString(string: symbol + "\t", attributes: [.font: NSFont.systemFont(ofSize: size, weight: .semibold), .foregroundColor: symbolColor, .paragraphStyle: ps]))
+        out.append(NSAttributedString(string: text + "\n", attributes: [.font: NSFont.systemFont(ofSize: size, weight: weight), .foregroundColor: color, .paragraphStyle: ps]))
+        return out
+    }
 
-        if let storage = historyTextView?.textStorage {
-            storage.append(fullString)
+    func appendEntry(_ kind: EntryKind, _ rawText: String) {
+        guard let storage = historyTextView?.textStorage else { return }
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { return }
+        let isFirst = storage.length == 0
+        let out = NSMutableAttributedString()
+        let start = storage.length
+
+        switch kind {
+        case .goal:
+            out.append(caption("YOU", color: Theme.tertiary, before: isFirst ? 0 : 20))
+            out.append(body(text, font: NSFont.systemFont(ofSize: 15, weight: .medium), color: Theme.text, lineSpacing: 3, after: 10))
+        case .step:
+            out.append(marginLine(symbol: "✓", symbolColor: Theme.success, text: text, color: Theme.secondary, weight: .regular, size: 13, before: 0, after: 6))
+        case .note:
+            out.append(marginLine(symbol: "·", symbolColor: Theme.tertiary, text: text, color: Theme.tertiary, weight: .regular, size: 13, before: 0, after: 6))
+        case .attention:
+            out.append(marginLine(symbol: "!", symbolColor: Theme.warning, text: text, color: Theme.warning, weight: .medium, size: 13.5, before: 4, after: 8))
+        case .error:
+            out.append(marginLine(symbol: "✕", symbolColor: Theme.danger, text: text, color: Theme.danger, weight: .medium, size: 13.5, before: 4, after: 8))
+        case .answer:
+            out.append(caption("RESULT", color: Theme.success, before: isFirst ? 0 : 18))
+            let answer = body(text, font: NSFont.systemFont(ofSize: 14.5, weight: .regular), color: Theme.text, lineSpacing: 4, after: 4)
+            if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+                let whole = NSRange(location: 0, length: answer.length)
+                for match in detector.matches(in: answer.string, options: [], range: whole) {
+                    if let url = match.url { answer.addAttribute(.link, value: url, range: match.range) }
+                }
+            }
+            out.append(answer)
+            answerStart = start
+            answerText = text
+        }
+
+        storage.append(out)
+        if kind == .answer {
+            scrollFeed(toTopOf: start)
+        } else {
             historyTextView?.scrollToEndOfDocument(nil)
         }
     }
+
+    /// Puts the line at `location` at the top of the feed, so a long answer is read from its first line.
+    func scrollFeed(toTopOf location: Int) {
+        guard let tv = historyTextView, let lm = tv.layoutManager, let tc = tv.textContainer, let storage = tv.textStorage, storage.length > 0 else { return }
+        lm.ensureLayout(for: tc)
+        let glyph = lm.glyphIndexForCharacter(at: min(location, storage.length - 1))
+        let rect = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        let clip = historyScrollView.contentView
+        let target = NSRect(x: 0, y: max(0, rect.origin.y + tv.textContainerOrigin.y - 6), width: clip.bounds.width, height: clip.bounds.height)
+        clip.scroll(to: clip.constrainBoundsRect(target).origin)
+        historyScrollView.reflectScrolledClipView(clip)
+    }
+
+    @objc func onCopyClicked() {
+        guard !answerText.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(answerText, forType: .string)
+        copyButton.attributedTitle = NSAttributedString(string: "Copied", attributes: [.foregroundColor: Theme.success, .font: NSFont.systemFont(ofSize: 12, weight: .semibold)])
+        copyResetWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.copyButton.attributedTitle = NSAttributedString(string: "Copy", attributes: [.foregroundColor: Theme.text, .font: NSFont.systemFont(ofSize: 12, weight: .semibold)])
+        }
+        copyResetWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
+    }
+
+    /// "READING" from the helper's protocol becomes "Reading" on screen.
+    func displayStatus(_ raw: String) -> String {
+        let lower = raw.lowercased()
+        return lower.prefix(1).uppercased() + lower.dropFirst()
+    }
+
+    // MARK: - Updates from the daemon
 
     func setupInputReader() {
         FileHandle.standardInput.readabilityHandler = { [weak self] handle in
@@ -1096,68 +1311,57 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                       let jsonData = trimmed.data(using: .utf8),
                       let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else { continue }
                 DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    if dict["event"] as? String == "context", let h = dict["hierarchy"] as? [String: Any] {
-                        self.loadHierarchy(h)
-                        return
-                    }
-
-                    let status = (dict["status"] as? String)?.uppercased() ?? "WORKING"
-                    let text = dict["text"] as? String ?? ""
-                    let role = dict["role"] as? String
-
-                    if status == "COMPLETE" || status == "DONE" {
-                        self.isWorking = false
-                        self.statusPill.stringValue = "✔ COMPLETE"
-                        self.statusPill.textColor = .systemGreen
-                        self.stopButton.isHidden = true
-                        self.appendHistory(role: role ?? "DONE", text: text.isEmpty ? "Task completed successfully." : text, color: .systemGreen, icon: "✔")
-                        self.panel.makeFirstResponder(self.textField)
-                    } else if status == "STOPPED" || status == "CANCELLED" {
-                        if self.isWorking {
-                            self.appendHistory(role: role ?? "STATUS", text: text.isEmpty ? "Task stopped." : text, color: .systemOrange, icon: "⏹")
-                        }
-                        self.isWorking = false
-                        self.statusPill.stringValue = "⏹ STOPPED"
-                        self.statusPill.textColor = .systemOrange
-                        self.stopButton.isHidden = true
-                        self.panel.makeFirstResponder(self.textField)
-                    } else if status == "FAILED" {
-                        // The task is over: stop the spinner and give the input back.
-                        self.isWorking = false
-                        self.statusPill.stringValue = "✖ FAILED"
-                        self.statusPill.textColor = .systemRed
-                        self.stopButton.isHidden = true
-                        self.appendHistory(role: role ?? "ERROR", text: text.isEmpty ? "The task failed." : text, color: .systemRed, icon: "⚠")
-                        self.panel.makeFirstResponder(self.textField)
-                    } else if status == "ERROR" {
-                        self.appendHistory(role: role ?? "ERROR", text: text.isEmpty ? "Action error occurred." : text, color: .systemRed, icon: "⚠")
-                    } else if text.isEmpty && !self.isWorking {
-                        // A status-word-only update that arrives after the task ended must not bring the spinner back.
-                        return
-                    } else {
-                        self.isWorking = true
-                        self.statusPill.stringValue = "● " + status
-                        self.statusPill.textColor = .systemCyan
-                        self.stopButton.isHidden = false
-                        if !text.isEmpty {
-                            var color = NSColor.systemCyan
-                            var icon = "🧠"
-                            let r = role ?? status
-                            if status == "EXECUTING" || status == "ACTION" || role == "ACTION" || role == "ATTENTION" {
-                                color = NSColor(red: 1.0, green: 0.78, blue: 0.28, alpha: 1.0)
-                                icon = "⚡"
-                            } else if status == "FOCUS" {
-                                color = NSColor(red: 0.6, green: 0.6, blue: 1.0, alpha: 1.0)
-                                icon = "🎯"
-                            } else if status == "OUTPUT" {
-                                color = NSColor(red: 0.4, green: 0.85, blue: 0.5, alpha: 1.0)
-                                icon = "✔"
-                            }
-                            self.appendHistory(role: r, text: text, color: color, icon: icon)
-                        }
-                    }
+                    self?.handleUpdate(dict)
                 }
+            }
+        }
+    }
+
+    func handleUpdate(_ dict: [String: Any]) {
+        if dict["event"] as? String == "context", let h = dict["hierarchy"] as? [String: Any] {
+            loadHierarchy(h)
+            return
+        }
+
+        let status = (dict["status"] as? String)?.uppercased() ?? "WORKING"
+        let text = dict["text"] as? String ?? ""
+        let role = dict["role"] as? String
+
+        if status == "COMPLETE" || status == "DONE" {
+            isWorking = false
+            setStatus("Done", color: Theme.success)
+            stopButton.isHidden = true
+            appendEntry(.answer, text.isEmpty ? "Task completed successfully." : text)
+            copyButton.isHidden = answerText.isEmpty
+            copyButton.attributedTitle = NSAttributedString(string: "Copy", attributes: [.foregroundColor: Theme.text, .font: NSFont.systemFont(ofSize: 12, weight: .semibold)])
+            panel.makeFirstResponder(textField)
+        } else if status == "STOPPED" || status == "CANCELLED" {
+            if isWorking {
+                appendEntry(.note, text.isEmpty ? "Stopped." : text)
+            }
+            isWorking = false
+            setStatus("Stopped", color: Theme.warning)
+            stopButton.isHidden = true
+            panel.makeFirstResponder(textField)
+        } else if status == "FAILED" {
+            // The task is over: stop the spinner and give the input back.
+            isWorking = false
+            setStatus("Failed", color: Theme.danger)
+            stopButton.isHidden = true
+            appendEntry(.error, text.isEmpty ? "The task failed." : text)
+            panel.makeFirstResponder(textField)
+        } else if status == "ERROR" {
+            appendEntry(.error, text.isEmpty ? "Something went wrong." : text)
+        } else if text.isEmpty && !isWorking {
+            // A status-word-only update that arrives after the task ended must not bring the spinner back.
+            return
+        } else {
+            isWorking = true
+            setStatus(displayStatus(status), color: Theme.accent)
+            stopButton.isHidden = false
+            copyButton.isHidden = true
+            if !text.isEmpty {
+                appendEntry(role == "ATTENTION" || role == "PROBLEM" ? .attention : .step, text)
             }
         }
     }
@@ -1165,48 +1369,65 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
     func transitionToProgress(query: String) {
         isExpanded = true
         isWorking = true
-        let newHeight: CGFloat = 420
         guard let screen = panel.screen ?? NSScreen.main else { return }
-        let width: CGFloat = 580
-        let x = screen.frame.width - width - 24
-        let y = screen.frame.height - newHeight - 48
+        let visible = screen.visibleFrame
+        let width: CGFloat = 640
+        let height = min(600, max(420, visible.height - 80))
+        let x = visible.maxX - width - 24
+        let y = visible.maxY - height - 24
 
-        panel.setFrame(NSRect(x: x, y: y, width: width, height: newHeight), display: true, animate: true)
+        panel.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true, animate: true)
         panel.level = .floating
-        visualEffect.frame = NSRect(x: 0, y: 0, width: width, height: newHeight)
+        rootView.frame = NSRect(x: 0, y: 0, width: width, height: height)
 
-        badge.stringValue = targetApp.uppercased()
-        badge.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
-        badge.textColor = NSColor(red: 0.25, green: 0.70, blue: 1.0, alpha: 1.0)
-        badge.frame = NSRect(x: 20, y: newHeight - 32, width: 130, height: 18)
-
-        attachmentChipsLabel.frame = NSRect(x: 160, y: newHeight - 32, width: width - 440, height: 18)
-
-        statusPill.frame = NSRect(x: width - 265, y: newHeight - 32, width: 125, height: 18)
-        statusPill.stringValue = "● WORKING"
-        statusPill.textColor = .systemCyan
-        statusPill.alignment = .right
+        // Header: where it works, what it is doing, and the one button that matters right now.
+        let headerBottom = height - 52
+        badge.attributedStringValue = badgeText(targetApp)
+        let badgeWidth = min(200, ceil(badge.attributedStringValue.size().width) + 4)
+        badge.frame = NSRect(x: 22, y: height - 34, width: badgeWidth, height: 16)
+        let statusX = 22 + badgeWidth + 20
+        statusLeft = statusX
+        spinner.frame = NSRect(x: statusX, y: height - 35, width: 16, height: 16)
+        statusPill.frame = NSRect(x: statusX, y: height - 35, width: 150, height: 18)
+        statusPill.alignment = .left
+        attachmentChipsLabel.frame = NSRect(x: statusX + 180, y: height - 34, width: max(40, width - 130 - (statusX + 180)), height: 16)
         statusPill.isHidden = false
+        setStatus("Starting", color: Theme.accent)
 
-        stopButton.frame = NSRect(x: width - 130, y: newHeight - 34, width: 78, height: 24)
+        stopButton.frame = NSRect(x: width - 118, y: height - 38, width: 64, height: 24)
         stopButton.isHidden = false
-        visualEffect.addSubview(stopButton, positioned: .above, relativeTo: nil)
+        copyButton.frame = stopButton.frame
+        closeButton.frame = NSRect(x: width - 44, y: height - 38, width: 26, height: 24)
+        rootView.addSubview(copyButton, positioned: .above, relativeTo: nil)
+        rootView.addSubview(stopButton, positioned: .above, relativeTo: nil)
+        rootView.addSubview(closeButton, positioned: .above, relativeTo: nil)
 
-        closeButton.frame = NSRect(x: width - 44, y: newHeight - 34, width: 26, height: 24)
-        visualEffect.addSubview(closeButton, positioned: .above, relativeTo: nil)
-
-        topDividerLine = NSBox(frame: NSRect(x: 20, y: newHeight - 44, width: width - 40, height: 1))
+        topDividerLine = NSBox(frame: NSRect(x: 0, y: headerBottom, width: width, height: 1))
         topDividerLine.boxType = .custom
         topDividerLine.borderWidth = 0
-        topDividerLine.fillColor = NSColor(white: 1.0, alpha: 0.12)
-        visualEffect.addSubview(topDividerLine)
+        topDividerLine.fillColor = Theme.divider
+        rootView.addSubview(topDividerLine)
 
-        let scrollFrame = NSRect(x: 20, y: 56, width: width - 40, height: newHeight - 110)
+        // Footer: a rounded box to type a follow-up in.
+        let boxHeight: CGFloat = 44
+        inputBox = NSView(frame: NSRect(x: 16, y: 16, width: width - 32, height: boxHeight))
+        inputBox.wantsLayer = true
+        inputBox.layer?.backgroundColor = Theme.field.cgColor
+        inputBox.layer?.cornerRadius = 12
+        inputBox.layer?.borderWidth = 1
+        inputBox.layer?.borderColor = Theme.divider.cgColor
+        rootView.addSubview(inputBox)
+
+        // The feed, between the header and the footer.
+        let feedBottom: CGFloat = 16 + boxHeight + 12
+        let scrollFrame = NSRect(x: 22, y: feedBottom, width: width - 44, height: headerBottom - feedBottom - 6)
         historyScrollView = NSScrollView(frame: scrollFrame)
         historyScrollView.drawsBackground = false
         historyScrollView.hasVerticalScroller = true
         historyScrollView.hasHorizontalScroller = false
         historyScrollView.autohidesScrollers = true
+        historyScrollView.scrollerStyle = .overlay
+        historyScrollView.scrollerKnobStyle = .light
         historyScrollView.borderType = .noBorder
 
         let contentSize = historyScrollView.contentSize
@@ -1216,30 +1437,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         historyTextView.isVerticallyResizable = true
         historyTextView.isHorizontallyResizable = false
         historyTextView.autoresizingMask = [.width]
+        historyTextView.textContainerInset = NSSize(width: 0, height: 14)
         historyTextView.textContainer?.containerSize = NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
         historyTextView.textContainer?.widthTracksTextView = true
+        historyTextView.textContainer?.lineFragmentPadding = 0
         historyTextView.drawsBackground = false
         historyTextView.backgroundColor = .clear
         historyTextView.isEditable = false
         historyTextView.isSelectable = true
+        historyTextView.selectedTextAttributes = [.backgroundColor: NSColor(red: 0.38, green: 0.64, blue: 1.0, alpha: 0.35)]
+        historyTextView.linkTextAttributes = [.foregroundColor: Theme.accent, .underlineStyle: NSUnderlineStyle.single.rawValue, .cursor: NSCursor.pointingHand]
         historyScrollView.documentView = historyTextView
-        visualEffect.addSubview(historyScrollView)
+        rootView.addSubview(historyScrollView)
 
-        bottomDividerLine = NSBox(frame: NSRect(x: 20, y: 50, width: width - 40, height: 1))
-        bottomDividerLine.boxType = .custom
-        bottomDividerLine.borderWidth = 0
-        bottomDividerLine.fillColor = NSColor(white: 1.0, alpha: 0.12)
-        visualEffect.addSubview(bottomDividerLine)
-
-        textField.frame = NSRect(x: 20, y: 10, width: width - 40, height: 32)
-        textField.font = NSFont.systemFont(ofSize: 14, weight: .regular)
-        textField.placeholderString = "Type follow-up instruction... (or press Esc to stop)"
+        textField.removeFromSuperview()
+        textField.frame = NSRect(x: 14, y: 11, width: inputBox.bounds.width - 28, height: 22)
+        textField.font = NSFont.systemFont(ofSize: 14.5, weight: .regular)
         textField.isHidden = false
-        visualEffect.addSubview(textField, positioned: .above, relativeTo: nil)
+        inputBox.addSubview(textField)
+        updateWorkingChrome()
         panel.makeFirstResponder(textField)
 
-        appendHistory(role: "GOAL", text: query, color: .white, icon: "💬")
-        appendHistory(role: "SYSTEM", text: "Getting started…", color: NSColor(white: 0.6, alpha: 1.0), icon: "⚡")
+        appendEntry(.goal, query)
     }
 }
 

@@ -334,7 +334,7 @@ export class HudFeed {
         if (planned) {
           const result = flattenResult(payload.ok !== false, payload.output);
           const line = failureLine(result) ?? planned.after(result);
-          if (line && !(line === FAILED && planned.quietFailure)) this.line(line);
+          if (line && !(line === FAILED && planned.quietFailure)) this.line(line, failureLine(result) !== null ? 'PROBLEM' : 'ACTION');
         }
         this.pill('THINKING');
         return;
@@ -380,10 +380,11 @@ export class HudFeed {
     this.send(word, '');
   }
 
-  private line(text: string): void {
+  /** `role` is ACTION for something that happened and PROBLEM for something that did not work out. */
+  private line(text: string, role: 'ACTION' | 'PROBLEM'): void {
     if (text === this.lastLine) return;
     this.lastLine = text;
     this.lastPill = 'WORKING';
-    this.send('WORKING', text, 'ACTION');
+    this.send('WORKING', text, role);
   }
 }

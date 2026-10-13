@@ -68,6 +68,8 @@ describe('HudFeed', () => {
       mcp('3', 'browser_open', { url: 'https://a.com' }), done('3', envelope('error: Chrome is not running', true)),
     ]);
     expect(lines(out)).toEqual(["That action wasn't approved, so it was skipped.", 'Clicked "Pay"', "That didn't work."]);
+    // something that did not work out is marked as a problem, not as a finished step
+    expect(out.filter((u) => u.text).map((u) => u.role)).toEqual(['PROBLEM', 'ACTION', 'PROBLEM']);
     expect(flattenResult(true, { isError: true, content: [{ text: 'x' }] })).toEqual({ ok: false, output: 'x' });
     expect(flattenResult(true, 'plain {not json')).toEqual({ ok: true, output: 'plain {not json' });
     expect(flattenResult(true, envelope('boom', true))).toEqual({ ok: false, output: 'boom' });
