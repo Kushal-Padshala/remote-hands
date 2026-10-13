@@ -86,6 +86,19 @@ const PRELUDE = String.raw`
   };
   const TEXT_TYPES = ['text', 'search', 'email', 'url', 'tel', 'password'];
   const NON_TYPABLE = ['checkbox', 'radio', 'button', 'submit', 'reset', 'image', 'file', 'hidden', 'range', 'color'];
+  const deepActive = () => {
+    let a = document.activeElement || document.body;
+    for (let i = 0; i < 8 && a; i++) {
+      let next = null;
+      if (a.shadowRoot && a.shadowRoot.activeElement) next = a.shadowRoot.activeElement;
+      else if (a.tagName === 'IFRAME' || a.tagName === 'FRAME') {
+        try { const d = a.contentDocument; if (d && d.activeElement) next = d.activeElement; } catch (e) { next = null; }
+      }
+      if (!next || next === a) break;
+      a = next;
+    }
+    return a;
+  };
 `;
 
 // Identity guard: the document must be the one that was snapshotted (when the caller says which).
@@ -181,17 +194,19 @@ const TYPE = String.raw`
   } else {
     // contenteditable: prefer execCommand (keeps the editor's undo stack and fires a real
     // input event); fall back to textContent only when it is missing, throws or returns false.
+    const ownDoc = el.ownerDocument || document;
+    const ownView = ownDoc.defaultView || window;
     let inserted = false;
-    if (typeof document.execCommand === 'function') {
+    if (typeof ownDoc.execCommand === 'function') {
       try {
-        const sel = window.getSelection && window.getSelection();
-        if (sel && document.createRange) {
-          const range = document.createRange();
+        const sel = ownView.getSelection && ownView.getSelection();
+        if (sel && ownDoc.createRange) {
+          const range = ownDoc.createRange();
           range.selectNodeContents(el);
           sel.removeAllRanges();
           sel.addRange(range);
         }
-        inserted = document.execCommand('insertText', false, text) === true;
+        inserted = ownDoc.execCommand('insertText', false, text) === true;
       } catch (e) { inserted = false; }
     }
     if (!inserted) {
@@ -250,7 +265,7 @@ const CHECK = String.raw`
 
 const PRESS = String.raw`
   const k = String(op.key);
-  const target = document.activeElement || document.body;
+  const target = deepActive();
   const allowed = pressKey(target, k);
   if (k === 'Enter' && allowed && target.tagName === 'INPUT' && target.form) submitForm(target.form);
   return out({ ok: true });
@@ -313,7 +328,7 @@ export function buildExtractScript(maxChars: number): string {
     text = text ? text + ' ' + t : t;
     if (text.length >= max) full = true;
   };
-  const walk = (n) => {
+  const walk = (n, depth) => {
     if (truncated) return;
     if (n.nodeType === 3) { add(n.textContent || ''); return; }
     if (n.nodeType !== 1 || SKIP.includes(n.tagName) || hidden(n)) return;
@@ -323,9 +338,15 @@ export function buildExtractScript(maxChars: number): string {
       return;
     }
     if (n.tagName === 'TEXTAREA') { if (n.value) add(n.value); return; }
-    for (const c of n.childNodes) walk(c);
+    if (n.shadowRoot && depth < 3) for (const c of n.shadowRoot.childNodes) walk(c, depth + 1);
+    if ((n.tagName === 'IFRAME' || n.tagName === 'FRAME') && depth < 3) {
+      let d = null;
+      try { d = n.contentDocument; } catch (e) { d = null; }
+      if (d && d.body) walk(d.body, depth + 1);
+    }
+    for (const c of n.childNodes) walk(c, depth);
   };
-  if (root) walk(root);
+  if (root) walk(root, 0);
   if (truncated || text.length > max) {
     // Cut at max without splitting a surrogate pair.
     let end = Math.min(max, text.length);

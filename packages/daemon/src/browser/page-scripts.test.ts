@@ -805,9 +805,9 @@ function nodeOf(p: Page, el: unknown): number {
   return p.win.__rhFast.ids.get(el);
 }
 
-function addFrame(p: Page, html: string, rect = { left: 10, top: 20, width: 300, height: 200 }): any {
+function addFrame(p: Page, html: string, rect = { left: 10, top: 20, width: 300, height: 200 }, parent: any = p.doc.body): any {
   const frame = p.doc.createElement('iframe');
-  p.doc.body.appendChild(frame);
+  parent.appendChild(frame);
   frame.contentDocument.body.innerHTML = html;
   frame.getBoundingClientRect = () => ({
     x: rect.left, y: rect.top, left: rect.left, top: rect.top, width: rect.width, height: rect.height,
@@ -903,5 +903,74 @@ describe('snapshot across shadow roots and frames', () => {
     p.snapshot();
     const found = p.win.__rhFast.deepAll('button').map((b: any) => b.textContent);
     expect(found).toEqual(expect.arrayContaining(['Top', 'Inner']));
+  });
+});
+describe('actions and extract inside shadow roots and frames', () => {
+  it('types into a contenteditable inside a frame using the frame document', () => {
+    const p = makePage('', { contentEditable: true });
+    const frame = addFrame(p, '<div id="ed" contenteditable="true" role="textbox" aria-label="Reply"></div>');
+    const idoc = frame.contentDocument;
+    const calls: Array<[string, unknown]> = [];
+    idoc.execCommand = (cmd: string, _ui: boolean, val: unknown) => { calls.push([cmd, val]); return true; };
+    Object.defineProperty(idoc.defaultView.HTMLElement.prototype, 'innerText', { configurable: true, get(this: any) { return this.textContent; } });
+    Object.defineProperty(idoc.defaultView.HTMLElement.prototype, 'isContentEditable', {
+      configurable: true,
+      get(this: any) { const v = this.getAttribute('contenteditable'); return v !== null && v !== 'false'; },
+    });
+    const snap = p.snapshot();
+    const reply = snap.actions.find((a: any) => a.label === 'Reply');
+    expect(reply).toBeDefined();
+    expect(p.run({ op: 'type', node: reply.node, label: 'Reply', text: 'Thanks!' })).toMatchObject({ ok: true });
+    expect(calls).toEqual([['insertText', 'Thanks!']]);
+  });
+
+  it('press Enter goes to the focused control inside a shadow root', () => {
+    const p = makePage('<div id="host"></div>');
+    const root = p.doc.getElementById('host').attachShadow({ mode: 'open' });
+    root.innerHTML = '<input id="in" type="text" aria-label="Search">';
+    const input = root.getElementById('in');
+    let seen = 0;
+    input.addEventListener('keydown', (e: any) => { if (e.key === 'Enter') seen += 1; });
+    input.focus();
+    expect(p.run({ op: 'press', key: 'Enter' })).toMatchObject({ ok: true });
+    expect(seen).toBe(1);
+  });
+
+  it('press goes to the focused control inside a same-origin frame', () => {
+    const p = makePage('');
+    const frame = addFrame(p, '<input id="in" type="text" aria-label="Answer">');
+    const input = frame.contentDocument.getElementById('in');
+    let seen = 0;
+    input.addEventListener('keydown', () => { seen += 1; });
+    input.focus();
+    frame.focus();
+    expect(p.run({ op: 'press', key: 'Escape' })).toMatchObject({ ok: true });
+    expect(seen).toBe(1);
+  });
+
+  it('extract includes shadow-root and same-origin frame text and still skips passwords', () => {
+    const p = makePage('<main><p>Top text</p><div id="host"></div></main>');
+    p.doc.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<p>Shadow text</p><input type="password" value="hunter2">';
+    addFrame(p, '<p>Frame text</p><input type="password" value="swordfish">', undefined, p.doc.querySelector('main'));
+    const out = p.evalJson(buildExtractScript(2000));
+    expect(out.text).toContain('Top text');
+    expect(out.text).toContain('Shadow text');
+    expect(out.text).toContain('Frame text');
+    expect(out.text).not.toContain('hunter2');
+    expect(out.text).not.toContain('swordfish');
+  });
+
+  it('extract stops at 3 nested frame levels so a page embedding itself cannot loop', () => {
+    const p = makePage('<p>Level0</p>');
+    let doc = p.doc;
+    for (let level = 1; level <= 5; level += 1) {
+      const f = doc.createElement('iframe');
+      doc.body.appendChild(f);
+      f.contentDocument.body.innerHTML = `<p>Level${level}</p>`;
+      doc = f.contentDocument;
+    }
+    const text = p.evalJson(buildExtractScript(2000)).text as string;
+    expect(text).toContain('Level3');
+    expect(text).not.toContain('Level4');
   });
 });
