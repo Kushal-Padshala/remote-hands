@@ -10,6 +10,10 @@
 
 **Spec:** None written. Design basis: `docs/superpowers/specs/2026-10-03-fast-browser-engine-design.md` (non-goals there named iframes and shadow DOM; this plan lifts exactly those two) and the improvement review in this session. The earlier `docs/superpowers/plans/2026-10-04-hud-speed.md` is already implemented in the tree (previous-task digest, SKILL.md rule, blocked-osascript sentence, `NODE_NO_WARNINGS`); it is not part of this plan.
 
+## Status (written after execution)
+
+All nine tasks were executed on branch `feat/hud-browser-reliability`. The code differs from the snippets below in places because five rounds of Codex review (`docs/superpowers/reviews/`) found real defects in the first versions; the final behaviour is described in `docs/development.md` ("Frames, shadow DOM and label targets", "Call log"), not in this plan. The biggest changes: nested content is read only by the fast engine; labels fail closed and resolve against a fresh look; a per-call cancellation scope (`computer/call-scope.ts`) replaces the plain deadline; dropdown payloads are bounded; the call log rotates by renaming. Not done: a smoke test in a real browser (none could be launched in the review environment), and the declined items below.
+
 ## Declined on purpose (and why)
 
 - **Skipping the 80 ms settle after pure input ops.** Measured in code: the whole post-action wait is 80-230 ms against a 3-7 s model turn. It is not worth the risk of missing a validation message that appears right after typing.
