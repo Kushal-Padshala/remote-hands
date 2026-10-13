@@ -254,16 +254,19 @@ function hint(ctx: Ctx, indent: number, owner: AxNode): void {
   const s = owner.scroll;
   const where = s === undefined ? 'out of view' : s < 0.02 ? 'below' : s > 0.98 ? 'above' : 'above and below';
   const pad = '  '.repeat(Math.min(indent, MAX_INDENT));
+  const hasFrame = owner.x !== undefined && owner.y !== undefined && owner.width !== undefined && owner.height !== undefined;
   ctx.items.push({
     key: `h${owner.id}`,
-    id: 0,
+    // the area's own id, so the model can scroll it
+    id: owner.id,
     role: 'hint',
     label: '',
-    line: `${pad}… ${owner.off} more ${where} (desktop_scroll)`,
+    line: `${pad}… ${owner.off} more ${where} (desktop_scroll [${owner.id}])`,
     interactive: false,
     editable: false,
     secure: false,
     disabled: false,
+    ...(hasFrame ? { frame: { x: owner.x!, y: owner.y!, width: owner.width!, height: owner.height! } } : {}),
     actionTargets: {},
     members: [],
   });
@@ -433,7 +436,7 @@ export function buildView(snapshot: AxSnapshot, opts: ViewOptions = {}): View {
   const body = [...notes, ...lines];
   const text = [header, ...body].join('\n');
   const byId = new Map<number, ViewItem>();
-  for (const item of items) if (item.id !== 0 && !byId.has(item.id)) byId.set(item.id, item);
+  for (const item of items) if (!byId.has(item.id)) byId.set(item.id, item);
   // Rows fold in their cells and texts: those ids lead to the row.
   for (const item of items) for (const m of item.members) if (!byId.has(m)) byId.set(m, item);
   return {

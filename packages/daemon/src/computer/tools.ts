@@ -68,28 +68,66 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
     {
       name: 'desktop_snapshot',
       description:
-        'List interactive UI elements of a macOS app as "[index] Role \\"label\\"". Indexes are valid until the next snapshot or action. Use filter to search by role/label substring. desktop_click must target the same app as the latest snapshot, so either omit app on both calls or pass the same app to both.',
+        'List the controls and text of a macOS app window as "[index] role \\"label\\"" with state (disabled, selected, checked, focused), values in fields ("= \\"text\\""), extra actions in braces ({open}, {menu}) and a hint line when more is scrolled out of view ("… N more below"). Indexes stay the same across snapshots and actions while the element stays on screen. Use filter to search by role/label substring. Later desktop tools must target the same app as the latest snapshot, so either omit app on all calls or pass the same app.',
       inputSchema: { app, filter: z.string().optional().describe('Case-insensitive substring of role or label.') },
       handler: (a) => session.desktopSnapshot(a.app, a.filter),
     },
     {
       name: 'desktop_click',
       description:
-        'Press a UI element by index from the latest desktop_snapshot using native Accessibility (no mouse movement); if the element does not support AXPress it may fall back to a physical click at its center, which is reported in the result. The app must be the same as in the latest desktop_snapshot: omit app on both calls or pass the same app to both, otherwise the call fails. Returns the new UI state, so a separate snapshot is not needed.',
+        'Press a UI element by index from the latest desktop_snapshot using native Accessibility (no mouse movement); if the element does not support AXPress it may fall back to a physical click at its center, which is reported in the result. action (optional): "press" (default), "open" (open a row/file/folder; same as double-click), "menu" (show its context menu), "double", "right". The app must be the same as in the latest desktop_snapshot: omit app on both calls or pass the same app to both, otherwise the call fails. Returns what changed on screen (lines starting with + new, ~ changed, - gone), or the whole window when most of it changed, so a separate snapshot is not needed.',
       inputSchema: {
         index: z.number().int().describe('Index from the latest snapshot.'),
         app: z
           .string()
           .optional()
           .describe('Application name. Must match the latest desktop_snapshot app; omit to use the snapshot app.'),
+        action: z.enum(['press', 'open', 'menu', 'double', 'right']).optional().describe('How to activate it. Default press.'),
       },
-      handler: (a) => session.desktopClick(a.index, a.app),
+      handler: (a) => session.desktopClick(a.index, a.app, a.action),
     },
     {
       name: 'desktop_type',
-      description: 'Type text into the focused element. Returns the new UI state.',
-      inputSchema: { text: z.string(), app },
-      handler: (a) => session.desktopType(a.text, a.app),
+      description:
+        'Type text into the focused element, or into the field with the given index (it is focused first). With index, replace:true swaps the whole content of the field for the text; submit:true presses Return afterwards. Emoji, new lines and non-English text are fine. Returns what changed on screen.',
+      inputSchema: {
+        text: z.string(),
+        app,
+        index: z.number().int().optional().describe('Text field from the latest snapshot. Omit to type into whatever has focus.'),
+        replace: z.boolean().optional().describe('With index: replace the existing content instead of adding to it.'),
+        submit: z.boolean().optional().describe('Press Return after typing.'),
+      },
+      handler: (a) => session.desktopType(a.text, a.app, { index: a.index, replace: a.replace, submit: a.submit }),
+    },
+    {
+      name: 'desktop_scroll',
+      description:
+        'Scroll a list, table or scroll area by its index from the latest snapshot (or any element in it). direction up/down/left/right; amount 1-20 where 1 is about ten lines (default 3). Use it when the snapshot says "… N more below (desktop_scroll [6])" and pass that number as index. Returns what changed on screen.',
+      inputSchema: {
+        index: z.number().int().describe('Index of the list or an element inside the area to scroll.'),
+        direction: z.enum(['up', 'down', 'left', 'right']),
+        amount: z.number().int().min(1).max(20).optional().describe('1 is about ten lines. Default 3.'),
+        app,
+      },
+      handler: (a) => session.desktopScroll(a.index, a.direction, a.amount ?? 3, a.app),
+    },
+    {
+      name: 'desktop_read',
+      description:
+        'Read the full text of an element (a document, a long field, a message) by index from the latest snapshot. Never reads password fields. Use it instead of scrolling when you only need to read.',
+      inputSchema: {
+        index: z.number().int(),
+        max_chars: z.number().int().min(100).max(100000).optional().describe('Maximum characters (default 20000).'),
+        app,
+      },
+      handler: (a) => session.desktopRead(a.index, a.max_chars, a.app),
+    },
+    {
+      name: 'desktop_drag',
+      description:
+        'Drag one element onto another by index from the latest snapshot (move a file into a folder, reorder a list). It briefly moves the real mouse pointer and puts it back. Returns what changed on screen.',
+      inputSchema: { from: z.number().int(), to: z.number().int(), app },
+      handler: (a) => session.desktopDrag(a.from, a.to, a.app),
     },
     {
       name: 'desktop_key',

@@ -12,6 +12,9 @@ function fakeSession() {
     desktopSnapshot: vi.fn().mockResolvedValue('snap'),
     desktopClick: vi.fn().mockResolvedValue('clicked'),
     desktopType: vi.fn().mockResolvedValue('typed'),
+    desktopScroll: vi.fn().mockResolvedValue('scrolled'),
+    desktopRead: vi.fn().mockResolvedValue('read'),
+    desktopDrag: vi.fn().mockResolvedValue('dragged'),
     desktopKey: vi.fn().mockResolvedValue('pressed'),
     desktopOpen: vi.fn().mockResolvedValue('opened'),
     desktopMenu: vi.fn().mockResolvedValue('menu'),
@@ -43,9 +46,12 @@ describe('buildComputerTools', () => {
       'browser_type',
       'computer_batch',
       'desktop_click',
+      'desktop_drag',
       'desktop_key',
       'desktop_menu',
       'desktop_open',
+      'desktop_read',
+      'desktop_scroll',
       'desktop_snapshot',
       'desktop_type',
       'desktop_windows',
@@ -56,7 +62,9 @@ describe('buildComputerTools', () => {
     const session = fakeSession();
     const tool = (name: string) => buildComputerTools(session).find((t) => t.name === name)!;
     await tool('desktop_click').handler({ index: 4, app: 'Finder' });
-    expect(session.desktopClick).toHaveBeenCalledWith(4, 'Finder');
+    expect(session.desktopClick).toHaveBeenCalledWith(4, 'Finder', undefined);
+    await tool('desktop_click').handler({ index: 5, action: 'double' });
+    expect(session.desktopClick).toHaveBeenLastCalledWith(5, undefined, 'double');
     await tool('browser_type').handler({ index: 2, text: 'hi' });
     expect(session.browserType).toHaveBeenCalledWith(2, 'hi', undefined);
     await tool('browser_type').handler({ index: 2, text: 'hi', submit: true });
@@ -74,7 +82,7 @@ describe('buildComputerTools', () => {
         { tool: 'desktop_key', args: { combo: 'tab' } },
       ],
     });
-    expect(session.desktopType).toHaveBeenCalledWith('a', undefined);
+    expect(session.desktopType).toHaveBeenCalledWith('a', undefined, { index: undefined, replace: undefined, submit: undefined });
     expect(session.desktopKey).toHaveBeenCalledWith('tab', undefined);
     expect(out).toBe('step 1 desktop_type ok\nstep 2 desktop_key ok\npressed');
   });
@@ -162,8 +170,31 @@ describe('buildComputerTools', () => {
     expect(out).toBe('step 1 browser_type ok\nstep 2 desktop_windows ok\nwins');
   });
 
-  it('has 17 tools', () => {
-    expect(buildComputerTools(fakeSession())).toHaveLength(17);
+  it('has 20 tools', () => {
+    expect(buildComputerTools(fakeSession())).toHaveLength(20);
+  });
+
+  it('routes the native-app tools: type into a field, scroll, read and drag', async () => {
+    const session = fakeSession();
+    const tool = (name: string) => buildComputerTools(session).find((t) => t.name === name)!;
+    await tool('desktop_type').handler({ text: 'hi', index: 7, replace: true, submit: true });
+    expect(session.desktopType).toHaveBeenCalledWith('hi', undefined, { index: 7, replace: true, submit: true });
+    await tool('desktop_scroll').handler({ index: 3, direction: 'down' });
+    expect(session.desktopScroll).toHaveBeenCalledWith(3, 'down', 3, undefined);
+    await tool('desktop_scroll').handler({ index: 3, direction: 'up', amount: 9, app: 'Finder' });
+    expect(session.desktopScroll).toHaveBeenLastCalledWith(3, 'up', 9, 'Finder');
+    await tool('desktop_read').handler({ index: 4, max_chars: 500 });
+    expect(session.desktopRead).toHaveBeenCalledWith(4, 500, undefined);
+    await tool('desktop_drag').handler({ from: 2, to: 9 });
+    expect(session.desktopDrag).toHaveBeenCalledWith(2, 9, undefined);
+  });
+
+  it('rejects out-of-range scroll amounts and unknown directions in a batch before anything runs', async () => {
+    const session = fakeSession();
+    const batch = buildComputerTools(session).find((t) => t.name === 'computer_batch')!;
+    await expect(batch.handler({ steps: [{ tool: 'desktop_scroll', args: { index: 1, direction: 'sideways' } }] })).rejects.toThrow(/invalid args/);
+    await expect(batch.handler({ steps: [{ tool: 'desktop_scroll', args: { index: 1, direction: 'down', amount: 99 } }] })).rejects.toThrow(/invalid args/);
+    expect(session.desktopScroll).not.toHaveBeenCalled();
   });
 
   it('routes browser_find, browser_do and browser_extract args unchanged', async () => {
@@ -363,7 +394,7 @@ describe('buildComputerTools', () => {
     const [a, b] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(a), client.connect(b)]);
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(17);
+    expect(tools).toHaveLength(20);
     const banned = new Set(['oneOf', 'anyOf', 'allOf', '$ref', 'const', 'exclusiveMinimum', 'exclusiveMaximum', 'not', 'if', 'then']);
     const found: string[] = [];
     const walk = (node: unknown, where: string, inProperties = false): void => {

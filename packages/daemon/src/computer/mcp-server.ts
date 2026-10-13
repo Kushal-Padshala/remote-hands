@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import os from 'node:os';
+import { axHelperEnabledByDefault, ensureAxHelperBinary } from '../desktop/ax-helper.js';
 import { appendCallRecord, classifyError, type ToolCallRecord } from './call-log.js';
 import { runInCallScope } from './call-scope.js';
 import type { ComputerSession } from './session.js';
@@ -92,6 +93,8 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
 }
 
 export async function serveComputerMcp(session: ComputerSession): Promise<void> {
+  // Build the native-app helper in the background so the first desktop_snapshot already has it.
+  if (axHelperEnabledByDefault()) void ensureAxHelperBinary();
   const server = createComputerMcpServer(
     buildComputerTools(session),
     process.env.RH_CALL_LOG === '0' ? {} : { onCall: (record) => appendCallRecord(os.homedir(), record) },

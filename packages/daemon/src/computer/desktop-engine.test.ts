@@ -60,8 +60,10 @@ describe('DesktopEngine.snapshot', () => {
     await expect(new DesktopEngine(fake(() => new AxHelperError('not_trusted', 'x'))).snapshot('Notes')).rejects.toThrow(
       'Accessibility permission is missing for Remote Hands',
     );
-    await expect(new DesktopEngine(fake(() => new AxHelperError('no_app', 'x'))).snapshot('Nope')).rejects.toThrow('No running app matches "Nope". Use desktop_open to start it.');
-    await expect(new DesktopEngine(fake(() => new AxHelperError('no_app', 'x'))).snapshot('')).rejects.toThrow('No app is in front.');
+    expect(describeHelperError(new AxHelperError('no_app', 'x'), 'Nope')?.message).toBe('No running app matches "Nope". Use desktop_open to start it.');
+    expect(describeHelperError(new AxHelperError('no_app', 'x'), '')?.message).toBe('No app is in front.');
+    // the slower reader may know that app by another name, so the snapshot falls back
+    expect(await new DesktopEngine(fake(() => new AxHelperError('no_app', 'x'))).snapshot('Nope')).toBeNull();
   });
 
   it('maps stale and unknown helper errors to plain messages, and passes other errors through', async () => {

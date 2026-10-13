@@ -53,16 +53,16 @@ describe('buildView', () => {
 
   it('shows how much is scrolled out of view and which way', () => {
     // lined up with the rows it is about, not with the window
-    expect(buildView(finderLike()).lines).toContain('  … 7 more below (desktop_scroll)');
+    expect(buildView(finderLike()).lines).toContain('  … 7 more below (desktop_scroll [3])');
     const mk = (scroll?: number): string[] => {
       reset();
       const win = node('AXWindow', 0);
       const area = node('AXScrollArea', win.id, { off: 3, ...(scroll === undefined ? {} : { scroll }) });
       return buildView(snap([win, area, node('AXButton', area.id, { label: 'Item' })])).lines;
     };
-    expect(mk(0.5)).toContain('… 3 more above and below (desktop_scroll)');
-    expect(mk(1)).toContain('… 3 more above (desktop_scroll)');
-    expect(mk()).toContain('… 3 more out of view (desktop_scroll)');
+    expect(mk(0.5)).toContain('… 3 more above and below (desktop_scroll [2])');
+    expect(mk(1)).toContain('… 3 more above (desktop_scroll [2])');
+    expect(mk()).toContain('… 3 more out of view (desktop_scroll [2])');
   });
 
   it('shows checkboxes, popups, fields and passwords with their value, and never a password', () => {

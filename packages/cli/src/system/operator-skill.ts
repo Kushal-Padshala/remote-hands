@@ -43,9 +43,12 @@ When the \`rh-computer\` MCP server is registered with your agent (\`rh mcp inst
 
 | Tool | Purpose |
 |---|---|
-| \`desktop_snapshot\` | List interactive elements of an app as \`[index] Role "label"\`. Optional \`app\` and \`filter\` (role/label substring). |
-| \`desktop_click\` | Press an element by index from the latest \`desktop_snapshot\` through native Accessibility. |
-| \`desktop_type\` | Type text into the focused element. |
+| \`desktop_snapshot\` | List the controls and text of an app window as \`[index] role "label"\` with state, field values and scroll hints. Indexes stay the same while an element stays on screen. Optional \`app\` and \`filter\` (role/label substring). |
+| \`desktop_click\` | Press an element by index from the latest \`desktop_snapshot\` through native Accessibility. Optional \`action\`: \`open\`, \`menu\`, \`double\`, \`right\`. |
+| \`desktop_type\` | Type text into the focused element, or into the field at \`index\` (\`replace\` swaps its content, \`submit\` presses Return). |
+| \`desktop_scroll\` | Scroll the list or area at \`index\` up/down/left/right when the snapshot says \`… N more below\`. |
+| \`desktop_read\` | Read the full text of an element by \`index\` (never password fields). |
+| \`desktop_drag\` | Drag one element onto another (\`from\`, \`to\`). |
 | \`desktop_key\` | Press a key or shortcut such as \`return\` or \`cmd+s\`. |
 | \`desktop_open\` | Launch or activate an app and return its UI state. |
 | \`desktop_menu\` | Fuzzy-search an app menu bar and trigger the best match. |
@@ -62,7 +65,7 @@ When the \`rh-computer\` MCP server is registered with your agent (\`rh mcp inst
 | \`computer_batch\` | Run up to 12 tool calls in one round trip. |
 
 Rules:
-- Same-app rule: \`desktop_click\` must target the same app as the latest \`desktop_snapshot\`. Omit \`app\` on both calls or pass the same app to both, otherwise the call fails.
+- Same-app rule: \`desktop_click\`, \`desktop_type\` with an index, \`desktop_scroll\`, \`desktop_read\` and \`desktop_drag\` must target the same app as the latest \`desktop_snapshot\`. Omit \`app\` on both calls or pass the same app to both, otherwise the call fails.
 - Browser ids (the numbers in brackets) are stable: they stay valid while the element stays on the page. Every browser action result already contains the updated state, so never call \`browser_snapshot\` again after an action.
 - Use \`browser_do\` to fill and submit a whole form or run any multi-step browser sequence in one call, with ids from the last state you saw. Use \`target\` (the visible label) when you have not seen the page yet; ambiguous labels fail with candidates. Open shadow DOM and same-origin iframes are included; large frames that cannot be read (other websites, sandboxed) are reported in a note. Labels are matched among the controls visible on screen, using a fresh look at the page at the start of the call, and fail, asking for an \`index\`, when the page has more controls than could be listed or the label is not unique. Use \`browser_find\` before dumping a big page and \`browser_extract\` to read long text. \`browser_focus\` and \`browser_open\` reuse existing tabs.
 - If a browser result begins with \`note: fast browser path unavailable\`, do not mention it to the user and continue with the fallback. If a \`browser_*\` tool fails because the browser is not Chrome, drive that browser with \`desktop_snapshot\`, \`desktop_click\` and \`desktop_type\` using its app name. Never run \`rh browser setup\` yourself: it is interactive.
