@@ -55,6 +55,8 @@ export interface View {
   truncated: boolean;
   /** Lists, toolbars, groups and scroll areas in the window, by id. */
   regions: Map<number, Region>;
+  /** The app offers a context menu on nearly everything, so `{menu}` is not shown. */
+  menuNoise: boolean;
 }
 
 export interface ViewOptions {
@@ -62,6 +64,10 @@ export interface ViewOptions {
   filter?: string;
   /** Names the part of the window that was read on its own, e.g. `[12] list "Changes"`. */
   zoom?: string;
+  /** The id of that part. */
+  zoomId?: number;
+  /** Whether `{menu}` is left out; a part read on its own inherits this from the whole window. */
+  menuNoise?: boolean;
 }
 
 const MAX_LABEL = 80;
@@ -69,6 +75,8 @@ const MAX_GATE_LABEL = 400;
 const MAX_VALUE = 60;
 const MAX_INDENT = 3;
 const DEFAULT_MAX_LINES = 150;
+/** A part of a window read on its own may be longer: asking for it is the way to see more. */
+const ZOOM_MAX_LINES = 400;
 
 const ROLE_NAMES: Record<string, string> = {
   AXButton: 'button',
@@ -177,7 +185,8 @@ interface Ctx {
 
 /** The text a row or control shows: its own label, else the texts and image names inside it. */
 function textOf(ctx: Ctx, node: AxNode, depth = 0, max = MAX_LABEL): string[] {
-  const own = clean(TEXT_FIELD_ROLES.has(node.role) ? node.label : withoutIconCodes(node.label), max);
+  // Icon codes are dropped from what is shown, never from the longer text approval is judged on.
+  const own = clean(max <= MAX_LABEL && !TEXT_FIELD_ROLES.has(node.role) ? withoutIconCodes(node.label) : node.label, max);
   if (own) return [own];
   const parts: string[] = [];
   for (const child of ctx.kids.get(node.id) ?? []) {
@@ -218,14 +227,13 @@ function actionTargets(ctx: Ctx, node: AxNode, members: number[]): Record<string
   // the element itself first, then what is folded into it
   for (const id of [node.id, ...members.filter((m) => m !== node.id)]) {
     for (const action of ctx.byNode.get(id)?.actions ?? []) {
-      if (action === 'AXShowMenu' && ctx.menuNoise) continue;
       if (!(action in out)) out[action] = id;
     }
   }
   return out;
 }
 
-function annotations(node: AxNode, role: string, targets: Record<string, number>): string[] {
+function annotations(node: AxNode, role: string, targets: Record<string, number>, menuNoise: boolean): string[] {
   const out: string[] = [];
   const check = node.value;
   if (['checkbox', 'radio', 'switch', 'toggle'].includes(role)) {
@@ -238,6 +246,8 @@ function annotations(node: AxNode, role: string, targets: Record<string, number>
   else if (node.expanded === false && role === 'disclosure') out.push('collapsed');
   if (node.focused && (TEXT_FIELD_ROLES.has(node.role) || role === 'search' || role === 'password')) out.push('focused');
   const names = Object.keys(targets)
+    // an app that offers a context menu on everything says nothing by listing it on everything
+    .filter((a) => !(a === 'AXShowMenu' && menuNoise))
     .map((a) => ACTION_NAMES[a])
     .filter((n): n is string => Boolean(n));
   if (names.length > 0) out.push(`{${[...new Set(names)].join(',')}}`);
@@ -259,7 +269,7 @@ function valuePart(node: AxNode, role: string, label: string): string {
 function emit(ctx: Ctx, indent: number, node: AxNode, opts: { role?: string; label: string; gateLabel?: string; interactive: boolean; members: number[]; text?: boolean; container?: boolean }): void {
   const role = opts.role ?? roleName(node);
   const targets = actionTargets(ctx, node, opts.members);
-  const notes = annotations(node, role, targets);
+  const notes = annotations(node, role, targets, ctx.menuNoise);
   const tail = valuePart(node, role, opts.label);
   const shownLabel = opts.label ? ` ${quote(opts.label)}` : '';
   const pad = '  '.repeat(Math.min(indent, MAX_INDENT));
@@ -351,13 +361,16 @@ function visit(ctx: Ctx, node: AxNode, indent: number, inRow: boolean): void {
       gateLabel = textOf(ctx, node, 0, MAX_GATE_LABEL).join(' · ');
       collectMembers(ctx, node, members);
     }
+    // what the control is called in the tree, kept for approval even when the shown label came from somewhere else
+    const rawLabel = clean(node.label, MAX_GATE_LABEL);
+    const withRaw = (text: string): string => [rawLabel, text].filter(Boolean).join(' · ');
     if (!label && TEXT_FIELD_ROLES.has(role)) {
       label = clean(node.placeholder ?? node.help, MAX_LABEL);
-      gateLabel = clean(node.placeholder ?? node.help, MAX_GATE_LABEL);
+      gateLabel = withRaw(clean(node.placeholder ?? node.help, MAX_GATE_LABEL));
     }
     if (!label) {
       label = clean(node.help, MAX_LABEL);
-      gateLabel = clean(node.help, MAX_GATE_LABEL);
+      gateLabel = withRaw(clean(node.help, MAX_GATE_LABEL));
     }
     emit(ctx, indent, node, { label, gateLabel, interactive: true, members });
     return;
@@ -420,9 +433,33 @@ function fingerprintOf(text: string): string {
  * window are not the ones lost. Headings stay (they are what desktop_snapshot index=N zooms into) and each
  * part that lost lines ends with a line saying where the rest is.
  */
-function fairTrim(list: ViewItem[], max: number, regions: Map<number, Region>): { items: ViewItem[]; markers: number } {
+/** The line that says a part of the window has more than is shown, and how to see it. */
+function moreMarker(region: number, left: number, info: Region | undefined, zoomId: number | undefined, overview = false): ViewItem {
+  // reading the part again would show the same lines: only a filter narrows it further
+  const here = region === 0 || !info || region === zoomId;
+  return {
+    key: `t${region}`,
+    id: region,
+    role: 'hint',
+    label: '',
+    gateLabel: '',
+    line: here
+      ? `… ${left} more elements hidden; ${overview ? 'zoom into a part above (desktop_snapshot index=N) or ' : ''}pass filter to narrow`
+      : `… ${left} more in [${region}] ${info.role}${info.label ? ` ${quote(info.label)}` : ''} (desktop_snapshot index=${region})`,
+    interactive: false,
+    editable: false,
+    secure: false,
+    disabled: false,
+    actionTargets: {},
+    members: [],
+    region,
+    container: false,
+  };
+}
+
+function fairTrim(list: ViewItem[], max: number, regions: Map<number, Region>, zoomId?: number): { items: ViewItem[]; markers: number } {
   const kept = new Set<ViewItem>();
-  const headingCap = Math.floor(max / 3);
+  const headingCap = Math.floor(max / 4);
   for (const item of list) if (item.container && kept.size < headingCap) kept.add(item);
   const order: number[] = [];
   const groups = new Map<number, ViewItem[]>();
@@ -444,7 +481,12 @@ function fairTrim(list: ViewItem[], max: number, regions: Map<number, Region>): 
   let q = 0;
   for (const g of groups.values()) q = Math.max(q, g.length);
   while (q > 0 && total(q) > max) q -= 1;
-  if (q === 0) return { items: list.slice(0, max), markers: 0 };
+  if (q === 0) {
+    // more parts than lines: list the parts themselves (each can be read on its own), then say the rest is hidden
+    const headings = list.filter((i) => i.container).slice(0, max - 1);
+    if (headings.length === 0) return { items: list.slice(0, max), markers: 0 };
+    return { items: [...headings, moreMarker(0, list.length - headings.length, undefined, zoomId, true)], markers: 1 };
+  }
 
   const quota = new Map<number, number>();
   for (const [r, g] of groups) quota.set(r, Math.min(g.length, q));
@@ -482,26 +524,7 @@ function fairTrim(list: ViewItem[], max: number, regions: Map<number, Region>): 
     if (marked.has(r)) continue;
     marked.add(r);
     markers += 1;
-    const left = groups.get(r)!.length - quota.get(r)!;
-    const info = regions.get(r);
-    out.push({
-      key: `t${r}`,
-      id: r,
-      role: 'hint',
-      label: '',
-      gateLabel: '',
-      line: r === 0 || !info
-        ? `… ${left} more elements hidden; pass filter to narrow`
-        : `… ${left} more in [${r}] ${info.role}${info.label ? ` ${quote(info.label)}` : ''} (desktop_snapshot index=${r})`,
-      interactive: false,
-      editable: false,
-      secure: false,
-      disabled: false,
-      actionTargets: {},
-      members: [],
-      region: r,
-      container: false,
-    });
+    out.push(moreMarker(r, groups.get(r)!.length - quota.get(r)!, regions.get(r), zoomId));
   }
   return { items: out, markers };
 }
@@ -543,7 +566,7 @@ export function buildView(snapshot: AxSnapshot, opts: ViewOptions = {}): View {
   }
   const withActions = nodes.filter((n) => (n.actions?.length ?? 0) > 0);
   const withMenu = withActions.filter((n) => n.actions!.includes('AXShowMenu')).length;
-  const menuNoise = withMenu >= 8 && withMenu >= withActions.length * 0.6;
+  const menuNoise = opts.menuNoise ?? (withMenu >= 8 && withMenu >= withActions.length * 0.6);
   const ctx: Ctx = {
     nodes, byNode: new Map(nodes.map((n) => [n.id, n])), kids, items: [], claimed: new Set(), visited: new Set(),
     region: 0, regions: new Map(), menuNoise,
@@ -570,7 +593,7 @@ export function buildView(snapshot: AxSnapshot, opts: ViewOptions = {}): View {
   let shown = items;
   if (filter) shown = items.filter((i) => i.role !== 'hint' && `${i.role} ${i.label} ${i.line}`.toLowerCase().includes(filter));
   let hidden = filter ? items.length - shown.length : 0;
-  const max = opts.max ?? DEFAULT_MAX_LINES;
+  const max = opts.max ?? (opts.zoom ? ZOOM_MAX_LINES : DEFAULT_MAX_LINES);
   let markers = 0;
   if (shown.length > max) {
     // Plain text goes first: controls are what the model acts on.
@@ -585,7 +608,7 @@ export function buildView(snapshot: AxSnapshot, opts: ViewOptions = {}): View {
     });
     if (keep.length > max) {
       // a big window is cut evenly across its lists and panes, each saying where the rest is
-      const fair = fairTrim(keep, max, ctx.regions);
+      const fair = fairTrim(keep, max, ctx.regions, opts.zoomId);
       keep = fair.items;
       markers = fair.markers;
     }
@@ -617,6 +640,7 @@ export function buildView(snapshot: AxSnapshot, opts: ViewOptions = {}): View {
     hidden,
     truncated: snapshot.truncated || snapshot.timedOut,
     regions: ctx.regions,
+    menuNoise,
   };
 }
 

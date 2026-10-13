@@ -385,6 +385,7 @@ func snapshot(_ id: Any?, _ request: [String: Any]) {
     let appElement = AXUIElementCreateApplication(app.processIdentifier)
     // Reading one part of the window on its own (a list, a pane): the element must be one of this app's.
     var zoomRoot: AXUIElement? = nil
+    var zoomClipRect: CGRect? = nil
     if request["root"] != nil {
         guard let element = liveElement(id, request, key: "root") else { return }
         var owner: pid_t = 0
@@ -394,6 +395,12 @@ func snapshot(_ id: Any?, _ request: [String: Any]) {
             return
         }
         zoomRoot = element
+        let (clip, gone) = zoomClip(element)
+        if gone {
+            fail(id, "stale", "That part of the window is scrolled out of view: take a new snapshot.")
+            return
+        }
+        zoomClipRect = clip
     }
     if needsManualAccessibility(app), !manualAccessibilitySet.contains(app.processIdentifier) {
         AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
@@ -418,8 +425,13 @@ func snapshot(_ id: Any?, _ request: [String: Any]) {
             if zoomRoot == nil { walker.visit(w, parent: 0, clip: frame, owner: nil, depth: 0) }
         }
         if let root = zoomRoot {
-            walker.visit(root, parent: 0, clip: visibleFrame(root), owner: nil, depth: 0)
-            return (walker, window, windowInfo)
+            walker.visit(root, parent: 0, clip: zoomClipRect, owner: nil, depth: 0)
+            // a sheet opened by an action hangs off the window, outside the part being read
+            if let w = window {
+                for kid in (attribute(w, kAXChildrenAttribute) as? [AXUIElement]) ?? [] where text(attribute(kid, kAXRoleAttribute)) == "AXSheet" {
+                    walker.visit(kid, parent: 0, clip: frameOf(kid), owner: nil, depth: 0)
+                }
+            }
         }
         // Open menus and popovers hang off the app, not the window.
         for extra in (attribute(appElement, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
@@ -526,6 +538,26 @@ func visibleFrame(_ element: AXUIElement) -> CGRect? {
         current = p
     }
     return frame
+}
+
+/// The area of the screen a zoomed-into element can show in: its own frame cut down to the scroll areas, sheets and
+/// window around it. `gone` when it is known to be entirely outside them (scrolled away). Without a frame of its own,
+/// only the surrounding areas limit it.
+func zoomClip(_ element: AXUIElement) -> (CGRect?, Bool) {
+    var frame: CGRect? = frameOf(element)
+    var current: AXUIElement = element
+    for _ in 0..<16 {
+        guard let parent = attribute(current, kAXParentAttribute), CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
+        let p = parent as! AXUIElement
+        let role = text(attribute(p, kAXRoleAttribute)) ?? ""
+        if viewportRoles.contains(role) || role == "AXWindow" || role == "AXSheet", let f = frameOf(p) {
+            let next = frame.map { $0.intersection(f) } ?? f
+            if next.isNull || next.width < 1 || next.height < 1 { return (nil, true) }
+            frame = next
+        }
+        current = p
+    }
+    return (frame, false)
 }
 
 func pidOf(_ element: AXUIElement) -> pid_t? {

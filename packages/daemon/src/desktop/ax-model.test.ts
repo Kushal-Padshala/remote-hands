@@ -364,12 +364,32 @@ describe('big windows and web-based apps', () => {
     expect(view.lines.length).toBeLessThanOrEqual(20);
   });
 
-  it('keeps the old tail cut when there are more panes than lines', () => {
-    const { snapshot } = panes(40, 3);
-    const view = buildView(snapshot, { max: 10 });
-    // ten lines and the line saying more exist
-    expect(view.lines.length).toBe(11);
+  it('lists the panes themselves, each with its id, when there are more panes than lines', () => {
+    const { snapshot, listIds } = panes(60, 10);
+    const view = buildView(snapshot);
+    expect(view.lines.length).toBeLessThanOrEqual(150);
+    // every pane that fits is named with the id that zooms into it, including the last ones shown
+    for (const id of listIds.slice(0, 30)) expect(view.text).toContain(`[${id}] list`);
+    expect(view.text).toContain('zoom into a part above (desktop_snapshot index=N) or pass filter to narrow');
+    // none of the ids is lost
+    for (const id of listIds) expect(view.byId.has(id)).toBe(true);
+  });
+
+  it('cuts a window without panes to the cap, ending with one line saying the rest is hidden', () => {
+    reset();
+    const win = node('AXWindow', 0);
+    const view = buildView(snap([win, ...Array.from({ length: 40 }, (_, i) => node('AXButton', win.id, { label: `B${i}` }))]), { max: 10 });
+    expect(view.lines.length).toBe(10);
+    expect(view.lines[9]).toBe('… 31 more elements hidden; pass filter to narrow');
+  });
+
+  it('shows up to 400 lines when a part is read on its own, and then says to filter instead of repeating the zoom', () => {
+    const { snapshot, listIds } = panes(1, 500);
+    const view = buildView(snapshot, { zoom: `[${listIds[0]}] list "Pane 1"`, zoomId: listIds[0] });
+    expect(view.items.length).toBeGreaterThan(300);
+    expect(view.items.length).toBeLessThanOrEqual(400);
     expect(view.text).toContain('more elements hidden; pass filter to narrow');
+    expect(view.text).not.toContain('desktop_snapshot index=');
   });
 
   it('names the part of the window that was read on its own', () => {
@@ -393,7 +413,8 @@ describe('big windows and web-based apps', () => {
     const many = Array.from({ length: 10 }, (_, i) => node('AXButton', win.id, { label: `B${i}`, actions: ['AXPress', 'AXShowMenu'] }));
     const view = buildView(snap([win, ...many]));
     expect(view.text).not.toContain('{menu}');
-    expect(view.items.find((i) => i.label === 'B0')!.actionTargets).toEqual({ AXPress: many[0]!.id });
+    // the action itself is still there: only the label is quiet
+    expect(view.items.find((i) => i.label === 'B0')!.actionTargets).toEqual({ AXPress: many[0]!.id, AXShowMenu: many[0]!.id });
 
     reset();
     const w2 = node('AXWindow', 0);
@@ -411,6 +432,43 @@ describe('big windows and web-based apps', () => {
     expect(view.lines).toContain(`[${commit.id}] button "Commit"`);
     expect(view.items.find((i) => i.id === commit.id)!.gateLabel).toBe('$(check) Commit');
     expect(view.text).toContain('echo $(date)');
+  });
+
+  it('keeps rows that only offer a menu, and the cell that offers it, when the menu is not listed', () => {
+    reset();
+    const win = node('AXWindow', 0);
+    const nodes: AxNode[] = [win];
+    const rows: AxNode[] = [];
+    const cells: AxNode[] = [];
+    for (let i = 0; i < 9; i++) {
+      const row = node('AXRow', win.id);
+      const cell = node('AXCell', row.id, { actions: ['AXShowMenu'] });
+      rows.push(row);
+      cells.push(cell);
+      nodes.push(row, cell, node('AXStaticText', cell.id, { value: `Item ${i}` }));
+    }
+    const view = buildView(snap(nodes));
+    expect(view.text).not.toContain('{menu}');
+    for (let i = 0; i < 9; i++) {
+      const item = view.items.find((x) => x.label === `Item ${i}`)!;
+      expect(item.actionTargets).toEqual({ AXShowMenu: cells[i]!.id });
+      expect(view.byId.get(rows[i]!.id)).toBe(item);
+    }
+  });
+
+  it('keeps the whole label, icon code included, for approval of a row, an icon-only control and a control with help text', () => {
+    reset();
+    const win = node('AXWindow', 0);
+    const row = node('AXRow', win.id, { label: '$(delete) Remove account' });
+    const iconOnly = node('AXButton', win.id, { label: '$(trash)', actions: ['AXPress'] });
+    const helped = node('AXButton', win.id, { label: '$(trash)', help: 'Remove all', actions: ['AXPress'] });
+    const view = buildView(snap([win, row, iconOnly, helped]));
+    const byId = (id: number) => view.items.find((i) => i.id === id)!;
+    expect(byId(row.id).label).toBe('Remove account');
+    expect(byId(row.id).gateLabel).toBe('$(delete) Remove account');
+    expect(byId(iconOnly.id).gateLabel).toBe('$(trash)');
+    expect(byId(helped.id).label).toBe('Remove all');
+    expect(byId(helped.id).gateLabel).toBe('$(trash) · Remove all');
   });
 
   it('drops icon codes from a row label too', () => {

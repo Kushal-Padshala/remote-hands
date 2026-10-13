@@ -123,6 +123,55 @@ describe('DesktopEngine zoom', () => {
     expect(engine.current()?.zoom).toBeUndefined();
   });
 
+  it('keeps leaving out {menu} inside a zoomed part of an app that offers it everywhere', async () => {
+    const withMenu = (n: AxNode): AxNode => ({ ...n, actions: [...(n.actions ?? []), 'AXShowMenu'] });
+    const many = Array.from({ length: 9 }, (_, i): AxNode => withMenu({ id: 10 + i, parent: 3, role: 'AXButton', label: `Row ${i}`, actions: ['AXPress'] }));
+    const engine = new DesktopEngine(fake((op) => (op.root === undefined ? snapshotOf([WIN, LIST, ...many], { epoch: 9 }) : snapshotOf([many[0]!], { epoch: 9 }))));
+    expect(await engine.snapshot('Notes')).not.toContain('{menu}');
+    expect(await engine.snapshot('', { index: 10 })).not.toContain('{menu}');
+    expect(await engine.settle('Notes', engine.current()!.view, { firstMs: 0, gapMs: 0 })).not.toContain('{menu}');
+  });
+
+  it('does not carry a zoom into another app or another window', async () => {
+    const helper = fake((op) => {
+      if (op.app === 'Music') return snapshotOf([WIN, BTN], { app: { name: 'Music', pid: 8 }, epoch: 9 });
+      if (op.root !== undefined) return part();
+      return full();
+    });
+    const engine = new DesktopEngine(helper);
+    await engine.snapshot('Notes');
+    await engine.snapshot('', { index: 3 });
+    // opening another app: its first look must not name the old app's element
+    const music = await engine.settle('Music', engine.current()!.view, { firstMs: 0, gapMs: 0 });
+    expect(music).toContain('app: Music');
+    expect(helper.calls.filter((c) => c.app === 'Music').every((c) => c.root === undefined)).toBe(true);
+    expect(engine.current()?.app).toBe('Music');
+    expect(engine.current()?.zoom).toBeUndefined();
+
+    // another window in front (a dialog): the whole window is read
+    let dialog = false;
+    const second = new DesktopEngine(fake((op) => (op.root !== undefined ? snapshotOf([LIST, ROW], { epoch: 9, ...(dialog ? { window: { title: 'Save' } } : {}) }) : full())));
+    await second.snapshot('Notes');
+    await second.snapshot('', { index: 3 });
+    dialog = true;
+    const text = await second.settle('Notes', second.current()!.view, { firstMs: 0, gapMs: 0 });
+    expect(text).toContain('[2] button "New Note"');
+    expect(second.current()?.zoom).toBeUndefined();
+  });
+
+  it('reads the whole window again when the helper says the zoomed part belongs to another app or is scrolled away', async () => {
+    for (const code of ['bad_request', 'stale']) {
+      let broken = false;
+      const engine = new DesktopEngine(fake((op) => (op.root === undefined ? full() : broken ? new AxHelperError(code, 'x') : part())));
+      await engine.snapshot('Notes');
+      await engine.snapshot('', { index: 3 });
+      broken = true;
+      const text = await engine.settle('Notes', engine.current()!.view, { firstMs: 0, gapMs: 0 });
+      expect(text).toContain('[2] button "New Note"');
+      expect(engine.current()?.zoom).toBeUndefined();
+    }
+  });
+
   it('answers null when the helper cannot serve the zoom', async () => {
     const engine = new DesktopEngine(fake((op) => (op.root === undefined ? full() : new AxHelperError('timeout', 'x'))));
     await engine.snapshot('Notes');

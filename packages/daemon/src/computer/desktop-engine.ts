@@ -88,9 +88,10 @@ export class DesktopEngine {
       zoom = { id: opts.index, text: `[${opts.index}] ${role === 'hint' ? 'scroll area' : role}${label ? ` "${label}"` : ''}` };
       target = last.app;
     }
+    const inherited = this.last?.view.menuNoise;
     const taken = await this.take(target, zoom?.id);
     if (!taken) return null;
-    const viewOpts = zoom ? { zoom: zoom.text } : {};
+    const viewOpts = zoom ? { zoom: zoom.text, zoomId: zoom.id, ...(inherited !== undefined ? { menuNoise: inherited } : {}) } : {};
     const view = buildView(taken.snapshot, opts.filter ? { filter: opts.filter, ...viewOpts } : viewOpts);
     // A filtered view hides lines, so the ids the model may use are those of the whole window.
     this.last = {
@@ -114,6 +115,8 @@ export class DesktopEngine {
       if (err instanceof AxHelperError) {
         // an app the helper cannot find by that name may still be found by the slower reader
         if (err.code === 'no_app') return null;
+        // a part of the window that is gone, scrolled away, or belongs to another app is no longer the view
+        if (root !== undefined && (err.code === 'stale' || err.code === 'bad_request')) throw new StaleElementError('That part of the window is no longer there. Call desktop_snapshot again.');
         const told = describeHelperError(err, app);
         if (told) throw told;
         return null;
@@ -239,7 +242,10 @@ export class DesktopEngine {
     if ((opts.firstMs ?? 120) > 0) await sleep(opts.firstMs ?? 120);
     let previous: string | null = null;
     // a part of the window that was zoomed into stays the view while it is still there
-    let zoom = this.last?.zoom;
+    const lastApp = this.last?.app ?? '';
+    let zoom = app === '' || app.toLowerCase() === lastApp.toLowerCase() ? this.last?.zoom : undefined;
+    const zoomWindow = this.last?.snapshot.window?.title;
+    const menuNoise = this.last?.view.menuNoise;
     for (;;) {
       let taken: { app: string; snapshot: AxSnapshot } | null;
       try {
@@ -251,7 +257,14 @@ export class DesktopEngine {
         taken = await this.take(app);
       }
       if (!taken) return null;
-      const view = buildView(taken.snapshot, zoom ? { zoom: zoom.text } : {});
+      if (zoom && taken.snapshot.window?.title !== zoomWindow) {
+        // another window is in front now (a dialog, a different document): the whole window is the view
+        zoom = undefined;
+        previous = null;
+        taken = await this.take(app);
+        if (!taken) return null;
+      }
+      const view = buildView(taken.snapshot, zoom ? { zoom: zoom.text, zoomId: zoom.id, ...(menuNoise !== undefined ? { menuNoise } : {}) } : {});
       this.last = { app: taken.app, snapshot: taken.snapshot, view, ...(zoom ? { zoom } : {}) };
       if (view.fingerprint === previous || now() - started >= SETTLE_MAX_MS) return renderDiff(before, view);
       previous = view.fingerprint;
