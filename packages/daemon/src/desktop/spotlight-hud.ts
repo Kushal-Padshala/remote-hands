@@ -7,6 +7,7 @@ import type { ExecFunction } from './macos-driver.js';
 import type { ContextAttachment } from '@remote-hands/shared';
 import { ContextService } from '../context/context-service.js';
 import { SPOTLIGHT_SWIFT_SOURCE } from './spotlight-source.generated.js';
+import { ensureWindowsHud, saveHudHotkey } from './windows-hud.js';
 
 export interface SpotlightPromptResult {
   query: string;
@@ -71,6 +72,10 @@ export class SpotlightHudRunner {
    * loudly instead of leaving a hotkey that silently does nothing.
    */
   prepare(): HotkeyHelperStatus {
+    if (process.platform === 'win32') {
+      const built = ensureWindowsHud();
+      return built.ok ? { ok: true, path: built.path } : { ok: false, error: `could not build the hotkey program: ${built.error}` };
+    }
     const target = this.ensureBinary();
     if (target && !target.endsWith('.swift')) return { ok: true, path: target };
     return {
@@ -81,6 +86,11 @@ export class SpotlightHudRunner {
   }
 
   private ensureBinary(): string | null {
+    // Windows: a small program built from C# with the compiler Windows ships.
+    if (process.platform === 'win32') {
+      const built = ensureWindowsHud();
+      return built.ok ? built.path : null;
+    }
     // The CLI ships as one file: make sure the helper's source is on disk for the build below (tests never write to the real home).
     if (process.env.VITEST !== 'true') {
       try {
@@ -365,7 +375,11 @@ export class SpotlightHudRunner {
           for (const line of lines) {
             try {
               const parsed = JSON.parse(line.trim());
-              if (parsed && typeof parsed.app === 'string') {
+              if (parsed && parsed.event === 'hotkey-ready' && typeof parsed.keys === 'string') {
+                saveHudHotkey(parsed.keys);
+              } else if (parsed && parsed.event === 'hotkey-failed') {
+                console.error('Remote Hands: the HUD hotkey is already used by another program (tried Ctrl+Shift+Space and Ctrl+Alt+Space). Close that program and run "rh hud install" again.');
+              } else if (parsed && typeof parsed.app === 'string') {
                 onTrigger(parsed as SpotlightPromptResult);
               }
             } catch {}

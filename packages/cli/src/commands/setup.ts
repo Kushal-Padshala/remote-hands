@@ -62,7 +62,7 @@ import {
   c,
 } from '../output/ui.js';
 
-import { HudServiceManager, SpotlightHudRunner, type ChromeManager, type DynamicPowerManager } from '@remote-hands/daemon';
+import { HudServiceManager, SpotlightHudRunner, hudHotkeyLabel, type ChromeManager, type DynamicPowerManager } from '@remote-hands/daemon';
 import { defaultAsk } from './browser-setup.js';
 import { mcpCommand } from './mcp.js';
 
@@ -237,7 +237,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     }
     stdout(renderStepSuccess('Tunnel binary ready for zero-account remote access'));
 
-    stdout(renderStepStart(4, LOCAL_STEPS, 'Desktop Overlay Assistant (Shift + Cmd + Space)'));
+    stdout(renderStepStart(4, LOCAL_STEPS, `Desktop Overlay Assistant (${hudHotkeyLabel()})`));
     const skipHud = args.includes('--no-hud') || args.includes('--skip-hud');
     const hudService = context.hudServiceManager ?? (context.runner ? {
       install: () => ({ success: true, plistPath: '/mock/LaunchAgents/com.remote-hands.hud.plist' }),
@@ -248,7 +248,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     if (!skipHud && process.platform === 'darwin') {
       const installRes = hudService.install();
       if (installRes.success) {
-        stdout(renderStepSuccess('Desktop Overlay Assistant installed and active (Shift + Cmd + Space)'));
+        stdout(renderStepSuccess(`Desktop Overlay Assistant installed and active (${hudHotkeyLabel()})`));
       } else {
         stdout(renderStepInfo(`Desktop Overlay note: ${installRes.error || 'could not auto-load LaunchAgent'}`));
       }
@@ -278,7 +278,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
 
     stdout('\n' + renderStepSuccess('Zero-account local setup complete!'));
     stdout(`\n  ${c.bold('1. Desktop Use (Active now):')}`);
-    stdout(`     Press ${c.bold('Shift + Cmd + Space')} anywhere to open the prompt textbox overlay.`);
+    stdout(`     Press ${c.bold(hudHotkeyLabel())} anywhere to open the prompt textbox overlay.`);
     stdout(`     It works in the background on any app or browser with zero idle CPU.`);
     stdout(`     No need to run "rh start" while working on your computer.\n`);
     stdout(`  ${c.bold('2. Remote Mobile Use:')}`);
@@ -490,7 +490,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   } catch {}
   stdout(renderStepSuccess(`Web app live at ${webUrl}`));
 
-  stdout(renderStepStart(7, TOTAL_STEPS, 'Desktop Overlay Assistant (Shift + Cmd + Space)'));
+  stdout(renderStepStart(7, TOTAL_STEPS, `Desktop Overlay Assistant (${hudHotkeyLabel()})`));
   const skipHud = args.includes('--no-hud') || args.includes('--skip-hud');
   const hudService = context.hudServiceManager ?? (context.runner ? {
     install: () => ({ success: true, plistPath: '/mock/LaunchAgents/com.remote-hands.hud.plist' }),
@@ -501,7 +501,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
   if (!skipHud && process.platform === 'darwin') {
     const installRes = hudService.install();
     if (installRes.success) {
-      stdout(renderStepSuccess('Desktop Overlay Assistant installed and active (Shift + Cmd + Space)'));
+      stdout(renderStepSuccess(`Desktop Overlay Assistant installed and active (${hudHotkeyLabel()})`));
     } else {
       stdout(renderStepInfo(`Desktop Overlay note: ${installRes.error || 'could not auto-load LaunchAgent'}`));
     }
@@ -521,7 +521,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
 
   stdout(summary);
   stdout(`\n  ${c.bold('Desktop vs Remote Use:')}`);
-  stdout(`  • ${c.bold('Desktop Use:')} Press ${c.bold('Shift + Cmd + Space')} anywhere to use the overlay assistant directly.`);
+  stdout(`  • ${c.bold('Desktop Use:')} Press ${c.bold(hudHotkeyLabel())} anywhere to use the overlay assistant directly.`);
   stdout(`    It is active in the background. You do not need to run "rh start" while at your computer.`);
   stdout(`  • ${c.bold('Remote Use:')} Run "${c.cyan('rh start')}" when stepping away to connect from your phone over any network.\n`);
   return 0;
@@ -552,7 +552,7 @@ async function askSetupMode(
 ): Promise<'hud' | 'remote'> {
   stdout(renderBanner());
   stdout('What do you want to set up right now?\n');
-  stdout(`  ${c.bold('1) Desktop HUD')}   Press Shift + Cmd + Space on this computer and tell it what to do (recommended)`);
+  stdout(`  ${c.bold('1) Desktop HUD')}   Press ${hudHotkeyLabel()} on this computer and tell it what to do (recommended)`);
   stdout(`  ${c.bold('2) Remote use')}    Control this computer from your phone (needs a free Cloudflare account)\n`);
   for (;;) {
     const answer = (await ask('Choose 1 or 2 [1]: ')).trim().toLowerCase();
@@ -610,8 +610,8 @@ async function hudSetupFlow(
         }
       : new HudServiceManager());
   let helperError: string | null = null;
-  if (process.platform !== 'darwin') {
-    stdout(renderStepInfo('The desktop HUD hotkey service is supported on macOS.'));
+  if (process.platform !== 'darwin' && process.platform !== 'win32') {
+    stdout(renderStepInfo('The desktop HUD hotkey service is supported on macOS and Windows.'));
   } else {
     // Build the hotkey helper now so a missing toolchain is reported here, not as a silent hotkey later.
     const prepare =
@@ -619,10 +619,10 @@ async function hudSetupFlow(
       (context.runner ? () => ({ ok: true as const, path: '/mock/rh-spotlight' }) : () => new SpotlightHudRunner().prepare());
     const helper = prepare();
     if (helper.ok) {
-      stdout(renderStepSuccess('Shift + Cmd + Space helper is built'));
+      stdout(renderStepSuccess(`${hudHotkeyLabel()} helper is built`));
     } else {
       helperError = helper.error;
-      stdout(renderStepInfo(`Shift + Cmd + Space helper: ${helper.error}`));
+      stdout(renderStepInfo(`${hudHotkeyLabel()} helper: ${helper.error}`));
     }
     const res = hudService.install();
     if (res.success) {
@@ -638,7 +638,7 @@ async function hudSetupFlow(
     return 1;
   }
   stdout(renderStepSuccess('Desktop HUD is ready'));
-  stdout(`\n  Press ${c.bold('Shift + Cmd + Space')} anywhere and type what you want done.`);
+  stdout(`\n  Press ${c.bold(hudHotkeyLabel())} anywhere and type what you want done.`);
   stdout('  The first request after logging in takes a few seconds longer while the agent starts.');
   stdout(`  Check that it is running any time with "${c.cyan('rh hud status')}".`);
   stdout(`  Remote (phone) use is not set up yet: run "${c.cyan('rh setup --remote')}" when you want it.\n`);

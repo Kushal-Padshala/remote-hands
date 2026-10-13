@@ -2,6 +2,8 @@ import {
   HudCoordinator,
   HudServiceManager,
   LocalTaskStore,
+  SpotlightHudRunner,
+  hudHotkeyLabel,
   type ActiveWindowContext,
 } from '@remote-hands/daemon';
 import * as path from 'node:path';
@@ -33,7 +35,7 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
     stdout('Usage: rh hud <listen|prompt|install|uninstall|status> [options]');
     stdout('');
     stdout('Commands:');
-    stdout('  listen    Run desktop overlay hotkey listener (Shift + Cmd + Space) with standalone auto-execution');
+    stdout(`  listen    Run desktop overlay hotkey listener (${hudHotkeyLabel()}) with standalone auto-execution`);
     stdout('  prompt    Open Spotlight HUD prompt textbox immediately');
     stdout('  install   Install macOS background LaunchAgent (starts automatically on login)');
     stdout('  uninstall Remove macOS background LaunchAgent');
@@ -51,8 +53,8 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
     const res = serviceManager.install();
     if (res.success) {
       stdout(c.brightGreen('✔ Desktop Overlay Assistant installed successfully!'));
-      stdout(`  HotKey:      ${c.bold('Shift + Cmd + Space')} (available on any screen)`);
-      stdout(`  LaunchAgent: ${res.plistPath}`);
+      stdout(`  HotKey:      ${c.bold(hudHotkeyLabel())} (available on any screen)`);
+      stdout(`  ${process.platform === 'win32' ? 'Starts at login: ' : 'LaunchAgent: '}${res.plistPath}`);
       stdout(`  Status:      Running in background with 0% idle CPU`);
       return 0;
     } else {
@@ -78,7 +80,7 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
     stdout('');
     stdout(c.bold('Remote Hands Desktop Overlay Status:'));
     stdout(`  Installed: ${installed ? c.green('Yes') : c.dim('No')}`);
-    stdout(`  Running:   ${running ? c.brightGreen('Active (listening for Shift+Cmd+Space)') : c.dim('Inactive')}`);
+    stdout(`  Running:   ${running ? c.brightGreen(`Active (listening for ${hudHotkeyLabel().replace(/ /g, '')})`) : c.dim('Inactive')}`);
     if (!installed) {
       stdout(`  To enable: Run "${c.cyan('rh hud install')}" or "${c.cyan('rh setup')}".`);
     }
@@ -120,6 +122,14 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
 
   if (subcommand === 'listen') {
     await ensureAgyPermissions(context.fs);
+    if (process.platform === 'win32' && !context.coordinator) {
+      // build (or find) the Windows hotkey program now, so a problem is said here and not as a silent hotkey
+      const helper = new SpotlightHudRunner().prepare();
+      if (!helper.ok) {
+        stderr(c.yellow(`Remote Hands cannot start the hotkey: ${helper.error}`));
+        return 1;
+      }
+    }
     if (process.platform === 'darwin' && !context.runner && !args.includes('--skip-permissions') && !checkMacScreenCapture()) {
       await ensureMacPermissions(stdout);
     }
@@ -140,8 +150,8 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
     });
 
     stdout(`${c.brightCyan('⚡ Remote Hands Desktop Assistant active')}`);
-    stdout(`  Listening for ${c.bold('Shift + Cmd + Space')} across all apps.`);
-    stdout(`  Press ${c.bold('Shift + Cmd + Space')} anywhere to control browsers or desktop software.`);
+    stdout(`  Listening for ${c.bold(hudHotkeyLabel())} across all apps.`);
+    stdout(`  Press ${c.bold(hudHotkeyLabel())} anywhere to ${process.platform === 'win32' ? 'control your browser' : 'control browsers or desktop software'}.`);
     stdout(`  Press Ctrl+C to stop.\n`);
 
     const listener = coordinator.startListening();
