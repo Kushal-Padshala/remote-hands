@@ -36,13 +36,31 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
     if (!e.isConnected) cache.nodes.delete(id);
   }
   const safe = (e) => !['file', 'hidden'].includes(e.type);
-  const visible = (e) => !e.closest('[aria-hidden="true"],[inert]') &&
+  const MAX_NEST = 3;
+  const MAX_SCAN = 100000;
+  const hostOf = (e) => { const r = e.getRootNode && e.getRootNode(); return r && r.host ? r.host : null; };
+  const frameOf = (e) => {
+    const view = e.ownerDocument && e.ownerDocument.defaultView;
+    try { return view && view !== window ? view.frameElement : null; } catch (err) { return null; }
+  };
+  const closestDeep = (e, sel) => {
+    for (let n = e; n; n = n.parentElement || hostOf(n) || frameOf(n)) {
+      if (typeof n.matches === 'function' && n.matches(sel)) return n;
+    }
+    return null;
+  };
+  const byId = (e, id) => {
+    const r = e.getRootNode && e.getRootNode();
+    const scope = r && typeof r.getElementById === 'function' ? r : e.ownerDocument;
+    return scope.getElementById(id);
+  };
+  const visible = (e) => !closestDeep(e, '[aria-hidden="true"],[inert]') &&
     (typeof e.checkVisibility === 'function' ? e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) : true);
   const name = (e, seen = new Set()) => {
     if (!e || seen.has(e)) return '';
     seen.add(e);
     const referenced = (e.getAttribute('aria-labelledby') || '').split(/\s+/)
-      .map((id) => name(document.getElementById(id), seen)).filter(Boolean).join(' ');
+      .map((id) => name(byId(e, id), seen)).filter(Boolean).join(' ');
     return referenced || e.getAttribute('aria-label') ||
       [...(e.labels || [])].map((l) => name(l, seen)).filter(Boolean).join(' ') ||
       (['button', 'submit', 'reset'].includes(e.type) ? e.value : '') || e.getAttribute('alt') ||
@@ -82,16 +100,44 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
       e.getAttribute('aria-expanded'), e.getAttribute('aria-checked'), e.getAttribute('aria-selected'),
       e.getAttribute('href'), scope?.innerText?.slice(0, 6000) || ''];
   };
+  let blocked = 0;
+  const textRoots = [];
+  const gather = (root, dx, dy, depth, sel, found, track) => {
+    for (const e of root.querySelectorAll(sel)) found.push({ e, dx, dy });
+    if (track) textRoots.push({ root: root.body || root, dx, dy });
+    if (depth >= MAX_NEST) return;
+    const all = root.querySelectorAll('*');
+    const count = Math.min(all.length, MAX_SCAN);
+    for (let i = 0; i < count; i++) {
+      const host = all[i];
+      if (host.shadowRoot) { gather(host.shadowRoot, dx, dy, depth + 1, sel, found, track); continue; }
+      if (host.tagName !== 'IFRAME' && host.tagName !== 'FRAME') continue;
+      let doc = null;
+      try { doc = host.contentDocument; } catch (err) { doc = null; }
+      const r = host.getBoundingClientRect();
+      if (doc && doc.body) {
+        if (visible(host)) gather(doc, dx + r.left + (host.clientLeft || 0), dy + r.top + (host.clientTop || 0), depth + 1, sel, found, track);
+      } else if (!doc && track && r.width >= 50 && r.height >= 50 && visible(host)) {
+        blocked++;
+      }
+    }
+  };
+  cache.deepAll = (sel) => { const list = []; gather(document, 0, 0, 0, sel, list, false); return list.map((f) => f.e); };
   const actions = [];
-  for (const e of document.querySelectorAll(selector)) {
-    if (!safe(e) || !visible(e) || e.matches(':disabled') || e.closest('[aria-disabled="true"]')) continue;
+  const found = [];
+  gather(document, 0, 0, 0, selector, found, true);
+  for (const { e, dx, dy } of found) {
+    if (!safe(e) || !visible(e) || e.matches(':disabled') || closestDeep(e, '[aria-disabled="true"]')) continue;
     const r = typeof e.getBoundingClientRect === 'function' ? e.getBoundingClientRect() : { x: 0, y: 0, width: 10, height: 10 };
-    const x = r.x + (r.width || 10) / 2, y = r.y + (r.height || 10) / 2, rname = role(e);
+    const win = (e.ownerDocument && e.ownerDocument.defaultView) || window;
+    const lx = r.x + (r.width || 10) / 2, ly = r.y + (r.height || 10) / 2;
+    const x = lx + dx, y = ly + dy, rname = role(e);
     const isNodeEnv = typeof window.CSS === 'undefined';
-    if (!rname || (!isNodeEnv && (r.width <= 0 || r.height <= 0 || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight))) continue;
+    const outside = lx < 0 || ly < 0 || lx >= win.innerWidth || ly >= win.innerHeight || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight;
+    if (!rname || (!isNodeEnv && (r.width <= 0 || r.height <= 0 || outside))) continue;
     if (rname === 'gridcell' && e.querySelector('button,[role="button"]')) continue;
     const base = { node: identity(e), role: rname, label: name(e) || rname, type: e.type,
-      rect: { x: r.x, y: r.y, w: r.width, h: r.height } };
+      rect: { x: r.x + dx, y: r.y + dy, w: r.width, h: r.height } };
     for (const key of ['checked', 'selected', 'expanded']) {
       const value = e.getAttribute('aria-' + key);
       if (value !== null) base[key] = value;
@@ -115,19 +161,26 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
     }
   }
   const words = [];
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  const range = document.createRange();
-  let node;
   let length = 0;
-  while ((node = walker.nextNode()) && length < 6000) {
-    const value = node.textContent.trim();
-    const parent = node.parentElement;
-    if (!value || !parent || parent.closest('script,style,noscript,template') || !visible(parent)) continue;
-    range.selectNodeContents(node);
-    const r = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect() : { width: 10, height: 10, bottom: 10, top: 1, right: 10, left: 1 };
-    if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) {
-      words.push(value);
-      length += value.length;
+  for (const tr of textRoots) {
+    if (length >= 6000) break;
+    const tdoc = tr.root.ownerDocument || tr.root;
+    const twin = tdoc.defaultView || window;
+    const walker = tdoc.createTreeWalker(tr.root, NodeFilter.SHOW_TEXT);
+    const range = tdoc.createRange();
+    let node;
+    while ((node = walker.nextNode()) && length < 6000) {
+      const value = node.textContent.trim();
+      const parent = node.parentElement;
+      if (!value || !parent || parent.closest('script,style,noscript,template') || !visible(parent)) continue;
+      range.selectNodeContents(node);
+      const r = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect() : { width: 10, height: 10, bottom: 10, top: 1, right: 10, left: 1 };
+      const inOwn = r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < twin.innerHeight && r.right > 0 && r.left < twin.innerWidth;
+      const inTop = r.bottom + tr.dy > 0 && r.top + tr.dy < innerHeight && r.right + tr.dx > 0 && r.left + tr.dx < innerWidth;
+      if (inOwn && inTop) {
+        words.push(value);
+        length += value.length;
+      }
     }
   }
   const text = words.join('\\n').slice(0, 6000);
@@ -154,6 +207,7 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   actions.push({ id: 'wait', kind: 'wait', label: 'Wait for the page to update' });
   const out = { url: location.href, title: document.title, w: innerWidth, h: innerHeight, text,
     scroll: { y: scrollY, height }, actions, elements: actions, marker, page_key, guards, omitted_actions };
+  if (blocked > 0) out.frames_blocked = blocked;
   if (light) { delete out.marker; delete out.guards; }
   return out;
 })()`;

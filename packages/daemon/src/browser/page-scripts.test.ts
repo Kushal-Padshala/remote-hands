@@ -801,3 +801,107 @@ describe('fix round 1: identity guard, navigation flag, navigate script', () => 
     expect(page.win.location.hash).toBe('#a%22b%3C/script%3E');
   });
 });
+function nodeOf(p: Page, el: unknown): number {
+  return p.win.__rhFast.ids.get(el);
+}
+
+function addFrame(p: Page, html: string, rect = { left: 10, top: 20, width: 300, height: 200 }): any {
+  const frame = p.doc.createElement('iframe');
+  p.doc.body.appendChild(frame);
+  frame.contentDocument.body.innerHTML = html;
+  frame.getBoundingClientRect = () => ({
+    x: rect.left, y: rect.top, left: rect.left, top: rect.top, width: rect.width, height: rect.height,
+    right: rect.left + rect.width, bottom: rect.top + rect.height,
+  });
+  return frame;
+}
+
+describe('snapshot across shadow roots and frames', () => {
+  it('lists controls and text inside an open shadow root and keeps them actionable', () => {
+    const p = makePage('<div id="host"></div><button id="top">Top</button>');
+    const root = p.doc.getElementById('host').attachShadow({ mode: 'open' });
+    root.innerHTML = '<p>Secure checkout</p><input id="card" type="text" aria-label="Card number"><button id="pay">Pay now</button>';
+    let clicks = 0;
+    root.getElementById('pay').addEventListener('click', () => { clicks += 1; });
+    const snap = p.snapshot();
+    const labels = snap.actions.map((a: any) => a.label);
+    expect(labels).toEqual(expect.arrayContaining(['Top', 'Pay now', 'Card number']));
+    expect(snap.text).toContain('Secure checkout');
+    expect(p.run({ op: 'click', node: nodeOf(p, root.getElementById('pay')), label: 'Pay now' })).toMatchObject({ ok: true });
+    expect(clicks).toBe(1);
+  });
+
+  it('lists controls inside a same-origin iframe, offsets their rect, and acts on them', () => {
+    const p = makePage('<button id="top">Top</button>');
+    const frame = addFrame(p, '<input id="q" type="text" aria-label="Survey answer"><button id="next">Next question</button>');
+    let clicks = 0;
+    frame.contentDocument.getElementById('next').addEventListener('click', () => { clicks += 1; });
+    const snap = p.snapshot();
+    const next = snap.actions.find((a: any) => a.label === 'Next question');
+    expect(next).toBeDefined();
+    expect(next.rect).toMatchObject({ x: 10, y: 20 });
+    expect(p.run({ op: 'click', node: next.node, label: 'Next question' })).toMatchObject({ ok: true });
+    expect(clicks).toBe(1);
+    const q = snap.actions.find((a: any) => a.label === 'Survey answer');
+    expect(p.run({ op: 'type', node: q.node, label: 'Survey answer', text: 'Somewhat confident' })).toMatchObject({ ok: true });
+    expect(frame.contentDocument.getElementById('q').value).toBe('Somewhat confident');
+  });
+
+  it('masks password values inside a shadow root and a frame', () => {
+    const p = makePage('<div id="host"></div>');
+    p.doc.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<input id="pw1" type="password" aria-label="Shadow password" value="hunter2">';
+    addFrame(p, '<input type="password" aria-label="Frame password" value="swordfish">');
+    // The engine reads the light snapshot (full mode also carries guards with raw values for the legacy driver).
+    const json = JSON.stringify(p.evalJson(buildSnapshotCall()));
+    expect(json).not.toContain('hunter2');
+    expect(json).not.toContain('swordfish');
+    expect(json).toContain('••••••••');
+  });
+
+  it('counts a visible frame it cannot read and ignores small or hidden ones', () => {
+    const p = makePage('<button id="top">Top</button>');
+    const blocked = addFrame(p, '', { left: 0, top: 0, width: 400, height: 300 });
+    Object.defineProperty(blocked, 'contentDocument', { get: () => null });
+    const pixel = addFrame(p, '', { left: 0, top: 0, width: 1, height: 1 });
+    Object.defineProperty(pixel, 'contentDocument', { get: () => null });
+    const snap = p.snapshot();
+    expect(snap.frames_blocked).toBe(1);
+    expect(snap.actions.map((a: any) => a.label)).toContain('Top');
+  });
+
+  it('does not report frames_blocked when every frame is readable', () => {
+    const p = makePage('<button>Top</button>');
+    addFrame(p, '<button>Inside</button>');
+    expect('frames_blocked' in p.snapshot()).toBe(false);
+  });
+
+  it('ignores closed shadow roots without error', () => {
+    const p = makePage('<div id="host"></div><button>Visible</button>');
+    p.doc.getElementById('host').attachShadow({ mode: 'closed' }).innerHTML = '<button>Secret</button>';
+    const labels = p.snapshot().actions.map((a: any) => a.label);
+    expect(labels).toContain('Visible');
+    expect(labels).not.toContain('Secret');
+  });
+
+  it('stops descending after 3 nested shadow levels', () => {
+    const p = makePage('<div id="h0"></div>');
+    let host = p.doc.getElementById('h0');
+    for (let level = 1; level <= 5; level += 1) {
+      const root = host.attachShadow({ mode: 'open' });
+      root.innerHTML = `<button>L${level}</button><div class="next"></div>`;
+      host = root.querySelector('.next');
+    }
+    const labels = p.snapshot().actions.map((a: any) => a.label);
+    expect(labels).toEqual(expect.arrayContaining(['L1', 'L2', 'L3']));
+    expect(labels).not.toContain('L4');
+    expect(labels).not.toContain('L5');
+  });
+
+  it('exposes deepAll for composed-tree queries', () => {
+    const p = makePage('<div id="host"></div><button>Top</button>');
+    p.doc.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<button>Inner</button>';
+    p.snapshot();
+    const found = p.win.__rhFast.deepAll('button').map((b: any) => b.textContent);
+    expect(found).toEqual(expect.arrayContaining(['Top', 'Inner']));
+  });
+});
