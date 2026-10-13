@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { defineConfig } from 'vitest/config';
@@ -20,6 +20,13 @@ for (const name of ['osascript', 'open']) {
   chmodSync(file, 0o755);
 }
 process.env.PATH = `${noUiBin}${delimiter}${process.env.PATH ?? ''}`;
+
+// Code under test writes to ~/.remote-hands and ~/.gemini/*/settings.json (agy permissions,
+// local.db, pairing token, HUD helper). Point the home directory at a throwaway one so a test
+// run never edits the developer's real config. os.homedir() reads HOME (USERPROFILE on Windows).
+const testHome = mkdtempSync(join(tmpdir(), 'rh-vitest-home-'));
+process.env.HOME = testHome;
+process.env.USERPROFILE = testHome;
 
 // Local dev keeps Supabase keys in a git-ignored .env at the repo root; CI exports
 // them as real environment variables instead, so a missing file here is expected.

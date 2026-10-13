@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Approval, classifyRiskyAction, hasExpired, isPending, resolveDecision } from './approval.js';
+import { type Approval, classifyRiskyAction, classifyRiskyKey, hasExpired, isPending, resolveDecision } from './approval.js';
 
 const at = (iso: string) => new Date(iso);
 
@@ -128,5 +128,25 @@ describe('classifyRiskyAction', () => {
     const label = 'Delete the entire repository including all of its pull requests and issues';
     expect(classifyRiskyAction(label)).toBe('delete');
     expect(classifyRiskyAction(label, { goal: true })).toBe('delete');
+  });
+});
+
+describe('classifyRiskyKey', () => {
+  it('flags send and delete shortcuts', () => {
+    expect(classifyRiskyKey('cmd+enter')).toBe('send');
+    expect(classifyRiskyKey('Command+Return')).toBe('send');
+    expect(classifyRiskyKey('ctrl+enter')).toBe('send');
+    expect(classifyRiskyKey('cmd+shift+d')).toBe('send');
+    expect(classifyRiskyKey('cmd+delete')).toBe('delete');
+    expect(classifyRiskyKey('cmd+backspace')).toBe('delete');
+  });
+
+  it('leaves ordinary keys alone', () => {
+    expect(classifyRiskyKey('enter')).toBeNull();
+    expect(classifyRiskyKey('return')).toBeNull();
+    expect(classifyRiskyKey('cmd+s')).toBeNull();
+    expect(classifyRiskyKey('cmd+d')).toBeNull();
+    expect(classifyRiskyKey('delete')).toBeNull();
+    expect(classifyRiskyKey('')).toBeNull();
   });
 });

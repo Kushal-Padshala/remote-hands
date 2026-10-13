@@ -4,7 +4,7 @@ import { BrowserDriver, ChromeManager, MacOsDriver } from '@remote-hands/daemon'
 import { browserDoctor } from './browser-doctor.js';
 import { browserSetupCommand } from './browser-setup.js';
 import type { CommandContext } from './setup.js';
-import { createActionGate, type ActionGateContext } from '../action-gate.js';
+import { activeTaskId, createActionGate, type ActionGateContext } from '../action-gate.js';
 
 export function findChromeBinary(): string {
   if (process.platform === 'darwin') {
@@ -208,6 +208,16 @@ export async function browserCommand(args: string[], context: CommandContext & P
         }
       }
       return 0;
+    } catch (err: any) {
+      stderr(err?.message || String(err));
+      return 1;
+    }
+  }
+
+  if (activeTaskId(context)) {
+    // A raw harness script can click anything; during a task it needs the phone's approval.
+    try {
+      await createActionGate(context)(`browser-harness ${cleanArgs.join(' ')}`, { kind: 'shell' });
     } catch (err: any) {
       stderr(err?.message || String(err));
       return 1;

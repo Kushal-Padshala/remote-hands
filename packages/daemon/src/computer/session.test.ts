@@ -61,6 +61,21 @@ function makeDeps(overrides: Partial<ComputerSessionDeps> = {}) {
 }
 
 describe('ComputerSession desktop', () => {
+  it.each([
+    ['cmd+enter', 'send'],
+    ['cmd+delete', 'delete'],
+  ])('asks the gate before %s and leaves other keys alone', async (combo, kind) => {
+    const gate = vi.fn().mockRejectedValue(new Error('Approval rejected by user.'));
+    const deps = makeDeps({ gate });
+    const s = new ComputerSession(deps);
+    await expect(s.desktopKey(combo)).rejects.toThrow('Approval rejected by user.');
+    expect(gate).toHaveBeenCalledWith(combo, { kind });
+    expect(deps.desktop.sendKeyCombo).not.toHaveBeenCalled();
+    await s.desktopKey('cmd+s');
+    expect(gate).toHaveBeenCalledTimes(1);
+    expect(deps.desktop.sendKeyCombo).toHaveBeenCalledWith(['s'], ['command']);
+  });
+
   it('requires approval for a menu item resolved from an abbreviated query', async () => {
     const exec = vi.fn().mockReturnValue({ status: 0, stderr: '', stdout: JSON.stringify({ success: true, triggeredPath: ['Edit', 'Delete'], appPid: 123 }) });
     const asked: string[] = [];
