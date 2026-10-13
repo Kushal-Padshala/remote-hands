@@ -39,6 +39,8 @@ describe('ensureRemoteHandsOperatorSkill', () => {
     const md = REMOTE_HANDS_OPERATOR_SKILL_MD;
     for (const tool of ['browser_find', 'browser_do', 'browser_extract']) expect(md).toContain(`\`${tool}\``);
     expect(md).toContain('stable');
+    expect(md).toContain('`target`');
+    expect(md).toContain('1-30');
     expect(md).toContain('never call `browser_snapshot` again after an action');
     expect(md).toContain('note: fast browser path unavailable');
     expect(md).toContain('rh browser setup');

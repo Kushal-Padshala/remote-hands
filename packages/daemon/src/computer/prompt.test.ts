@@ -16,6 +16,15 @@ describe('SLIM_COMPUTER_PROMPT', () => {
     expect(rule).toMatch(/selects and checkboxes .*browser_do.*select.*check/i);
   });
 
+  it('rule 5 teaches label targets, hover and Tab while staying concise', () => {
+    const rule = SLIM_COMPUTER_PROMPT.split('\n').find((l) => l.startsWith('5. Browser')) ?? '';
+    expect(rule).toContain('`target`');
+    expect(rule).toContain('hover');
+    expect(rule).toContain('press Tab');
+    expect(rule).toContain('Never run `rh browser setup` yourself');
+    expect(rule.length).toBeLessThan(900);
+  });
+
   it('tells the model to keep the desktop_click app consistent and re-snapshot on stale errors', () => {
     expect(SLIM_COMPUTER_PROMPT).toMatch(/same `app` as the latest `desktop_snapshot`/);
     expect(SLIM_COMPUTER_PROMPT).toMatch(/omit `app` on both/);

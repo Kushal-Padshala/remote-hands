@@ -314,12 +314,13 @@ describe('buildComputerTools', () => {
     expect(batch.description).toContain('browser_do');
   });
 
-  it('browser_do says press is synthetic and browser_snapshot says selects/checkboxes need browser_do (fix pass 4)', () => {
+  it('browser_do says press is synthetic (Tab moves focus) and browser_snapshot says selects/checkboxes need browser_do (fix pass 4)', () => {
     const tools = buildComputerTools(fakeSession());
     const d = (n: string) => tools.find((t) => t.name === n)!.description;
-    expect(d('browser_do')).toMatch(/press dispatches synthetic key events only/i);
+    expect(d('browser_do')).toMatch(/press dispatches synthetic key events/i);
     expect(d('browser_do')).toMatch(/Enter submits forms/);
-    expect(d('browser_do')).toMatch(/Tab.*do not move focus or type/);
+    expect(d('browser_do')).toMatch(/Tab and Shift\+Tab move focus/);
+    expect(d('browser_do')).toMatch(/typed keys do not type text \(use type\)/);
     expect(d('browser_snapshot')).toMatch(/selects and checkboxes .*browser_do.*"select".*"check"/i);
     expect(d('browser_snapshot')).toMatch(/browser_click\/browser_type cannot/);
   });
@@ -384,7 +385,7 @@ describe('buildComputerTools', () => {
     const tools = buildComputerTools(fakeSession());
     const d = (n: string) => tools.find((t) => t.name === n)!.description;
     expect(d('browser_do')).toContain('[{"op":"type","index":3,"text":"me@x.com"},{"op":"click","index":7}]');
-    expect(d('browser_do')).toMatch(/click\/type\/select\/check need index/);
+    expect(d('browser_do')).toMatch(/click\/type\/select\/check\/hover need index or target/);
     expect(d('browser_do')).toMatch(/remaining steps not run/);
     expect(d('browser_do')).toMatch(/fallback.*only click, type and wait/i);
     for (const n of ['browser_do', 'browser_snapshot']) {
@@ -393,6 +394,17 @@ describe('buildComputerTools', () => {
       expect(d(n)).toContain('[wait]');
       expect(d(n)).toMatch(/\{op:"scroll",delta:560\|-560\}/);
     }
+  });
+
+  it('browser_do description matches the schema: 30 steps, target, hover, Tab, fallback limits', () => {
+    const d = buildComputerTools(fakeSession()).find((t) => t.name === 'browser_do')!.description;
+    expect(d).toContain('up to 30');
+    expect(d).toContain('target');
+    expect(d).toContain('hover');
+    expect(d).toContain('Shift+Tab');
+    expect(d).not.toContain('up to 15');
+    expect(d).not.toContain('do not move focus');
+    expect(d).toContain('On the slower fallback path only click, type and wait are supported');
   });
 
   it('browser_find query description does not promise surrounding-text matching', () => {

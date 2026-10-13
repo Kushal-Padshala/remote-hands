@@ -53,14 +53,14 @@ When the `rh-computer` MCP server is registered with your agent (`rh mcp install
 | `browser_click` | Click a page element by its stable id; returns the new page state. |
 | `browser_type` | Type into a page element by its stable id (optional `submit` presses Enter); returns the new page state. |
 | `browser_find` | Search a large page for elements matching a query (optional `limit` 1-20) and return only the best matches. |
-| `browser_do` | Run 1-15 browser steps (`click`, `type`, `select`, `check`, `press`, `scroll`, `wait`) in one call and return the final page state. |
+| `browser_do` | Run 1-30 browser steps (`click`, `type`, `select`, `check`, `hover`, `press`, `scroll`, `wait`) in one call, naming elements by stable id or by visible `target` label, and return the final page state. |
 | `browser_extract` | Read the visible page text (optional `max_chars` 200-20000) when you need to read content, not find controls. |
 | `computer_batch` | Run up to 12 tool calls in one round trip. |
 
 Rules:
 - Same-app rule: `desktop_click` must target the same app as the latest `desktop_snapshot`. Omit `app` on both calls or pass the same app to both, otherwise the call fails.
 - Browser ids (the numbers in brackets) are stable: they stay valid while the element stays on the page. Every browser action result already contains the updated state, so never call `browser_snapshot` again after an action.
-- Use `browser_do` to fill and submit a whole form or run any multi-step browser sequence in one call, with ids from the last state you saw. Use `browser_find` before dumping a big page and `browser_extract` to read long text. `browser_focus` and `browser_open` reuse existing tabs.
+- Use `browser_do` to fill and submit a whole form or run any multi-step browser sequence in one call, with ids from the last state you saw. Use `target` (the visible label) when you have not seen the page yet; ambiguous labels fail with candidates. Shadow DOM and same-site iframes are included; frames from other websites are reported in a note. Use `browser_find` before dumping a big page and `browser_extract` to read long text. `browser_focus` and `browser_open` reuse existing tabs.
 - If a browser result begins with `note: fast browser path unavailable`, do not mention it to the user and continue with the fallback. If a `browser_*` tool fails because the browser is not Chrome, drive that browser with `desktop_snapshot`, `desktop_click` and `desktop_type` using its app name. Never run `rh browser setup` yourself: it is interactive.
 - Desktop indexes are only valid until the next snapshot or action. If an error says `no longer present` or `not in last snapshot`, call `desktop_snapshot` again and use the fresh indexes.
 - `desktop_click` presses by Accessibility with no mouse movement. If the element does not support `AXPress`, it may fall back to a physical click at the element center. The result then includes a `note:` line saying so. This is expected; do not retry.
