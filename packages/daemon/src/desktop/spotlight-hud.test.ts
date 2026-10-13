@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { spawn } from 'node:child_process';
 import { SpotlightHudRunner } from './spotlight-hud.js';
 
 // Parse prompt responses without compiling Swift or opening a real native HUD.
@@ -78,6 +79,30 @@ describe('SpotlightHudRunner', () => {
     expect(handle).toBeDefined();
     handle.close();
     expect(onCancel).toHaveBeenCalled();
+  });
+
+  it('gives the prompt window the models to offer and passes the pick back with each prompt', () => {
+    let onData: ((chunk: Buffer) => void) | undefined;
+    vi.mocked(spawn).mockImplementationOnce(((..._a: unknown[]) => ({
+      on: vi.fn(), stdout: { on: (_e: string, cb: (chunk: Buffer) => void) => { onData = cb; } }, stdin: { writable: false }, killed: false,
+      kill: vi.fn(), unref: vi.fn(),
+    })) as never);
+    const submitted: any[] = [];
+    const picked: string[] = [];
+    const models = [{ key: 'a', label: 'Model A' }, { key: 'b', label: 'Model B' }];
+    runner.openInteractivePrompt('Notes', (r) => { submitted.push(r); }, undefined, undefined, undefined, { models, model: 'b', onModel: (k) => picked.push(k) });
+    const args = vi.mocked(spawn).mock.calls.at(-1)![1] as string[];
+    expect(args).toContain(`--models=${JSON.stringify(models)}`);
+    expect(args).toContain('--model=b');
+    onData!(Buffer.from('{"event":"model","model":"a"}\n{"event":"submit","query":"do it","app":"Notes","model":"a"}\n'));
+    expect(picked).toEqual(['a']);
+    expect(submitted).toEqual([{ query: 'do it', app: 'Notes', windowTitle: undefined, attachments: undefined, model: 'a' }]);
+  });
+
+  it('offers no model arguments when there is no choice to make', () => {
+    runner.openInteractivePrompt('Notes', () => {});
+    const args = vi.mocked(spawn).mock.calls.at(-1)![1] as string[];
+    expect(args.some((a) => a.startsWith('--model'))).toBe(false);
   });
 
   it('parses attachments in prompt response from swift hud', async () => {

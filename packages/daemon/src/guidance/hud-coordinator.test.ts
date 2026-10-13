@@ -1,4 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { HUD_MODELS, readHudModelKey, writeHudModelKey } from '../hud-models.js';
 import {
   HudCoordinator,
   isAutonomousGoal,
@@ -336,7 +340,7 @@ describe('HudCoordinator', () => {
     expect(mockHudRunner.startListener).toHaveBeenCalled();
 
     await capturedListener({ event: 'hotkey', app: 'Safari' });
-    expect(mockHudRunner.openInteractivePrompt).toHaveBeenCalledWith('Safari', expect.any(Function), expect.any(Function), expect.any(Function));
+    expect(mockHudRunner.openInteractivePrompt).toHaveBeenCalledWith('Safari', expect.any(Function), expect.any(Function), expect.any(Function), undefined, expect.objectContaining({ model: 'gemini-flash-fast', onModel: expect.any(Function) }));
 
     await submitHandler({ query: 'start advertising campaign', app: 'Safari' }, dummySender);
     expect(mockStore.createTask).toHaveBeenCalledWith(
@@ -1028,7 +1032,7 @@ describe('HudCoordinator default warm runner lifecycle', () => {
     const listener = new HudCoordinator(deps).startListening();
     expect(defaultRunnerFactory).toHaveBeenCalledTimes(1);
     expect(fakeRunner.prewarm).toHaveBeenCalledTimes(1);
-    expect(fakeRunner.prewarm).toHaveBeenCalledWith({ mode: 'autonomous' });
+    expect(fakeRunner.prewarm).toHaveBeenCalledWith({ mode: 'autonomous', model: 'gemini-3.8-flash', effort: 'low' });
     expect(fakeRunner.stop).not.toHaveBeenCalled();
     listener.stop();
     expect(fakeRunner.stop).toHaveBeenCalledTimes(1);
@@ -1041,7 +1045,7 @@ describe('HudCoordinator default warm runner lifecycle', () => {
     const cb = hudRunner.startListener.mock.calls[0]![0];
     await cb({ event: 'hotkey', app: 'Google Chrome' });
     expect(fakeRunner.newConversation).toHaveBeenCalledTimes(1);
-    expect(fakeRunner.newConversation).toHaveBeenCalledWith({ mode: 'autonomous' });
+    expect(fakeRunner.newConversation).toHaveBeenCalledWith({ mode: 'autonomous', model: 'gemini-3.8-flash', effort: 'low' });
     await coordinator.cancelActiveTask();
     expect(fakeRunner.newConversation).toHaveBeenCalledTimes(2);
   });
@@ -1252,5 +1256,89 @@ describe('HudCoordinator fast lane', () => {
     const hotkey = h.hudRunner.startListener.mock.calls[0]![0];
     await hotkey({ event: 'hotkey', app: 'Google Chrome' });
     expect(prewarm).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('HudCoordinator model choice', () => {
+  const dirs: string[] = [];
+  const home = (): string => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rh-coord-model-'));
+    dirs.push(dir);
+    return dir;
+  };
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function setup(settingsHome: string) {
+    const hudRunner: any = {
+      openPrompt: vi.fn(),
+      startListener: vi.fn().mockReturnValue({ stop: vi.fn() }),
+      openInteractivePrompt: vi.fn().mockReturnValue({ close: vi.fn() }),
+    };
+    const fakeRunner = { run: vi.fn(), prewarm: vi.fn(), newConversation: vi.fn(), stop: vi.fn() };
+    const store = { createTask: vi.fn().mockResolvedValue({ id: 't1', status: 'queued' }) };
+    const coordinator = new HudCoordinator({
+      hudRunner,
+      intentResolver: { resolve: vi.fn() } as any,
+      guidanceManager: { startSession: vi.fn() } as any,
+      macosDriver: { getActiveWindowContext: vi.fn().mockResolvedValue({ app: 'Notes', title: '', isBrowser: false }), focusWindow: vi.fn() } as any,
+      store: store as any,
+      defaultRunnerFactory: () => fakeRunner as any,
+      settingsHome,
+    });
+    return { hudRunner, fakeRunner, store, coordinator };
+  }
+
+  it('uses the model picked in the prompt window for the task and remembers it', async () => {
+    const dir = home();
+    const { coordinator, store } = setup(dir);
+    await coordinator.handleResult({ query: 'start advertising campaign', app: 'Notes', model: 'claude-opus' });
+    expect(store.createTask).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'claude-opus-4-6-thinking', effort: 'low' }));
+    expect(readHudModelKey(dir)).toBe('claude-opus');
+    // a later task that names no model keeps the last choice
+    await coordinator.handleResult({ query: 'start advertising campaign again', app: 'Notes' });
+    expect(store.createTask).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'claude-opus-4-6-thinking' }));
+  });
+
+  it('ignores a model it does not know', async () => {
+    const dir = home();
+    const { coordinator, store } = setup(dir);
+    await coordinator.handleResult({ query: 'start advertising campaign', app: 'Notes', model: 'made-up' });
+    expect(store.createTask).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'gemini-3.8-flash', effort: 'low' }));
+    expect(readHudModelKey(dir)).toBe('gemini-flash-fast');
+  });
+
+  it('offers the models to the prompt window, saves a pick made there and warms the agent with it', async () => {
+    const dir = home();
+    const { coordinator, hudRunner, fakeRunner } = setup(dir);
+    writeHudModelKey('gpt-oss', dir);
+    coordinator.startListening();
+    expect(fakeRunner.prewarm).toHaveBeenLastCalledWith({ mode: 'autonomous', model: 'gpt-oss-120b-medium', effort: 'medium' });
+    await hudRunner.startListener.mock.calls[0]![0]({ event: 'hotkey', app: 'Notes' });
+    const menu = hudRunner.openInteractivePrompt.mock.calls[0]![5];
+    expect(menu.model).toBe('gpt-oss');
+    expect(menu.models.map((m: any) => m.key)).toEqual(HUD_MODELS.map((m) => m.key));
+    menu.onModel('claude-sonnet');
+    expect(readHudModelKey(dir)).toBe('claude-sonnet');
+    expect(fakeRunner.prewarm).toHaveBeenLastCalledWith({ mode: 'autonomous', model: 'claude-sonnet-4-6', effort: 'low' });
+    menu.onModel('nope');
+    expect(readHudModelKey(dir)).toBe('claude-sonnet');
+  });
+
+  it('does not restart the agent for a pick made while a task is running, but uses it from the next turn', async () => {
+    const dir = home();
+    const { coordinator, hudRunner, fakeRunner, store } = setup(dir);
+    coordinator.startListening();
+    await hudRunner.startListener.mock.calls[0]![0]({ event: 'hotkey', app: 'Notes' });
+    const menu = hudRunner.openInteractivePrompt.mock.calls[0]![5];
+    await coordinator.handleResult({ query: 'start advertising campaign', app: 'Notes' });
+    expect(coordinator.hasActiveTask()).toBe(true);
+    const warmed = fakeRunner.prewarm.mock.calls.length;
+    menu.onModel('claude-sonnet');
+    expect(fakeRunner.prewarm.mock.calls.length).toBe(warmed);
+    expect(readHudModelKey(dir)).toBe('claude-sonnet');
+    await coordinator.handleResult({ query: 'and now do the follow up work', app: 'Notes', model: 'claude-sonnet' });
+    expect(store.createTask).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'claude-sonnet-4-6' }));
   });
 });

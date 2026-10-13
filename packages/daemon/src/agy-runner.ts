@@ -9,6 +9,7 @@ import type { EventInput } from './task-store.js';
 import { HermesBrain } from './hermes-brain.js';
 import { clearActiveTask, writeActiveTask } from './action-gate.js';
 import type { WarmAgySession, WarmSessionConfig } from './warm-agy-session.js';
+import { effortFor } from './hud-models.js';
 
 export interface AgentRunResult {
   events: readonly EventInput[];
@@ -281,10 +282,10 @@ export function buildAgyArgs(task: Task, config: AgyArgConfig): readonly string[
 
   const model = task.model || 'gemini-3.8-flash-high';
   const effort = task.effort || 'low';
-  const supportsEffort = !model.toLowerCase().includes('claude');
+  const effortArg = effortFor(model, effort);
 
   if (model) args.push('--model', model);
-  if (supportsEffort && effort) args.push('--effort', effort);
+  if (effortArg) args.push('--effort', effortArg);
 
   return args;
 }

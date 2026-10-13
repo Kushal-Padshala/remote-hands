@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { EventInput } from './task-store.js';
+import { effortFor } from './hud-models.js';
 
 export interface WarmSessionConfig {
   model: string;
@@ -44,7 +45,8 @@ export function buildWarmAgyArgs(
   if (c.conversationId) args.push('--conversation', c.conversationId);
   if (c.mode && c.mode !== 'default') args.push('--mode', c.mode);
   if (c.model) args.push('--model', c.model);
-  if (c.effort && !c.model.toLowerCase().includes('claude')) args.push('--effort', c.effort);
+  const effort = effortFor(c.model, c.effort);
+  if (effort) args.push('--effort', effort);
   args.push('-p=');
   return args;
 }

@@ -13,6 +13,15 @@ export interface SpotlightPromptResult {
   app: string;
   windowTitle?: string | undefined;
   attachments?: ContextAttachment[];
+  /** The key of the model picked in the prompt window, when it offered a choice. */
+  model?: string | undefined;
+}
+
+/** The models the prompt window offers, which one is selected, and what to do when the person picks another. */
+export interface HudModelMenu {
+  models: Array<{ key: string; label: string }>;
+  model: string;
+  onModel: (key: string) => void;
 }
 
 export type SpotlightListenerEvent =
@@ -199,6 +208,7 @@ export class SpotlightHudRunner {
     onCancel?: () => void,
     onStop?: (sendUpdate?: HudUpdateSender) => void,
     windowTitle?: string | undefined,
+    modelMenu?: HudModelMenu | undefined,
   ): { close: () => void } {
     const target = this.ensureBinary();
     if (!target) {
@@ -210,6 +220,9 @@ export class SpotlightHudRunner {
     }
     if (windowTitle) {
       args.push(`--window-title=${windowTitle}`);
+    }
+    if (modelMenu && modelMenu.models.length > 0) {
+      args.push(`--models=${JSON.stringify(modelMenu.models)}`, `--model=${modelMenu.model}`);
     }
 
     let cmd = target;
@@ -273,8 +286,15 @@ export class SpotlightHudRunner {
               app: parsed.app || activeApp || 'Desktop',
               windowTitle: parsed.windowTitle || windowTitle || undefined,
               attachments: Array.isArray(parsed.attachments) ? parsed.attachments : undefined,
+              ...(typeof parsed.model === 'string' ? { model: parsed.model } : {}),
             };
             Promise.resolve(onSubmit(res, sendUpdate)).catch(() => {});
+          } else if (parsed.event === 'model') {
+            if (modelMenu && typeof parsed.model === 'string') {
+              try {
+                modelMenu.onModel(parsed.model);
+              } catch {}
+            }
           } else if (parsed.event === 'stop') {
             if (onStop) {
               try {

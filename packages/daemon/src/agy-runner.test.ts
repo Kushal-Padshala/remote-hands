@@ -63,9 +63,8 @@ describe('buildAgyArgs', () => {
       '--mode',
       'accept-edits',
       '--model',
+      // the effort is part of this model's name, so agy would refuse a different --effort
       'gemini-3.8-flash-low',
-      '--effort',
-      'medium',
     ]);
     expect(args).not.toContain('--dangerously-skip-permissions');
   });
@@ -86,8 +85,6 @@ describe('buildAgyArgs', () => {
       '60m',
       '--model',
       'gemini-3.8-flash-high',
-      '--effort',
-      'low',
     ]);
   });
 

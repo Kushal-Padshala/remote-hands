@@ -189,6 +189,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
     var spinner: NSProgressIndicator!
     var copyButton: HudActionButton!
     var inputBox: NSView!
+    /// Which model the next task uses; nil when the daemon offered no choice.
+    var modelButton: HudActionButton?
+    var modelKey: String = hudModelKey
+    let modelButtonWidth: CGFloat = 206
     var answerText: String = ""
     var answerStart: Int = -1
     var copyResetWork: DispatchWorkItem?
@@ -354,7 +358,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         statusPill.isHidden = true
         rootView.addSubview(statusPill)
 
-        textField = NSTextField(frame: NSRect(x: 24, y: 16, width: width - 48, height: 28))
+        let pickerWidth: CGFloat = hudModels.isEmpty ? 0 : modelButtonWidth + 8
+        textField = NSTextField(frame: NSRect(x: 24, y: 16, width: width - 48 - pickerWidth, height: 28))
         textField.isBordered = false
         textField.drawsBackground = false
         textField.focusRingType = .none
@@ -366,10 +371,50 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         textField.delegate = self
         rootView.addSubview(textField)
 
+        if !hudModels.isEmpty {
+            let button = makePillButton(title: "", frame: NSRect(x: width - 24 - modelButtonWidth, y: 18, width: modelButtonWidth, height: 26), tint: Theme.secondary, fill: NSColor(white: 1.0, alpha: 0.10), action: #selector(onModelClicked(_:)))
+            modelButton = button
+            rootView.addSubview(button)
+            updateModelButton()
+        }
+
         panel.contentView = rootView
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         panel.makeFirstResponder(textField)
+    }
+
+    /// The button shows the model the next task will use.
+    func updateModelButton() {
+        guard let button = modelButton else { return }
+        let label = hudModels.first(where: { $0["key"] == modelKey })?["label"] ?? hudModels.first?["label"] ?? ""
+        button.attributedTitle = NSAttributedString(string: "\(label)  ▾", attributes: [.foregroundColor: Theme.secondary, .font: NSFont.systemFont(ofSize: 12, weight: .semibold)])
+        button.toolTip = "Model used for your next task"
+    }
+
+    @objc func onModelClicked(_ sender: NSButton) {
+        let menu = NSMenu()
+        for model in hudModels {
+            guard let key = model["key"], let label = model["label"] else { continue }
+            let item = NSMenuItem(title: label, action: #selector(onModelPicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = key
+            item.state = key == modelKey ? .on : .off
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: sender)
+        panel.makeFirstResponder(textField)
+    }
+
+    @objc func onModelPicked(_ item: NSMenuItem) {
+        guard let key = item.representedObject as? String, key != modelKey else { return }
+        modelKey = key
+        updateModelButton()
+        let dict: [String: Any] = ["event": "model", "model": key]
+        if let data = try? JSONSerialization.data(withJSONObject: dict), let json = String(data: data, encoding: .utf8) {
+            print(json)
+            fflush(stdout)
+        }
     }
 
     func badgeText(_ app: String) -> NSAttributedString {
@@ -1124,6 +1169,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             if !text.isEmpty {
                 textField.stringValue = ""
                 var dict: [String: Any] = ["event": "submit", "query": text, "app": targetApp]
+                if !hudModels.isEmpty { dict["model"] = modelKey }
                 if !targetWindowTitle.isEmpty {
                     dict["windowTitle"] = targetWindowTitle
                 }
@@ -1457,7 +1503,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         rootView.addSubview(historyScrollView)
 
         textField.removeFromSuperview()
-        textField.frame = NSRect(x: 14, y: 11, width: inputBox.bounds.width - 28, height: 22)
+        let pickerWidth: CGFloat = modelButton == nil ? 0 : modelButtonWidth + 8
+        textField.frame = NSRect(x: 14, y: 11, width: inputBox.bounds.width - 28 - pickerWidth, height: 22)
+        if let button = modelButton {
+            button.removeFromSuperview()
+            button.frame = NSRect(x: inputBox.bounds.width - 10 - modelButtonWidth, y: 9, width: modelButtonWidth, height: 26)
+            inputBox.addSubview(button)
+        }
         textField.font = NSFont.systemFont(ofSize: 14.5, weight: .regular)
         textField.isHidden = false
         inputBox.addSubview(textField)
@@ -1473,6 +1525,9 @@ var mode = "prompt"
 var appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Desktop"
 var windowTitle = ""
 var initialContext: [String: Any]? = nil
+/// The models the prompt window offers ([{key,label}]) and the one selected; empty when the daemon offered none.
+var hudModels: [[String: String]] = []
+var hudModelKey = ""
 
 for arg in args {
     if arg == "listen" {
@@ -1481,6 +1536,13 @@ for arg in args {
         appName = String(arg.dropFirst(6))
     } else if arg.starts(with: "--window-title=") {
         windowTitle = String(arg.dropFirst(15))
+    } else if arg.starts(with: "--models=") {
+        if let data = String(arg.dropFirst(9)).data(using: .utf8),
+           let list = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+            hudModels = list.filter { $0["key"] != nil && $0["label"] != nil }
+        }
+    } else if arg.starts(with: "--model=") {
+        hudModelKey = String(arg.dropFirst(8))
     } else if arg.starts(with: "--context=") {
         let jsonStr = String(arg.dropFirst(10))
         if let data = jsonStr.data(using: .utf8),

@@ -10,6 +10,7 @@ import { MacOsDriver, type ActiveWindowContext } from '../desktop/macos-driver.j
 import { LocalTaskStore } from '../local-task-store.js';
 import type { TaskStore } from '../task-store.js';
 import { ProcessAgentRunner, parseAgyStreamLine, HUD_TASK_MODE, type AgentRunner, type AgentRunResult } from '../agy-runner.js';
+import { HUD_MODELS, hudModelByKey, readHudModelKey, resolveHudModel, writeHudModelKey, type HudModel } from '../hud-models.js';
 import { WarmAgySession } from '../warm-agy-session.js';
 import { SLIM_COMPUTER_PROMPT } from '../computer/prompt.js';
 import { DynamicPowerManager } from '../system/power-manager.js';
@@ -207,6 +208,8 @@ export interface HudCoordinatorOptions {
    * without it the task path below is exactly the old one.
    */
   fastLane?: Pick<FastLane, 'attempt' | 'prewarm'> | undefined;
+  /** Where the chosen model is remembered (the user's home by default). */
+  settingsHome?: string | undefined;
 }
 
 export class HudCoordinator {
@@ -231,6 +234,8 @@ export class HudCoordinator {
   private taskQueries = new Map<string, string>();
   private powerManager?: DynamicPowerManager | undefined;
   private fastLane?: Pick<FastLane, 'attempt' | 'prewarm'> | undefined;
+  /** Tests never read or write the real home. */
+  private settingsHome: string = process.env.VITEST === 'true' ? path.join(os.tmpdir(), 'rh-vitest-no-settings') : os.homedir();
 
   constructor(
     hudRunnerOrOptions?: SpotlightHudRunner | HudCoordinatorOptions,
@@ -253,6 +258,7 @@ export class HudCoordinator {
       this.onTaskCompleted = opts.onTaskCompleted;
       this.powerManager = opts.powerManager || new DynamicPowerManager();
       this.fastLane = opts.fastLane;
+      if (opts.settingsHome) this.settingsHome = opts.settingsHome;
       if (this.store === undefined) {
         this.store = this.initDefaultStore();
       }
@@ -350,7 +356,7 @@ export class HudCoordinator {
 
   async cancelActiveTask(reason = 'Task cancelled by user from HUD'): Promise<void> {
     this.currentConversationId = undefined;
-    this.defaultRunner?.newConversation({ mode: HUD_TASK_MODE });
+    this.defaultRunner?.newConversation(this.warmHint());
     await this.stopActiveTask(reason);
   }
 
@@ -531,6 +537,35 @@ export class HudCoordinator {
 
   }
 
+  /** The model the next task uses: the one the HUD just sent, else the last one chosen, else the default. */
+  private modelFor(result: { model?: string | undefined }): HudModel {
+    if (hudModelByKey(result.model)) {
+      if (readHudModelKey(this.settingsHome) !== result.model) writeHudModelKey(result.model, this.settingsHome);
+      return resolveHudModel(result.model);
+    }
+    return resolveHudModel(readHudModelKey(this.settingsHome));
+  }
+
+  /** What the warm agent process should be started with, so the first task after a choice does not wait for a restart. */
+  private warmHint(): { mode: string; model: string; effort: string } {
+    const chosen = resolveHudModel(readHudModelKey(this.settingsHome));
+    return { mode: HUD_TASK_MODE, model: chosen.model, effort: chosen.effort };
+  }
+
+  /** The model list and current choice shown in the prompt window, and what to do when the person picks another. */
+  private modelMenu(): { models: Array<{ key: string; label: string }>; model: string; onModel: (key: string) => void } {
+    return {
+      models: HUD_MODELS.map((m) => ({ key: m.key, label: m.label })),
+      model: readHudModelKey(this.settingsHome),
+      onModel: (key) => {
+        if (!writeHudModelKey(key, this.settingsHome)) return;
+        // Warming with another model restarts the agent process, which would end a task that is running: that task
+        // finishes as it is, and the next turn starts with the new choice.
+        if (!this.hasActiveTask()) this.defaultRunner?.prewarm(this.warmHint());
+      },
+    };
+  }
+
   private getStore(): TaskStore | null {
     if (this.store) return this.store;
     return this.initDefaultStore() || null;
@@ -546,6 +581,7 @@ export class HudCoordinator {
       ? await this.macosDriver.getActiveWindowContext(result.app, result.windowTitle)
       : await this.macosDriver.getActiveWindowContext(result.app);
     const isGoal = isAutonomousGoal(result.query);
+    const chosen = this.modelFor(result);
 
     if (isGoal && this.store && typeof this.store.createTask === 'function') {
       if (sendUpdate) {
@@ -563,8 +599,8 @@ export class HudCoordinator {
         kind: windowContext.isBrowser ? 'browser' : 'mixed',
         mode: HUD_TASK_MODE,
         status: 'queued',
-        model: 'gemini-3.8-flash',
-        effort: 'low',
+        model: chosen.model,
+        effort: chosen.effort,
         conversation_id: this.currentConversationId ?? null,
         attachments: result.attachments,
       });
@@ -610,8 +646,8 @@ export class HudCoordinator {
           kind: windowContext.isBrowser ? 'browser' : 'mixed',
           mode: HUD_TASK_MODE,
           status: 'queued',
-          model: 'gemini-3.8-flash',
-          effort: 'low',
+          model: chosen.model,
+          effort: chosen.effort,
           conversation_id: this.currentConversationId ?? null,
           attachments: result.attachments,
         });
@@ -665,6 +701,8 @@ export class HudCoordinator {
           (sendUpdate) => {
             this.stopActiveTask('User stopped task from Spotlight HUD', sendUpdate).catch(() => {});
           },
+          undefined,
+          this.modelMenu(),
         );
       });
     }
@@ -679,7 +717,7 @@ export class HudCoordinator {
   startListening(): { stop: () => void } {
     if (!this.runner) {
       this.getRunner();
-      this.defaultRunner?.prewarm({ mode: HUD_TASK_MODE });
+      this.defaultRunner?.prewarm(this.warmHint());
     }
     let activePrompt: { close: () => void } | null = null;
     const runnerListener = this.hudRunner.startListener(async (event: any) => {
@@ -693,7 +731,7 @@ export class HudCoordinator {
             activePrompt = null;
           }
           this.currentConversationId = undefined;
-          this.defaultRunner?.newConversation({ mode: HUD_TASK_MODE });
+          this.defaultRunner?.newConversation(this.warmHint());
           this.fastLane?.prewarm();
           const promptArgs: any[] = [
             event.app,
@@ -710,9 +748,7 @@ export class HudCoordinator {
               this.stopActiveTask('User stopped task from Spotlight HUD', sendUpdate).catch(() => {});
             },
           ];
-          if (event.windowTitle) {
-            promptArgs.push(event.windowTitle);
-          }
+          promptArgs.push(event.windowTitle || undefined, this.modelMenu());
           activePrompt = (this.hudRunner.openInteractivePrompt as any)(...promptArgs);
         }
       } catch {}
