@@ -5,7 +5,7 @@ import type { TabInfo } from './transport.js';
 /**
  * The fast browser engine's transport for browsers that are not driven through AppleScript (Windows, Linux): it
  * speaks the Chrome DevTools Protocol to a Chromium browser that was started with a debugging port. It offers the
- * same five methods as `AppleScriptTransport`, so the page scripts, rendering and fall-back logic are shared.
+ * same methods as `AppleScriptTransport`, so the page scripts, rendering and fall-back logic are shared.
  */
 
 /** The part of a WebSocket the transport uses; a seam for tests. */
@@ -18,14 +18,29 @@ export interface CdpSocket {
   onerror: (() => void) | null;
 }
 
+/** What starting the browser came to. */
+export interface BrowserStart {
+  available: boolean;
+  /** Why it could not be started, in words for the person. */
+  error?: string | undefined;
+}
+
 export interface CdpTransportOptions {
   port?: number | undefined;
   host?: string | undefined;
-  /** Starts the browser when nothing answers on the port; says whether it is up. Called at most once per cool-down. */
-  ensureBrowser?: (() => Promise<boolean>) | undefined;
+  /** Starts the browser when nothing answers on the port. Called at most once per cool-down. */
+  ensureBrowser?: (() => Promise<BrowserStart>) | undefined;
   fetchFn?: typeof fetch | undefined;
   openSocket?: ((url: string) => CdpSocket) | undefined;
   now?: (() => number) | undefined;
+}
+
+/** No browser can be reached or started: the engine says why while it falls back to the slower path. */
+export class BrowserUnavailableError extends BrowserAutomationError {
+  constructor(browser: string, message: string) {
+    super('not_running', browser, message);
+    this.name = 'BrowserUnavailableError';
+  }
 }
 
 interface CdpTarget {
@@ -47,6 +62,12 @@ const HIDDEN_URL = /^(devtools|chrome-extension|chrome-untrusted):/i;
 
 const failure = (code: 'not_running' | 'no_window' | 'no_tab' | 'timeout' | 'script_error', browser: string, message: string): BrowserAutomationError =>
   new BrowserAutomationError(code, browser, message);
+
+/** The request never left this program: it is safe to send it again on a new connection. */
+class CdpNotSent extends Error {}
+/** The request was sent and the answer never came: whether it ran is unknown. */
+class CdpLost extends Error {}
+class CdpTimeout extends Error {}
 
 /** One DevTools connection: numbered requests and their answers. */
 class CdpConnection {
@@ -89,7 +110,7 @@ class CdpConnection {
       socket.onmessage = (event) => conn.onMessage(event.data);
       socket.onclose = () => {
         conn.closed = true;
-        for (const [, p] of conn.pending) p.reject(new Error('the browser closed the connection'));
+        for (const [, p] of conn.pending) p.reject(new CdpLost('the browser closed the connection'));
         conn.pending.clear();
       };
     });
@@ -113,13 +134,13 @@ class CdpConnection {
   call<T = any>(method: string, params: Record<string, unknown>, timeoutMs: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       if (this.closed) {
-        reject(new Error('the browser closed the connection'));
+        reject(new CdpNotSent('the browser closed the connection'));
         return;
       }
       const id = this.nextId++;
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new CdpTimeout());
+        reject(new CdpTimeout('the browser did not answer in time'));
       }, timeoutMs);
       this.pending.set(id, {
         resolve: (v) => {
@@ -136,7 +157,7 @@ class CdpConnection {
       } catch (err) {
         this.pending.delete(id);
         clearTimeout(timer);
-        reject(err instanceof Error ? err : new Error(String(err)));
+        reject(new CdpNotSent(err instanceof Error ? err.message : String(err)));
       }
     });
   }
@@ -151,30 +172,37 @@ class CdpConnection {
   }
 }
 
-class CdpTimeout extends Error {
-  constructor() {
-    super('the browser did not answer in time');
-  }
-}
-
 /** The browser's friendly name from `/json/version`'s `Browser` field ("Chrome/130.0.0.0", "Edg/130.0.0.0"). */
 export function browserNameFromVersion(version: string | undefined): string {
   return /^Edg(e|A|iOS)?\//i.test(version ?? '') ? 'Microsoft Edge' : 'Google Chrome';
+}
+
+interface PageFacts {
+  visible: boolean;
+  focused: boolean;
 }
 
 export class CdpTransport {
   private readonly base: string;
   private readonly fetchFn: typeof fetch;
   private readonly openSocket: (url: string) => CdpSocket;
-  private readonly ensureBrowser: (() => Promise<boolean>) | undefined;
+  private readonly ensureBrowser: (() => Promise<BrowserStart>) | undefined;
   private readonly now: () => number;
   private readonly connections = new Map<string, CdpConnection>();
+  private readonly connecting = new Map<string, Promise<CdpConnection>>();
   private browserConnection: CdpConnection | null = null;
-  /** Tabs keep the position they first appeared at, so labels like w1-t2 stay put while tabs are used. */
-  private readonly order = new Map<string, number>();
-  private orderCounter = 0;
-  private starting: Promise<boolean> | null = null;
+  private browserConnecting: Promise<CdpConnection | null> | null = null;
+  /** Bumped by `dispose`: a connection that finishes opening after that closes itself. */
+  private generation = 0;
+  /** A tab keeps the number it first got in its window, so a label like w1-t2 never points at another tab later. */
+  private readonly tabNumber = new Map<string, number>();
+  private readonly tabCounter = new Map<string, number>();
+  /** Windows in the order they were first seen; the one the person is using is shown first. */
+  private readonly windowSeq = new Map<string, number>();
+  private frontWindow: string | null = null;
+  private starting: Promise<BrowserStart> | null = null;
   private lastStartFailure = -Infinity;
+  private lastStartError: string | undefined;
   private name = 'Google Chrome';
 
   constructor(opts: CdpTransportOptions = {}) {
@@ -208,15 +236,18 @@ export class CdpTransport {
   }
 
   /** Starts the browser once when nothing answers; many callers at the same moment share one start. */
-  private async startBrowser(): Promise<boolean> {
-    if (!this.ensureBrowser) return false;
-    if (this.now() - this.lastStartFailure < START_COOLDOWN_MS) return false;
+  private async startBrowser(): Promise<BrowserStart | null> {
+    if (!this.ensureBrowser) return null;
+    if (this.now() - this.lastStartFailure < START_COOLDOWN_MS) return { available: false, error: this.lastStartError };
     if (!this.starting) {
       this.starting = this.ensureBrowser()
-        .catch(() => false)
-        .then((ok) => {
-          if (!ok) this.lastStartFailure = this.now();
-          return ok;
+        .catch((): BrowserStart => ({ available: false }))
+        .then((result) => {
+          if (!result.available) {
+            this.lastStartFailure = this.now();
+            this.lastStartError = result.error;
+          }
+          return result;
         })
         .finally(() => {
           this.starting = null;
@@ -227,13 +258,25 @@ export class CdpTransport {
 
   // ---- what the fast engine asks for -------------------------------------------------------
 
-  /** The browser that answers on the port, starting it first when nothing does. Never throws. */
+  /**
+   * The browser that answers on the port, starting it first when nothing does. When no browser can be reached or
+   * started it throws `BrowserUnavailableError`, whose message tells the person why.
+   */
   async environment(): Promise<{ frontmost: string | null; running: string[] }> {
     let v = await this.version();
-    if (!v && (await this.startBrowser())) v = await this.version();
+    let started: BrowserStart | null = null;
+    if (!v) {
+      started = await this.startBrowser();
+      if (started?.available) v = await this.version();
+    }
     if (!v) {
       this.dropConnections();
-      return { frontmost: null, running: [] };
+      throw new BrowserUnavailableError(
+        this.name,
+        started === null
+          ? 'No browser is answering on the browser-control port.'
+          : (started.error ?? (started.available ? 'The browser was started but did not answer in time.' : 'The browser could not be started.')),
+      );
     }
     this.name = browserNameFromVersion(v.Browser);
     return { frontmost: this.name, running: [this.name] };
@@ -247,105 +290,155 @@ export class CdpTransport {
       .slice(0, MAX_TABS);
   }
 
-  private async browserSocket(): Promise<CdpConnection | null> {
-    if (this.browserConnection && !this.browserConnection.closed) return this.browserConnection;
-    const v = await this.version();
-    if (!v?.webSocketDebuggerUrl) return null;
-    try {
-      this.browserConnection = await CdpConnection.open(v.webSocketDebuggerUrl, this.openSocket, CONNECT_TIMEOUT_MS);
-      return this.browserConnection;
-    } catch {
-      return null;
-    }
+  private browserSocket(): Promise<CdpConnection | null> {
+    if (this.browserConnection && !this.browserConnection.closed) return Promise.resolve(this.browserConnection);
+    if (this.browserConnecting) return this.browserConnecting;
+    const generation = this.generation;
+    const attempt = (async (): Promise<CdpConnection | null> => {
+      const v = await this.version();
+      if (!v?.webSocketDebuggerUrl) return null;
+      try {
+        const conn = await CdpConnection.open(v.webSocketDebuggerUrl, this.openSocket, CONNECT_TIMEOUT_MS);
+        if (generation !== this.generation) {
+          conn.close();
+          return null;
+        }
+        this.browserConnection = conn;
+        return conn;
+      } catch {
+        return null;
+      }
+    })().finally(() => {
+      this.browserConnecting = null;
+    });
+    this.browserConnecting = attempt;
+    return attempt;
   }
 
+  /** One connection per tab; callers asking at the same moment share the one being opened. */
   private async connection(target: CdpTarget): Promise<CdpConnection> {
     const known = this.connections.get(target.id);
     if (known && !known.closed) return known;
+    const inFlight = this.connecting.get(target.id);
+    if (inFlight) return inFlight;
     if (!target.webSocketDebuggerUrl) {
       throw failure('no_tab', this.name, 'That tab cannot be controlled (another tool is attached to it). Open it in a new tab.');
     }
-    try {
-      const conn = await CdpConnection.open(target.webSocketDebuggerUrl, this.openSocket, CONNECT_TIMEOUT_MS);
-      this.connections.set(target.id, conn);
-      return conn;
-    } catch {
-      throw failure('script_error', this.name, `${this.name} did not accept the connection to that tab.`);
-    }
+    const generation = this.generation;
+    const attempt = CdpConnection.open(target.webSocketDebuggerUrl, this.openSocket, CONNECT_TIMEOUT_MS)
+      .then((conn) => {
+        if (generation !== this.generation) {
+          conn.close();
+          throw new Error('the transport was closed');
+        }
+        this.connections.set(target.id, conn);
+        return conn;
+      })
+      .catch((): never => {
+        throw failure('script_error', this.name, `${this.name} did not accept the connection to that tab.`);
+      })
+      .finally(() => {
+        this.connecting.delete(target.id);
+      });
+    this.connecting.set(target.id, attempt);
+    return attempt;
   }
 
   private dropConnections(): void {
+    this.generation += 1;
     for (const conn of this.connections.values()) conn.close();
     this.connections.clear();
+    this.connecting.clear();
     this.browserConnection?.close();
     this.browserConnection = null;
+    this.browserConnecting = null;
+  }
+
+  /** The window a tab is in, or '1' when the browser will not say. */
+  private async windowOf(targetId: string): Promise<string> {
+    const browser = await this.browserSocket();
+    if (!browser) return '1';
+    try {
+      const res = await browser.call<{ windowId?: number }>('Browser.getWindowForTarget', { targetId }, 2000);
+      return typeof res?.windowId === 'number' ? String(res.windowId) : '1';
+    } catch {
+      return '1';
+    }
+  }
+
+  /** Whether the page is showing and whether it has the keyboard focus (the window the person is using). */
+  private async facts(page: CdpTarget): Promise<PageFacts> {
+    try {
+      const conn = await this.connection(page);
+      const res = await conn.call<{ result?: { value?: unknown } }>(
+        'Runtime.evaluate',
+        { expression: 'JSON.stringify([document.visibilityState, document.hasFocus()])', returnByValue: true },
+        1500,
+      );
+      const parsed = JSON.parse(String(res?.result?.value ?? '[]')) as unknown[];
+      return { visible: parsed[0] === 'visible', focused: parsed[1] === true };
+    } catch {
+      return { visible: false, focused: false };
+    }
   }
 
   async listTabs(b: BrowserApp): Promise<TabInfo[]> {
     this.name = b.name;
     const pages = await this.pages();
     const present = new Set(pages.map((p) => p.id));
-    for (const id of [...this.order.keys()]) if (!present.has(id)) this.order.delete(id);
+    for (const id of [...this.tabNumber.keys()]) if (!present.has(id)) this.tabNumber.delete(id);
     for (const [id, conn] of [...this.connections]) {
       if (!present.has(id)) {
         conn.close();
         this.connections.delete(id);
       }
     }
-    for (const p of pages) if (!this.order.has(p.id)) this.order.set(p.id, this.orderCounter++);
 
-    // Which window a tab is in, and which tab of each window is the one showing.
-    const browser = await this.browserSocket();
-    const windowOf = async (p: CdpTarget): Promise<string> => {
-      if (!browser) return '1';
-      try {
-        const res = await browser.call<{ windowId?: number }>('Browser.getWindowForTarget', { targetId: p.id }, 2000);
-        return typeof res?.windowId === 'number' ? String(res.windowId) : '1';
-      } catch {
-        return '1';
-      }
-    };
-    const visible = async (p: CdpTarget): Promise<boolean> => {
-      try {
-        const conn = await this.connection(p);
-        const res = await conn.call<{ result?: { value?: unknown } }>(
-          'Runtime.evaluate',
-          { expression: 'document.visibilityState', returnByValue: true },
-          1500,
-        );
-        return res?.result?.value === 'visible';
-      } catch {
-        return false;
-      }
-    };
-    const windowIds = await Promise.all(pages.map(windowOf));
-    const showing = await Promise.all(pages.map(visible));
+    const windowIds = await Promise.all(pages.map((p) => this.windowOf(p.id)));
+    const facts = await Promise.all(pages.map((p) => this.facts(p)));
 
-    // Windows are numbered in the order their most recently used tab comes (the browser lists tabs most recent first).
-    const windowIndex = new Map<string, number>();
-    for (const id of windowIds) if (!windowIndex.has(id)) windowIndex.set(id, windowIndex.size + 1);
+    // Each tab keeps the number it first got in its window.
+    pages.forEach((p, i) => {
+      if (this.tabNumber.has(p.id)) return;
+      const windowId = windowIds[i]!;
+      const next = (this.tabCounter.get(windowId) ?? 0) + 1;
+      this.tabCounter.set(windowId, next);
+      this.tabNumber.set(p.id, next);
+    });
+    for (const id of windowIds) if (!this.windowSeq.has(id)) this.windowSeq.set(id, this.windowSeq.size);
 
-    const rows = pages.map((p, i) => ({ p, windowId: windowIds[i]!, showing: showing[i]!, seq: this.order.get(p.id)! }));
+    // The window the person is using is the one with a focused page; with none focused (they are in another program)
+    // the last one seen stays, else the window of the most recently used tab.
+    const focusedAt = facts.findIndex((f) => f.focused);
+    if (focusedAt >= 0) this.frontWindow = windowIds[focusedAt]!;
+    else if (!this.frontWindow || !windowIds.includes(this.frontWindow)) this.frontWindow = windowIds[0] ?? null;
+    const windowOrder = [...new Set(windowIds)].sort((a, b2) => {
+      if (a === this.frontWindow) return -1;
+      if (b2 === this.frontWindow) return 1;
+      return (this.windowSeq.get(a) ?? 0) - (this.windowSeq.get(b2) ?? 0);
+    });
+
+    const rows = pages.map((p, i) => ({ p, windowId: windowIds[i]!, ...facts[i]!, n: this.tabNumber.get(p.id)! }));
+    // The tab showing in each window (the focused one first); a window where none reports showing uses its most recent.
     const activeIn = new Map<string, string>();
-    for (const r of rows) if (r.showing && !activeIn.has(r.windowId)) activeIn.set(r.windowId, r.p.id);
-    // A window with no tab that reports showing (all hidden): its most recent tab stands in.
+    for (const r of rows) if (r.focused && !activeIn.has(r.windowId)) activeIn.set(r.windowId, r.p.id);
+    for (const r of rows) if (r.visible && !activeIn.has(r.windowId)) activeIn.set(r.windowId, r.p.id);
     for (const r of rows) if (!activeIn.has(r.windowId)) activeIn.set(r.windowId, r.p.id);
 
     const tabs: TabInfo[] = [];
-    for (const [windowId, index] of windowIndex) {
-      const inWindow = rows.filter((r) => r.windowId === windowId).sort((a, b) => a.seq - b.seq);
-      inWindow.forEach((r, i) =>
+    windowOrder.forEach((windowId, w) => {
+      for (const r of rows.filter((x) => x.windowId === windowId).sort((a, b2) => a.n - b2.n)) {
         tabs.push({
           windowId,
-          windowIndex: index,
+          windowIndex: w + 1,
           tabKey: r.p.id,
-          tabIndex: i + 1,
+          tabIndex: r.n,
           title: r.p.title ?? '',
           url: r.p.url ?? '',
           active: activeIn.get(windowId) === r.p.id,
-        }),
-      );
-    }
+        });
+      }
+    });
     return tabs;
   }
 
@@ -357,7 +450,7 @@ export class CdpTransport {
       return found;
     }
     if (pages.length === 0) throw failure('no_window', b.name, `${b.name} has no open window.`);
-    // The front tab: the first of the most recently used that is showing, else the most recent.
+    // The front tab: the showing tab of the window the person is using.
     const front = (await this.listTabs(b)).filter((t) => t.active).sort((a, c) => a.windowIndex - c.windowIndex)[0];
     return pages.find((p) => p.id === front?.tabKey) ?? pages[0]!;
   }
@@ -366,8 +459,9 @@ export class CdpTransport {
     this.name = b.name;
     const limit = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS;
     const page = await this.resolveTarget(b, target);
-    let lastError: unknown;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    // A request that never left this program may be sent again on a fresh connection once; one that was sent is
+    // never repeated (an action may already have happened).
+    for (let attempt = 0; ; attempt++) {
       const conn = await this.connection(page);
       try {
         const res = await conn.call<{ result?: { type?: string; value?: unknown }; exceptionDetails?: { text?: string; exception?: { description?: string } } }>(
@@ -387,13 +481,24 @@ export class CdpTransport {
         if (err instanceof CdpTimeout) {
           throw failure('timeout', b.name, `${b.name} did not answer in time (a dialog such as an alert may be open in that tab).`);
         }
-        // a connection that went away between calls: connect again once
-        lastError = err;
+        if (err instanceof CdpLost) {
+          this.connections.delete(page.id);
+          throw failure(
+            'script_error',
+            b.name,
+            `${b.name} lost the connection to that tab while the page script was running, so it may or may not have happened. Take a new snapshot to check before trying again.`,
+          );
+        }
+        if (err instanceof CdpNotSent && attempt === 0) {
+          this.connections.delete(page.id);
+          conn.close();
+          continue;
+        }
         this.connections.delete(page.id);
         conn.close();
+        throw failure('script_error', b.name, `${b.name} automation failed: ${err instanceof Error ? err.message : 'connection lost'}.`);
       }
     }
-    throw failure('script_error', b.name, `${b.name} automation failed: ${lastError instanceof Error ? lastError.message : 'connection lost'}.`);
   }
 
   async focusTab(b: BrowserApp, target: TabTarget): Promise<void> {
@@ -404,9 +509,12 @@ export class CdpTransport {
     }
     const done = await this.http(`/json/activate/${encodeURIComponent(target.tabKey)}`);
     if (done === null) throw failure('script_error', b.name, `${b.name} would not switch to that tab.`);
+    // The window of that tab is now the one in use.
+    this.frontWindow = await this.windowOf(target.tabKey);
   }
 
-  async openUrl(b: BrowserApp, url: string, _windowId?: string): Promise<void> {
+  /** Opens `url` in a new tab that comes to the front, and says which tab it is (so nothing else is mistaken for it). */
+  async openUrl(b: BrowserApp, url: string, _windowId?: string): Promise<TabTarget> {
     this.name = b.name;
     if (!/^(https?:|about:blank$)/i.test(url.trim())) throw failure('script_error', b.name, 'Only web addresses can be opened.');
     // Chrome 111+ wants PUT; older versions answer GET. The address is one component, so & and # stay part of it.
@@ -414,22 +522,19 @@ export class CdpTransport {
     let made = await this.http(`/json/new?${encoded}`, 'PUT');
     if (made === null) made = await this.http(`/json/new?${encoded}`, 'GET');
     if (made === null) throw failure('script_error', b.name, `${b.name} would not open a new tab.`);
-    // Like a person opening a tab, the new tab comes to the front, and the call returns once it has.
     const id = typeof made === 'object' ? (made as { id?: unknown }).id : undefined;
-    if (typeof id !== 'string') return;
+    if (typeof id !== 'string') throw failure('script_error', b.name, `${b.name} opened a tab but would not say which one.`);
     await this.http(`/json/activate/${encodeURIComponent(id)}`);
+    const windowId = await this.windowOf(id);
+    this.frontWindow = windowId;
+    // The call returns once the new tab is showing, as with a person opening a tab.
     for (let i = 0; i < 15; i++) {
       const page = (await this.pages().catch(() => [])).find((p) => p.id === id);
-      if (!page) return;
-      try {
-        const conn = await this.connection(page);
-        const res = await conn.call<{ result?: { value?: unknown } }>('Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }, 1000);
-        if (res?.result?.value === 'visible') return;
-      } catch {
-        // not ready yet
-      }
+      if (!page) break;
+      if ((await this.facts(page)).visible) break;
       await new Promise((r) => setTimeout(r, 100));
     }
+    return { windowId, tabKey: id };
   }
 
   /** Closes the connections: the browser keeps running. */

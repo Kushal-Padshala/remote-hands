@@ -35,6 +35,13 @@ export function createDefaultCdpTransport(env: NodeJS.ProcessEnv = process.env):
   return new CdpTransport({
     host: target.host,
     port: target.port,
-    ...(manager ? { ensureBrowser: async () => (await manager.ensureRunning()).available } : {}),
+    ...(manager
+      ? {
+          ensureBrowser: async () => {
+            const status = await manager.ensureRunning();
+            return { available: status.available, error: status.error };
+          },
+        }
+      : {}),
   });
 }

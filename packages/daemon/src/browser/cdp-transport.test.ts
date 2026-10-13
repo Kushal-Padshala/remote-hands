@@ -1,14 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BrowserAutomationError } from './applescript.js';
-import { CdpTransport, browserNameFromVersion, type CdpSocket } from './cdp-transport.js';
+import { BrowserUnavailableError, CdpTransport, browserNameFromVersion, type CdpSocket } from './cdp-transport.js';
+import { FastBrowserEngine } from './engine.js';
+import type { BrowserPort } from './port.js';
 
 const CHROME = { name: 'Google Chrome', family: 'chromium', aliases: [] } as const;
 
-interface FakePage { id: string; title: string; url: string; window: number; visible: boolean; type?: string; ws?: boolean }
+interface FakePage { id: string; title: string; url: string; window: number; visible: boolean; focused?: boolean; type?: string; ws?: boolean }
 
 /** A browser that answers the DevTools HTTP and WebSocket calls the transport makes. */
 function fakeBrowser(pages: FakePage[], opts: { up?: boolean; evalResult?: (expr: string, page: FakePage) => any; browserName?: string } = {}) {
-  const state = { up: opts.up ?? true, pages, calls: [] as string[], sockets: 0, hang: false };
+  const state = { up: opts.up ?? true, pages, calls: [] as string[], sockets: 0, hang: false, dropAfterRun: '' as string, executed: [] as string[], open: new Set<CdpSocket>(), failNextSend: false };
   const listing = () =>
     state.pages.map((p) => ({
       id: p.id, type: p.type ?? 'page', title: p.title, url: p.url,
@@ -45,6 +47,10 @@ function fakeBrowser(pages: FakePage[], opts: { up?: boolean; evalResult?: (expr
     const socket: CdpSocket = {
       onopen: null, onmessage: null, onclose: null, onerror: null,
       send(data: string) {
+        if (state.failNextSend) {
+          state.failNextSend = false;
+          throw new Error('socket is not writable');
+        }
         const msg = JSON.parse(data) as { id: number; method: string; params: any };
         const reply = (result: unknown) => queueMicrotask(() => socket.onmessage?.({ data: JSON.stringify({ id: msg.id, result }) }));
         const fail = (message: string) => queueMicrotask(() => socket.onmessage?.({ data: JSON.stringify({ id: msg.id, error: { message } }) }));
@@ -56,16 +62,24 @@ function fakeBrowser(pages: FakePage[], opts: { up?: boolean; evalResult?: (expr
         }
         if (msg.method === 'Runtime.evaluate' && page) {
           if (state.hang) return;
-          if (msg.params.expression === 'document.visibilityState') return reply({ result: { type: 'string', value: page.visible ? 'visible' : 'hidden' } });
+          if (msg.params.expression.includes('document.hasFocus')) return reply({ result: { type: 'string', value: JSON.stringify([page.visible ? 'visible' : 'hidden', page.focused === true]) } });
+          if (state.dropAfterRun && msg.params.expression === state.dropAfterRun) {
+            // the action runs in the page, then the connection dies before the answer
+            state.executed.push(msg.params.expression);
+            return queueMicrotask(() => socket.close());
+          }
+          state.executed.push(msg.params.expression);
           const out = opts.evalResult ? opts.evalResult(msg.params.expression, page) : { result: { type: 'string', value: 'ok' } };
           return reply(out);
         }
         fail('unknown');
       },
       close() {
+        state.open.delete(socket);
         queueMicrotask(() => socket.onclose?.());
       },
     };
+    state.open.add(socket);
     setTimeout(() => socket.onopen?.(), 0);
     return socket;
   };
@@ -96,17 +110,18 @@ describe('CdpTransport.environment', () => {
     expect(await t.environment()).toEqual({ frontmost: 'Microsoft Edge', running: ['Microsoft Edge'] });
   });
 
-  it('answers "nothing running" instead of throwing when the browser is not there', async () => {
+  it('says why when no browser answers and none can be started', async () => {
     const f = fakeBrowser(pages(), { up: false });
     const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket });
-    expect(await t.environment()).toEqual({ frontmost: null, running: [] });
+    await expect(t.environment()).rejects.toBeInstanceOf(BrowserUnavailableError);
+    await expect(t.environment()).rejects.toMatchObject({ code: 'not_running', message: expect.stringContaining('browser-control port') });
   });
 
   it('starts the browser once when nothing answers, then reports it', async () => {
     const f = fakeBrowser(pages(), { up: false });
     const ensure = vi.fn(async () => {
       f.state.up = true;
-      return true;
+      return { available: true };
     });
     const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket, ensureBrowser: ensure });
     const [one, two] = await Promise.all([t.environment(), t.environment()]);
@@ -115,23 +130,29 @@ describe('CdpTransport.environment', () => {
     expect(ensure).toHaveBeenCalledTimes(1);
   });
 
-  it('does not keep trying to start a browser that will not start', async () => {
+  it('does not keep trying to start a browser that will not start, and keeps telling the person why', async () => {
     const f = fakeBrowser(pages(), { up: false });
     let clock = 1000;
-    const ensure = vi.fn(async () => false);
+    const ensure = vi.fn(async () => ({ available: false, error: 'Google Chrome was not found. Install it from google.com/chrome, then try again.' }));
     const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket, ensureBrowser: ensure, now: () => clock });
-    await t.environment();
-    await t.environment();
+    await expect(t.environment()).rejects.toThrow('Google Chrome was not found');
+    await expect(t.environment()).rejects.toThrow('Google Chrome was not found');
     expect(ensure).toHaveBeenCalledTimes(1);
     clock += 25_000;
-    await t.environment();
+    await expect(t.environment()).rejects.toThrow('Google Chrome was not found');
     expect(ensure).toHaveBeenCalledTimes(2);
   });
 
   it('survives a start that throws', async () => {
     const f = fakeBrowser(pages(), { up: false });
     const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket, ensureBrowser: async () => { throw new Error('boom'); } });
-    expect(await t.environment()).toEqual({ frontmost: null, running: [] });
+    await expect(t.environment()).rejects.toMatchObject({ message: 'The browser could not be started.' });
+  });
+
+  it('is told apart from a browser that was started but never answered', async () => {
+    const f = fakeBrowser(pages(), { up: false });
+    const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket, ensureBrowser: async () => ({ available: true }) });
+    await expect(t.environment()).rejects.toMatchObject({ message: 'The browser was started but did not answer in time.' });
   });
 });
 
@@ -279,5 +300,145 @@ describe('CdpTransport.focusTab and openUrl', () => {
     }
     expect(f.state.calls.some((c) => c.includes('/json/new'))).toBe(false);
     await t.openUrl(CHROME, 'about:blank');
+  });
+});
+
+describe('CdpTransport: an action is never run twice', () => {
+  it('does not send a script again when the connection dies after it ran, and says the outcome is unknown', async () => {
+    const f = fakeBrowser(pages());
+    const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket });
+    f.state.dropAfterRun = 'document.querySelector("#pay").click()';
+    const err = await t.evaluate(CHROME, { windowId: '1', tabKey: 'a' }, 'document.querySelector("#pay").click()').catch((e) => e);
+    expect(err).toBeInstanceOf(BrowserAutomationError);
+    expect(err.message).toContain('may or may not have happened');
+    expect(f.state.executed).toEqual(['document.querySelector("#pay").click()']);
+    // the next call works on a new connection
+    f.state.dropAfterRun = '';
+    expect(await t.evaluate(CHROME, { windowId: '1', tabKey: 'a' }, 'read()')).toBe('ok');
+  });
+
+  it('sends a script again only when the first try never left, and then once', async () => {
+    const f = fakeBrowser(pages());
+    const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket });
+    await t.evaluate(CHROME, { windowId: '1', tabKey: 'a' }, 'warm()');
+    f.state.failNextSend = true;
+    expect(await t.evaluate(CHROME, { windowId: '1', tabKey: 'a' }, 'click()')).toBe('ok');
+    expect(f.state.executed.filter((e) => e === 'click()')).toHaveLength(1);
+  });
+});
+
+describe('CdpTransport: tabs and windows', () => {
+  it('reports the tab it opened, and the engine binds to exactly that tab even if another window is in use', async () => {
+    const f = fakeBrowser(pages());
+    const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket });
+    const opened = await t.openUrl(CHROME, 'https://new.example/');
+    expect(opened.tabKey).toBe(f.state.pages.at(-1)!.id);
+    expect(opened.windowId).toBe('1');
+
+    // The person is in window 2 (focused) while the new tab was made elsewhere.
+    const g = fakeBrowser(pages(), { evalResult: (expr, page) => ({ result: { type: 'string', value: expr.includes('timeOrigin') || expr.includes('JSON.stringify') ? JSON.stringify({ u: page.url, r: 'complete', t: page.title, o: 1, p: false, snap: null }) : 'ok' } }) });
+    g.state.pages.find((p) => p.id === 'c')!.focused = true;
+    const transport = new CdpTransport({ fetchFn: g.fetchFn, openSocket: g.openSocket });
+    const seen: Array<string | undefined> = [];
+    const wrapped = {
+      environment: () => transport.environment(),
+      listTabs: (b: any) => transport.listTabs(b),
+      focusTab: (b: any, target: any) => transport.focusTab(b, target),
+      evaluate: (b: any, target: any, js: string, ms?: number) => {
+        seen.push(target?.tabKey);
+        return transport.evaluate(b, target, js, ms);
+      },
+      openUrl: (b: any, url: string, w?: string) => transport.openUrl(b, url, w),
+    };
+    const legacy: BrowserPort = {
+      tabs: async () => 'legacy', focus: async () => 'legacy', open: async () => 'legacy', snapshot: async () => 'legacy', click: async () => 'legacy',
+      type: async () => 'legacy', find: async () => 'legacy', do: async () => 'legacy', extract: async () => 'legacy',
+    };
+    const engine = new FastBrowserEngine({ transport: wrapped, legacy, sleep: async () => {} });
+    await engine.open('https://new.example/').catch(() => undefined);
+    const newTab = g.state.pages.at(-1)!;
+    expect(newTab.url).toBe('https://new.example/');
+    // everything the engine ran after opening went to the new tab, never to another page
+    expect(seen.length).toBeGreaterThan(0);
+    expect(new Set(seen)).toEqual(new Set([newTab.id]));
+  });
+
+  it('numbers the window the person is using first, following keyboard focus rather than list order', async () => {
+    const f = fakeBrowser(pages());
+    const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket });
+    f.state.pages.find((p) => p.id === 'b')!.focused = true;
+    let tabs = await t.listTabs(CHROME);
+    expect(tabs.find((x) => x.tabKey === 'b')!.windowIndex).toBe(1);
+    expect(tabs.find((x) => x.tabKey === 'c')!.windowIndex).toBe(2);
+    // the person clicks into the other window: it becomes window 1, its showing tab stays that tab
+    f.state.pages.find((p) => p.id === 'b')!.focused = false;
+    f.state.pages.find((p) => p.id === 'c')!.focused = true;
+    tabs = await t.listTabs(CHROME);
+    expect(tabs.find((x) => x.tabKey === 'c')!.windowIndex).toBe(1);
+    expect(tabs.find((x) => x.tabKey === 'b')!.windowIndex).toBe(2);
+    expect(tabs.find((x) => x.tabKey === 'b')!.active).toBe(true);
+    // nothing focused (the person is in another program): the last window stays first
+    f.state.pages.find((p) => p.id === 'c')!.focused = false;
+    tabs = await t.listTabs(CHROME);
+    expect(tabs.find((x) => x.tabKey === 'c')!.windowIndex).toBe(1);
+  });
+
+  it('keeps the numbers of the other tabs when one is closed, and does not reuse its number', async () => {
+    const f = fakeBrowser([
+      { id: 'a', title: 'A', url: 'https://a.example/', window: 1, visible: true },
+      { id: 'b', title: 'B', url: 'https://b.example/', window: 1, visible: false },
+      { id: 'c', title: 'C', url: 'https://c.example/', window: 1, visible: false },
+    ]);
+    const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket });
+    expect((await t.listTabs(CHROME)).map((x) => [x.tabKey, x.tabIndex])).toEqual([['a', 1], ['b', 2], ['c', 3]]);
+    f.state.pages.splice(0, 1);
+    expect((await t.listTabs(CHROME)).map((x) => [x.tabKey, x.tabIndex])).toEqual([['b', 2], ['c', 3]]);
+    f.state.pages.push({ id: 'd', title: 'D', url: 'https://d.example/', window: 1, visible: false });
+    expect((await t.listTabs(CHROME)).map((x) => [x.tabKey, x.tabIndex])).toEqual([['b', 2], ['c', 3], ['d', 4]]);
+  });
+});
+
+describe('CdpTransport: connections', () => {
+  it('opens one connection per tab however many calls ask at once, and closes every one on dispose', async () => {
+    const f = fakeBrowser(pages());
+    const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket });
+    await Promise.all([1, 2, 3, 4].map((i) => t.evaluate(CHROME, { windowId: '1', tabKey: 'a' }, `read(${i})`)));
+    expect(f.state.sockets).toBe(1);
+    await Promise.all([t.listTabs(CHROME), t.listTabs(CHROME)]);
+    // browser socket + one per listed tab (a, b, c), each opened once
+    expect(f.state.sockets).toBe(4);
+    t.dispose();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(f.state.open.size).toBe(0);
+  });
+
+  it('closes a connection that finishes opening after dispose', async () => {
+    const f = fakeBrowser(pages());
+    const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket });
+    const pending = t.evaluate(CHROME, { windowId: '1', tabKey: 'a' }, 'x').catch((e) => e);
+    await new Promise((r) => setTimeout(r, 0));
+    t.dispose();
+    await pending;
+    await new Promise((r) => setTimeout(r, 10));
+    expect(f.state.open.size).toBe(0);
+  });
+});
+
+describe('FastBrowserEngine with a browser that cannot be started', () => {
+  it('uses the slower path and tells why', async () => {
+    const f = fakeBrowser(pages(), { up: false });
+    const transport = new CdpTransport({
+      fetchFn: f.fetchFn,
+      openSocket: f.openSocket,
+      ensureBrowser: async () => ({ available: false, error: 'Google Chrome was not found. Install it from google.com/chrome, then try again.' }),
+    });
+    const legacy: BrowserPort = {
+      tabs: async () => 'the legacy tabs', focus: async () => '', open: async () => '', snapshot: async () => '', click: async () => '',
+      type: async () => '', find: async () => '', do: async () => '', extract: async () => '',
+    };
+    const engine = new FastBrowserEngine({ transport, legacy });
+    const out = await engine.tabs();
+    expect(out).toContain('the legacy tabs');
+    expect(out).toContain('Google Chrome was not found');
   });
 });

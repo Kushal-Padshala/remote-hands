@@ -1,6 +1,7 @@
 import { pickTargetBrowser, type BrowserApp } from './browsers.js';
 import { BrowserAutomationError, type TabTarget } from './applescript.js';
 import type { AppleScriptTransport, TabInfo } from './transport.js';
+import { BrowserUnavailableError } from './cdp-transport.js';
 import {
   buildActionScript,
   buildExtractScript,
@@ -17,10 +18,10 @@ import { resolveTarget, type TargetOp } from './targets.js';
 import type { ActionGate } from '../action-gate.js';
 import { ABANDONED, isCallAborted } from '../computer/call-scope.js';
 
-export type BrowserTransportLike = Pick<
-  AppleScriptTransport,
-  'environment' | 'evaluate' | 'listTabs' | 'focusTab' | 'openUrl'
->;
+export type BrowserTransportLike = Pick<AppleScriptTransport, 'environment' | 'evaluate' | 'listTabs' | 'focusTab'> & {
+  /** A transport that knows which tab it opened says so, and the engine binds to exactly that tab. */
+  openUrl(b: BrowserApp, url: string, windowId?: string): Promise<void | TabTarget>;
+};
 
 export interface FastBrowserEngineDeps {
   transport: BrowserTransportLike;
@@ -260,6 +261,8 @@ export class FastBrowserEngine implements BrowserPort {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
   private envCache: { at: number; value: { frontmost: string | null; running: string[] } } | null = null;
+  /** Why no browser could be reached, when the transport said (shown with the slower fallback). */
+  private envProblem: string | null = null;
   private pin: (Ctx & { target: TabTarget; at: number; frontAtPin: string }) | null = null;
   private shown: Shown | null = null;
   private readonly disabled = new Map<string, { until: number; reason: string }>();
@@ -292,15 +295,17 @@ export class FastBrowserEngine implements BrowserPort {
     try {
       const value = await this.t.environment();
       this.envCache = { at: now, value };
+      this.envProblem = null;
       return value;
-    } catch {
+    } catch (err) {
+      this.envProblem = err instanceof BrowserUnavailableError ? err.message : null;
       return null;
     }
   }
 
   private async resolve(): Promise<Resolved> {
     const env = await this.environment();
-    if (!env) return { kind: 'legacy', reason: null };
+    if (!env) return { kind: 'legacy', reason: this.envProblem };
     const now = this.now();
     let ctx: Ctx | null = null;
     if (this.pin && now - this.pin.at < PIN_TTL_MS && env.running.includes(this.pin.browser.name)) {
@@ -821,13 +826,20 @@ export class FastBrowserEngine implements BrowserPort {
           return this.navigateReused(ctx.browser, same, url);
         }
         const front = tabs.find((t) => t.windowIndex === 1) ?? tabs[0];
-        await this.t.openUrl(ctx.browser, url, front?.windowId);
+        const created = await this.t.openUrl(ctx.browser, url, front?.windowId);
+        const made = created && typeof created === 'object' ? created : null;
         const after = await this.t.listTabs(ctx.browser);
         const inFront = (t: TabInfo): boolean => t.active && (!front || t.windowId === front.windowId);
         const isNew = (t: TabInfo): boolean => !tabs.some((o) => o.windowId === t.windowId && o.tabKey === t.tabKey);
-        const fresh = after.find((t) => inFront(t) && isNew(t)) ?? after.find(inFront);
-        const c: Ctx = { browser: ctx.browser, target: fresh ? { windowId: fresh.windowId, tabKey: fresh.tabKey } : null };
-        this.pin = c.target ? this.makePin(c.browser, c.target, frontTab(after)) : null;
+        // A transport that says which tab it opened is trusted over a guess from the tab list.
+        const fresh = made
+          ? after.find((t) => t.tabKey === made.tabKey)
+          : (after.find((t) => inFront(t) && isNew(t)) ?? after.find(inFront));
+        const c: Ctx = {
+          browser: ctx.browser,
+          target: made ? { windowId: fresh?.windowId ?? made.windowId, tabKey: made.tabKey } : fresh ? { windowId: fresh.windowId, tabKey: fresh.tabKey } : null,
+        };
+        this.pin = c.target ? this.makePin(c.browser, c.target, made ? undefined : frontTab(after)) : null;
         const loading = await this.waitStable(c, { avoidBlank: url.toLowerCase() !== 'about:blank' });
         const state = await this.show(c);
         return [`opened ${url}`, renderFull(state, { text: false }), ...(loading ? [loading] : [])].join('\n');
