@@ -7,11 +7,7 @@ import type { CommandContext } from './setup.js';
 import { activeTaskId, createActionGate, type ActionGateContext } from '../action-gate.js';
 
 export function findChromeBinary(): string {
-  if (process.platform === 'darwin') {
-    const macPath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-    if (fs.existsSync(macPath)) return macPath;
-  }
-  return 'google-chrome';
+  return ChromeManager.findBrowserExecutable()?.path ?? 'google-chrome';
 }
 
 export async function isCdpReady(url = 'http://127.0.0.1:9222/json/version'): Promise<boolean> {

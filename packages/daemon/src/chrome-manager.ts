@@ -22,6 +22,19 @@ export interface ChromeManagerOptions {
   profile?: string | undefined;
 }
 
+/** A Chromium browser found on this computer. */
+export interface BrowserExecutable {
+  path: string;
+  /** `chrome` or `edge`: Edge ships with Windows, so there is always one to fall back on. */
+  kind: 'chrome' | 'edge';
+}
+
+export interface BrowserLookup {
+  platform?: NodeJS.Platform | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
+  exists?: ((file: string) => boolean) | undefined;
+}
+
 export interface ChromeStatus {
   available: boolean;
   port: number;
@@ -31,6 +44,8 @@ export interface ChromeStatus {
   profileDir?: string | undefined;
   profileName?: string | undefined;
   profileDirectory?: string | undefined;
+  /** Why the browser could not be started, in words for the person. */
+  error?: string | undefined;
 }
 
 export class ChromeManager {
@@ -41,6 +56,7 @@ export class ChromeManager {
   private targetProfile?: string | undefined;
   private resolvedProfile?: ChromeProfileInfo | undefined;
   private process: ChildProcess | null = null;
+  private launchError: string | undefined;
 
   constructor(options?: ChromeManagerOptions) {
     this.mode = options?.mode ?? (options?.profile ? 'active' : 'dedicated');
@@ -50,7 +66,9 @@ export class ChromeManager {
       options?.chromeExecutablePath ??
       (process.platform === 'darwin'
         ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-        : 'google-chrome');
+        : process.platform === 'win32'
+          ? (ChromeManager.findBrowserExecutable()?.path ?? '')
+          : 'google-chrome');
     this.targetProfile = options?.profile;
 
     const baseDir = this.customProfileDir ?? (this.mode === 'active' ? ChromeManager.getDefaultUserDataDir() : undefined);
@@ -73,7 +91,35 @@ export class ChromeManager {
     }
   }
 
+  /**
+   * Where a Chromium browser is installed. On Windows: Chrome in its usual places, then Microsoft Edge (which Windows
+   * includes, so a computer without Chrome still has a browser Remote Hands can drive). Elsewhere: the Mac app, else
+   * nothing (the caller falls back to the `google-chrome` command).
+   */
+  static findBrowserExecutable(lookup: BrowserLookup = {}): BrowserExecutable | undefined {
+    const platform = lookup.platform ?? process.platform;
+    const env = lookup.env ?? process.env;
+    const exists = lookup.exists ?? ((file: string) => fs.existsSync(file));
+    if (platform === 'darwin') {
+      const mac = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+      return exists(mac) ? { path: mac, kind: 'chrome' } : undefined;
+    }
+    if (platform !== 'win32') return undefined;
+    const roots = [env.PROGRAMFILES, env['PROGRAMFILES(X86)'], env.LOCALAPPDATA, env.ProgramW6432].filter((r): r is string => Boolean(r));
+    const candidates: BrowserExecutable[] = [];
+    for (const root of roots) candidates.push({ path: path.win32.join(root, 'Google', 'Chrome', 'Application', 'chrome.exe'), kind: 'chrome' });
+    for (const root of roots) candidates.push({ path: path.win32.join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe'), kind: 'edge' });
+    return candidates.find((c) => exists(c.path));
+  }
+
   static isSystemChromeRunning(): boolean {
+    if (process.platform === 'win32') {
+      try {
+        const res = spawnSync('tasklist', ['/FI', 'IMAGENAME eq chrome.exe', '/FO', 'CSV', '/NH'], { encoding: 'utf-8', windowsHide: true });
+        if (res.status === 0 && /"chrome\.exe"/i.test(res.stdout)) return true;
+      } catch {}
+      return false;
+    }
     if (process.platform === 'darwin') {
       try {
         const res = spawnSync('pgrep', ['-x', 'Google Chrome'], { encoding: 'utf-8' });
@@ -366,10 +412,19 @@ export class ChromeManager {
     const profileDir = this.getProfileDirectory();
     fs.mkdirSync(profileDir, { recursive: true });
 
+    if (!this.chromeExecutablePath) {
+      this.launchError = 'Google Chrome was not found. Install it from google.com/chrome, then try again.';
+      return { ...current, error: this.launchError };
+    }
+    this.launchError = undefined;
     const args = this.buildLaunchArgs(initialUrl);
     this.process = spawn(this.chromeExecutablePath, args, {
       detached: true,
       stdio: 'ignore',
+    });
+    // a program that cannot be started reports it here, later: it must not end this process
+    this.process.on('error', () => {
+      this.launchError = 'The browser could not be started.';
     });
     this.process.unref();
 
@@ -381,7 +436,8 @@ export class ChromeManager {
       }
     }
 
-    return this.checkDebuggerStatus();
+    const last = await this.checkDebuggerStatus();
+    return last.available || !this.launchError ? last : { ...last, error: this.launchError };
   }
 
   close(): void {

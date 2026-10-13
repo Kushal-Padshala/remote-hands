@@ -26,6 +26,8 @@ export * from './desktop/fast-exec.js';
 export * from './browser/browsers.js';
 export * from './browser/applescript.js';
 export * from './browser/transport.js';
+export * from './browser/cdp-transport.js';
+export * from './browser/default-cdp.js';
 export * from './browser/page-scripts.js';
 export * from './browser/port.js';
 export * from './browser/render.js';

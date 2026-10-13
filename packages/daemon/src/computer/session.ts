@@ -7,6 +7,7 @@ import { MacOsDriver } from '../desktop/macos-driver.js';
 import { BrowserDriver } from '../browser-driver.js';
 import { FastBrowserEngine } from '../browser/engine.js';
 import { AppleScriptTransport } from '../browser/transport.js';
+import { createDefaultCdpTransport } from '../browser/default-cdp.js';
 import { createAutoEnable } from '../browser/auto-enable.js';
 import { LegacyBrowserPort } from '../browser/legacy-port.js';
 import type { BrowserPort, DoStep } from '../browser/port.js';
@@ -345,7 +346,9 @@ export function createDefaultComputerSession(rawGate?: ActionGate): ComputerSess
   // An approval that arrives after the tool call timed out must not let the action run (legacy driver included).
   const gate = rawGate ? abandonAwareGate(rawGate) : undefined;
   const desktop = new MacOsDriver();
-  const transport = new AppleScriptTransport();
+  // Mac: the person's own browsers through AppleScript. Elsewhere: a Chrome-family browser through its DevTools port.
+  const mac = process.platform === 'darwin';
+  const transport = mac ? new AppleScriptTransport() : createDefaultCdpTransport();
   const engine = createDefaultDesktopEngine();
   return new ComputerSession({
     desktop,
@@ -357,7 +360,7 @@ export function createDefaultComputerSession(rawGate?: ActionGate): ComputerSess
       legacy: new LegacyBrowserPort({
         driver: new BrowserDriver({ cdpUrl: process.env.BU_CDP_URL || 'http://127.0.0.1:9222', gate }),
       }),
-      autoEnable: createAutoEnable({ transport }),
+      ...(mac ? { autoEnable: createAutoEnable({ transport: transport as AppleScriptTransport }) } : {}),
       ...(gate ? { gate } : {}),
     }),
     ...(gate ? { gate } : {}),

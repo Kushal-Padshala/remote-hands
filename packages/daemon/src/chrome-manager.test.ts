@@ -197,3 +197,70 @@ describe('ChromeManager', () => {
   });
 });
 
+
+describe('ChromeManager.findBrowserExecutable', () => {
+  const env = {
+    PROGRAMFILES: 'C:\\Program Files',
+    'PROGRAMFILES(X86)': 'C:\\Program Files (x86)',
+    LOCALAPPDATA: 'C:\\Users\\José Müller\\AppData\\Local',
+  };
+  const present = (...files: string[]) => (f: string) => files.includes(f);
+
+  it('prefers Chrome in its usual places on Windows, including a per-user install', () => {
+    expect(ChromeManager.findBrowserExecutable({ platform: 'win32', env, exists: present('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe') })).toEqual({
+      path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      kind: 'chrome',
+    });
+    expect(
+      ChromeManager.findBrowserExecutable({
+        platform: 'win32',
+        env,
+        exists: present('C:\\Users\\José Müller\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'),
+      }),
+    ).toEqual({ path: 'C:\\Users\\José Müller\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe', kind: 'chrome' });
+  });
+
+  it('falls back to Edge, which Windows includes, when Chrome is not installed', () => {
+    expect(
+      ChromeManager.findBrowserExecutable({ platform: 'win32', env, exists: present('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe') }),
+    ).toEqual({ path: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', kind: 'edge' });
+  });
+
+  it('finds nothing when no browser is there, or when the folders are unknown', () => {
+    expect(ChromeManager.findBrowserExecutable({ platform: 'win32', env, exists: () => false })).toBeUndefined();
+    expect(ChromeManager.findBrowserExecutable({ platform: 'win32', env: {}, exists: () => true })).toBeUndefined();
+    expect(ChromeManager.findBrowserExecutable({ platform: 'linux', env, exists: () => true })).toBeUndefined();
+  });
+
+  it('finds the Mac app on a Mac', () => {
+    const mac = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    expect(ChromeManager.findBrowserExecutable({ platform: 'darwin', exists: present(mac) })).toEqual({ path: mac, kind: 'chrome' });
+    expect(ChromeManager.findBrowserExecutable({ platform: 'darwin', exists: () => false })).toBeUndefined();
+  });
+});
+
+describe('ChromeManager.ensureRunning without a browser', () => {
+  it('says so in plain words instead of failing silently, and does not start anything', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chrome-none-'));
+    try {
+      const manager = new ChromeManager({ mode: 'dedicated', port: 59999, customProfileDir: dir, chromeExecutablePath: '' });
+      const status = await manager.ensureRunning();
+      expect(status.available).toBe(false);
+      expect(status.error).toContain('Google Chrome was not found');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not end the process when the browser program cannot be started', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chrome-bad-'));
+    try {
+      const manager = new ChromeManager({ mode: 'dedicated', port: 59998, customProfileDir: dir, chromeExecutablePath: path.join(dir, 'no-such-browser') });
+      const status = await manager.ensureRunning();
+      expect(status.available).toBe(false);
+      expect(status.error).toBe('The browser could not be started.');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 15_000);
+});
