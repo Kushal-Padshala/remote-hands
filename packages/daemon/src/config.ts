@@ -39,8 +39,8 @@ const envSchema = z.object({
 function parseWorkspaceAllowlist(value: string | undefined): readonly string[] {
   if (value === undefined || value.length === 0) return [];
 
-  // A drive letter has a colon of its own, so Windows lists use ; (as PATH does); elsewhere, a colon
-  const entries = value.split(process.platform === 'win32' || value.includes(';') ? ';' : ':');
+  // A drive letter has a colon of its own, so on Windows the list is separated by ; (as PATH is); elsewhere by a colon
+  const entries = value.split(process.platform === 'win32' ? ';' : ':');
   if (entries.some((entry) => entry.trim().length === 0)) {
     throw new Error('REMOTE_HANDS_WORKSPACE_ALLOWLIST contains an empty entry');
   }

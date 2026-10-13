@@ -100,4 +100,7 @@ export async function serveComputerMcp(session: ComputerSession): Promise<void> 
     process.env.RH_CALL_LOG === '0' ? {} : { onCall: (record) => appendCallRecord(os.homedir(), record) },
   );
   await server.connect(new StdioServerTransport());
+  // The agent ends this server by closing its input. Without this a server with open connections (the browser) can outlive it.
+  process.stdin.once('end', () => process.exit(0));
+  process.stdin.once('close', () => process.exit(0));
 }

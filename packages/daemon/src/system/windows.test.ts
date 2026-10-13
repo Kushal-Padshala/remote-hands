@@ -112,8 +112,8 @@ describe('quoteWindowsArg and detachedWindowsLaunch', () => {
 
   it('starts a program from outside this process\'s tree, with the whole command in quotes', () => {
     const launch = detachedWindowsLaunch('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', ['--remote-debugging-port=9222', '--user-data-dir=C:\\Users\\José Müller\\.remote-hands\\chrome-profile'], { ComSpec: 'C:\\Windows\\System32\\cmd.exe' });
-    expect(launch.file).toBe('C:\\Windows\\System32\\cmd.exe');
-    expect(launch.args).toEqual([
+    expect(launch!.file).toBe('C:\\Windows\\System32\\cmd.exe');
+    expect(launch!.args).toEqual([
       '/d',
       '/s',
       '/c',
@@ -122,6 +122,12 @@ describe('quoteWindowsArg and detachedWindowsLaunch', () => {
   });
 
   it('falls back to cmd.exe when ComSpec is not set', () => {
-    expect(detachedWindowsLaunch('chrome.exe', [], {}).file).toBe('cmd.exe');
+    expect(detachedWindowsLaunch('chrome.exe', [], {})!.file).toBe('cmd.exe');
+  });
+
+  it('does not use cmd.exe for a folder name it would rewrite (% or !), so the caller starts the program directly', () => {
+    expect(detachedWindowsLaunch('chrome.exe', ['--user-data-dir=C:\\Users\\Ana%USERNAME%\\p'], {})).toBeNull();
+    expect(detachedWindowsLaunch('C:\\Users\\Ana!\\chrome.exe', [], {})).toBeNull();
+    expect(detachedWindowsLaunch('chrome.exe', ['--user-data-dir=C:\\Users\\Ana&Lee\\p'], {})).not.toBeNull();
   });
 });

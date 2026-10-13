@@ -61,6 +61,12 @@ describe('scripts/install-windows.ps1', () => {
     expect(code).toContain('@($Folder) + $parts');
   });
 
+  it('warns when an older rh in the machine-wide PATH would be found first, and shows the command that always works', () => {
+    expect(code).toContain("GetEnvironmentVariable('Path', 'Machine')");
+    expect(code).toContain('Test-LauncherShadow');
+    expect(code).toContain('Another rh command exists');
+  });
+
   it('hands over to the guided setup with the private Node directly, so PATH does not matter', () => {
     expect(code).toContain('& $NodeExe $CliEntry setup --hud');
   });

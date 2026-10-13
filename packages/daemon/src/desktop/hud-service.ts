@@ -9,6 +9,8 @@ import {
   readHudStatus,
   readHudSupervisorPid,
   hudSupervisorPidPath,
+  parseHudCommandLine,
+  windowsHudPaths,
   writeHudSettings,
   type HudStatus,
   type WindowsHudBuild,
@@ -119,8 +121,11 @@ export class HudServiceManager {
       '-Command',
       `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
     ]);
-    const line = res.status === 0 ? res.stdout.toLowerCase() : '';
-    return line.includes(WINDOWS_HUD_IMAGE) && /\bsupervise\b/.test(line) ? pid : undefined;
+    const parsed = res.status === 0 ? parseHudCommandLine(res.stdout.trim()) : undefined;
+    if (!parsed || parsed.role !== 'supervise') return undefined;
+    // and it is OUR program, not a copy somewhere else
+    const ours = windowsHudPaths(this.home).exe.replace(/\//g, '\\').toLowerCase();
+    return parsed.program.toLowerCase() === ours ? pid : undefined;
   }
 
   private windowsSupervisorAlive(): boolean {

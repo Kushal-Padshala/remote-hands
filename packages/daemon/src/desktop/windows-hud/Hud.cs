@@ -40,18 +40,7 @@ namespace RemoteHands
         [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
         [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
-        [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
         [DllImport("gdi32.dll")] public static extern IntPtr CreateRoundRectRgn(int x1, int y1, int x2, int y2, int cx, int cy);
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr CreateJobObject(IntPtr attributes, string name);
-        [DllImport("kernel32.dll")] public static extern bool SetInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint size);
-        [DllImport("kernel32.dll")] public static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
-
-        [StructLayout(LayoutKind.Sequential)]
-        public struct IoCounters { public ulong a, b, c, d, e, f; }
-        [StructLayout(LayoutKind.Sequential)]
-        public struct BasicLimits { public long PerProcessUserTimeLimit, PerJobUserTimeLimit; public uint LimitFlags; public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize; public uint ActiveProcessLimit; public UIntPtr Affinity; public uint PriorityClass, SchedulingClass; }
-        [StructLayout(LayoutKind.Sequential)]
-        public struct ExtendedLimits { public BasicLimits Basic; public IoCounters Io; public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed; }
 
         /// <summary>
         /// Brings the window to the front and gives it the keyboard. The hotkey listener first allows any program to do this
@@ -858,37 +847,17 @@ namespace RemoteHands
             }
         }
 
-        /// <summary>A job that ends everything started inside it when it is closed; null when Windows will not make one.</summary>
-        static IntPtr MakeJob()
+        /// <summary>What the listener said about its shortcut belongs to that listener: when it ends, "ready" is no longer true.</summary>
+        static void ForgetReadyStatus()
         {
-            IntPtr job = IntPtr.Zero;
             try
             {
-                job = Native.CreateJobObject(IntPtr.Zero, null);
-                if (job == IntPtr.Zero) return IntPtr.Zero;
-                var info = new Native.ExtendedLimits();
-                info.Basic.LimitFlags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-                int size = Marshal.SizeOf(typeof(Native.ExtendedLimits));
-                IntPtr ptr = Marshal.AllocHGlobal(size);
-                try
-                {
-                    Marshal.StructureToPtr(info, ptr, false);
-                    if (!Native.SetInformationJobObject(job, 9, ptr, (uint)size)) // JobObjectExtendedLimitInformation
-                    {
-                        Native.CloseHandle(job);
-                        return IntPtr.Zero;
-                    }
-                }
-                finally
-                {
-                    Marshal.FreeHGlobal(ptr);
-                }
-                return job;
+                string file = Path.Combine(HomeDir(), "hud-status.json");
+                if (File.Exists(file) && File.ReadAllText(file, new UTF8Encoding(false)).IndexOf("\"ready\"", StringComparison.Ordinal) >= 0) File.Delete(file);
             }
             catch (Exception)
             {
-                if (job != IntPtr.Zero) Native.CloseHandle(job);
-                return IntPtr.Zero;
+                // the next listener overwrites it
             }
         }
 
@@ -935,8 +904,9 @@ namespace RemoteHands
                     }
                     else
                     {
-                        // one job for each attempt: whatever the listener left behind is ended before the next one starts
-                        IntPtr job = MakeJob();
+                        // A listener that ended no longer holds its shortcut. Nothing here ties the listener's descendants to this program
+                        // (the browser window must survive a restart): helpers end when their own input closes.
+                        ForgetReadyStatus();
                         try
                         {
                             var psi = new ProcessStartInfo(settings.Node);
@@ -948,8 +918,6 @@ namespace RemoteHands
                             psi.RedirectStandardError = true;
                             using (Process p = Process.Start(psi))
                             {
-                                if (job == IntPtr.Zero) Log("no job object: helpers the listener leaves behind are ended by their own input closing");
-                                else if (!Native.AssignProcessToJobObject(job, p.Handle)) Log("the listener could not be placed in a job (an outer job may forbid it): helpers are ended by their own input closing");
                                 p.OutputDataReceived += delegate(object s, DataReceivedEventArgs e) { if (e.Data != null) Log(e.Data); };
                                 p.ErrorDataReceived += delegate(object s, DataReceivedEventArgs e) { if (e.Data != null) Log("error: " + e.Data); };
                                 p.BeginOutputReadLine();
@@ -962,10 +930,7 @@ namespace RemoteHands
                         {
                             Log("listener could not start: " + ex.Message);
                         }
-                        finally
-                        {
-                            if (job != IntPtr.Zero) Native.CloseHandle(job); // ends any helper the listener left running
-                        }
+                        ForgetReadyStatus();
                     }
                     // a listener that ran for a while was healthy: start again quickly; one that dies at once waits longer
                     wait = (DateTime.UtcNow - started).TotalSeconds > 60 ? 1000 : Math.Min(wait * 2, 30000);

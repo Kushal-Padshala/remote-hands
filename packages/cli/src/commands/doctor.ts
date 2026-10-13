@@ -24,11 +24,13 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
   stdout('');
 
   const nodeVer = process.version;
-  const majorNode = parseInt(nodeVer.slice(1).split('.')[0] ?? '0', 10);
-  if (majorNode >= 22) {
+  // node:sqlite (used for the local task store) needs no flag from Node 22.13 / 23.4 on
+  const [majorNode = 0, minorNode = 0] = nodeVer.slice(1).split('.').map((n) => parseInt(n, 10) || 0);
+  const nodeOk = majorNode >= 24 || (majorNode === 23 && minorNode >= 4) || (majorNode === 22 && minorNode >= 13);
+  if (nodeOk) {
     stdout(`[✓] Node.js version: ${nodeVer}`);
   } else {
-    stdout(`[✗] Node.js version: ${nodeVer} (Node >= 22.0.0 required)`);
+    stdout(`[✗] Node.js version: ${nodeVer} (Node 22.13.0 or newer required)`);
   }
 
   const bhInstalled = await checkBrowserHarness(runner);

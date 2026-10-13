@@ -52,7 +52,7 @@ npx wrangler d1 migrations apply remote-hands-db --remote
 - `wrangler deploy` fails with syntax or compatibility errors.
 
 ### Resolution
-1. Ensure Node.js version is `>= 22.0.0`:
+1. Ensure Node.js version is `>= 22.13.0`:
 ```bash
 node --version
 ```

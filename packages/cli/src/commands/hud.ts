@@ -98,7 +98,8 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
     // Windows: a running service is only "listening" once the listener has said it holds its shortcut
     const winState = process.platform === 'win32' && running ? readHudStatus()?.state : undefined;
     const waiting = process.platform === 'win32' && running && winState === undefined;
-    stdout(`  Running:   ${running ? (waiting ? c.yellow('Starting, or blocked (see ~/.remote-hands/logs/hud.log)') : c.brightGreen(`Active (listening for ${hudHotkeyLabel().replace(/ /g, '')})`)) : c.dim('Inactive')}`);
+    const shortcutFree = process.platform !== 'win32' || winState === 'ready';
+    stdout(`  Running:   ${running ? (shortcutFree ? c.brightGreen(`Active (listening for ${hudHotkeyLabel().replace(/ /g, '')})`) : waiting ? c.yellow('Starting, or blocked (see ~/.remote-hands/logs/hud.log)') : c.yellow('Running, but its shortcut is not available')) : c.dim('Inactive')}`);
     if (winState === 'failed') {
       stdout(`  Hotkey:    ${c.yellow('not available: another program uses Ctrl + Shift + Space and Ctrl + Alt + Space')}`);
     }

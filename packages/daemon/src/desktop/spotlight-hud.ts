@@ -7,7 +7,7 @@ import type { ExecFunction } from './macos-driver.js';
 import type { ContextAttachment } from '@remote-hands/shared';
 import { ContextService } from '../context/context-service.js';
 import { SPOTLIGHT_SWIFT_SOURCE } from './spotlight-source.generated.js';
-import { clearHudStatus, ensureWindowsHud, saveHudStatus } from './windows-hud.js';
+import { clearHudReadyStatus, ensureWindowsHud, saveHudStatus } from './windows-hud.js';
 
 export interface SpotlightPromptResult {
   query: string;
@@ -368,7 +368,7 @@ export class SpotlightHudRunner {
     const spawnChild = () => {
       if (stopped) return;
       // Windows: what the helper said about its shortcut belongs to that helper only
-      if (process.platform === 'win32') clearHudStatus();
+      if (process.platform === 'win32') clearHudReadyStatus();
       try {
         child = spawn(cmd, execArgs, {
           // Windows: the helper ends when this input ends (this program is gone), so it is never left holding the hotkey
@@ -392,7 +392,7 @@ export class SpotlightHudRunner {
           }
         });
         child.on('exit', () => {
-          if (process.platform === 'win32') clearHudStatus();
+          if (process.platform === 'win32') clearHudReadyStatus();
           if (!stopped) {
             restartTimer = setTimeout(spawnChild, 1000);
           }

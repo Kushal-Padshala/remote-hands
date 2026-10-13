@@ -605,7 +605,7 @@ export class ProcessAgentRunner implements AgentRunner {
       };
     }
 
-    if (task.workspace_path && isSafeWorkspacePath(task.workspace_path).allowed) {
+    if (task.workspace_path && isSafeWorkspacePath(task.workspace_path, undefined, { windows: process.platform === 'win32' }).allowed) {
       try {
         const settingsPath = path.join(os.homedir(), '.gemini/antigravity-cli/settings.json');
         if (fs.existsSync(settingsPath)) {

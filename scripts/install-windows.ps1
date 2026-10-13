@@ -106,6 +106,26 @@ function Write-Launchers {
     }
 }
 
+# In a new window Windows searches the machine-wide PATH before the user's own. An older Remote Hands installed for all users
+# (or any other program called rh) would then be found first: say so, and show the command that always works.
+function Test-LauncherShadow {
+    $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    if ($null -eq $machine) { $machine = '' }
+    $shadow = $null
+    foreach ($folder in @($machine.Split(';') | Where-Object { $_ -ne '' })) {
+        $candidate = Join-Path $folder 'rh.cmd'
+        if (Test-Path $candidate) { $shadow = $candidate; break }
+    }
+    if ($null -eq $shadow) {
+        Write-Note 'The commands rh and remote-hands are ready in new PowerShell windows.'
+    }
+    else {
+        Write-Host "   Another rh command exists at $shadow and would be found first in new windows." -ForegroundColor Yellow
+        Write-Host "   Use this one instead (it always works):  & '$(Join-Path $BinDir 'rh.cmd')' doctor" -ForegroundColor Yellow
+        Write-Host '   or remove the old one with:  npm uninstall -g remote-hands-cli' -ForegroundColor Yellow
+    }
+}
+
 function Install-RemoteHands {
     Write-Host ''
     Write-Host 'Remote Hands for Windows' -ForegroundColor Green
@@ -138,7 +158,8 @@ function Install-RemoteHands {
     if (-not (Test-Path $CliEntry)) { throw "Remote Hands was installed but its program file is missing in $NpmPrefix." }
     Write-Launchers
     Add-ToUserPathFirst $BinDir
-    Write-Note 'Installed. The commands rh and remote-hands are ready in new PowerShell windows.'
+    Write-Note 'Installed.'
+    Test-LauncherShadow
 
     Write-Step 'Guided setup (a few questions and one sign-in)'
     Write-Host ''

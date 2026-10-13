@@ -102,9 +102,11 @@ describe('HudServiceManager on Windows', () => {
   });
   const ok = { stdout: '', stderr: '', status: 0 };
   const EXE = 'C:\\Users\\Ana Lee\\.remote-hands\\bin\\rh-hud.exe';
+  // the service is recognised as the program under the home folder; the tests' home is a temp folder
+  const ownExe = (home: string) => path.join(home, '.remote-hands', 'bin', 'rh-hud.exe');
   const NODE = 'C:\\Program Files\\nodejs\\node.exe';
 
-  function setup(over: { exec?: (cmd: string, args: string[]) => { stdout: string; stderr: string; status: number | null }; built?: { ok: true; path: string } | { ok: false; error: string } } = {}) {
+  function setup(over: { exec?: (cmd: string, args: string[], home: string) => { stdout: string; stderr: string; status: number | null }; built?: { ok: true; path: string } | { ok: false; error: string } } = {}) {
     const home = makeHome();
     const calls: Array<[string, string[]]> = [];
     const started: Array<[string, string[]]> = [];
@@ -117,7 +119,7 @@ describe('HudServiceManager on Windows', () => {
       nodePath: NODE,
       exec: (cmd, args) => {
         calls.push([cmd, args]);
-        return over.exec ? over.exec(cmd, args) : ok;
+        return over.exec ? over.exec(cmd, args, home) : ok;
       },
       buildWindowsHud: () => over.built ?? { ok: true, path: EXE },
       startDetached: (cmd, args) => {
@@ -129,7 +131,7 @@ describe('HudServiceManager on Windows', () => {
   }
   /** What PowerShell prints for the command line of a process. */
   const commandLine = (text: string) => ({ stdout: `${text}\r\n`, stderr: '', status: 0 });
-  const supervisorRow = (_pid: number) => commandLine(`"${EXE}" supervise`);
+  const supervisorRow = (home: string) => commandLine(`"${ownExe(home)}" supervise`);
 
   it('registers a short login entry, keeps the long paths in a settings file, copies the CLI to a stable place and starts now', () => {
     const { manager, calls, started, home, cli } = setup();
@@ -161,7 +163,7 @@ describe('HudServiceManager on Windows', () => {
   });
 
   it('ends only the service it started (checked by its process id and program name), never every rh-hud.exe', () => {
-    const { manager, calls, home, cli } = setup({ exec: (cmd) => (cmd === 'powershell' ? supervisorRow(4242) : ok) });
+    const { manager, calls, home, cli } = setup({ exec: (cmd, _a, home) => (cmd === 'powershell' ? supervisorRow(home) : ok) });
     fs.mkdirSync(path.join(home, '.remote-hands'), { recursive: true });
     fs.writeFileSync(path.join(home, '.remote-hands', 'hud-supervisor.pid'), '4242');
     manager.install(cli);
@@ -171,8 +173,19 @@ describe('HudServiceManager on Windows', () => {
   });
 
   it('does not end a program that only happens to have the supervisor\'s old process id, even another rh-hud.exe (a prompt window)', () => {
-    for (const reused of ['"C:\\Windows\\notepad.exe" file.txt', `"${EXE}" prompt --app=Chrome`, `"${EXE}" listen`]) {
-      const { manager, calls, home, cli } = setup({ exec: (cmd) => (cmd === 'powershell' ? commandLine(reused) : ok) });
+    const reusedLines = (home: string) => [
+      '"C:\\Windows\\notepad.exe" file.txt',
+      `"${ownExe(home)}" prompt --app=Chrome`,
+      `"${ownExe(home)}" listen`,
+      // role words inside folder names and arguments do not make a prompt the service
+      '"C:\\Users\\supervise\\.remote-hands\\bin\\rh-hud.exe" prompt --app=supervise',
+      `"${ownExe(home)}" prompt supervise`,
+      // the service program, but another copy of it
+      '"D:\\elsewhere\\rh-hud.exe" supervise',
+    ];
+    for (let i = 0; i < 6; i++) {
+      const reused = `case ${i}`;
+      const { manager, calls, home, cli } = setup({ exec: (cmd, _a, h) => (cmd === 'powershell' ? commandLine(reusedLines(h)[i]!) : ok) });
       fs.mkdirSync(path.join(home, '.remote-hands'), { recursive: true });
       fs.writeFileSync(path.join(home, '.remote-hands', 'hud-supervisor.pid'), '4242');
       manager.install(cli);
@@ -202,7 +215,7 @@ describe('HudServiceManager on Windows', () => {
   });
 
   it('knows whether it is installed and running (the supervisor must still be that program)', () => {
-    const alive = setup({ exec: (cmd, args) => (cmd === 'reg' && args[0] === 'query' ? ok : supervisorRow(4242)) });
+    const alive = setup({ exec: (cmd, args, home) => (cmd === 'reg' && args[0] === 'query' ? ok : supervisorRow(home)) });
     fs.mkdirSync(path.join(alive.home, '.remote-hands'), { recursive: true });
     fs.writeFileSync(path.join(alive.home, '.remote-hands', 'hud-supervisor.pid'), '4242');
     expect(alive.manager.isInstalled()).toBe(true);
@@ -213,7 +226,7 @@ describe('HudServiceManager on Windows', () => {
   });
 
   it('removes the login entry and ends the service by its process id on uninstall', () => {
-    const { manager, calls, home } = setup({ exec: (cmd) => (cmd === 'powershell' ? supervisorRow(4242) : ok) });
+    const { manager, calls, home } = setup({ exec: (cmd, _a, home) => (cmd === 'powershell' ? supervisorRow(home) : ok) });
     fs.mkdirSync(path.join(home, '.remote-hands'), { recursive: true });
     fs.writeFileSync(path.join(home, '.remote-hands', 'hud-supervisor.pid'), '4242');
     expect(manager.uninstall()).toBe(true);

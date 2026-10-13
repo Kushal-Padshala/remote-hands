@@ -49,3 +49,34 @@ describe('ChromeManager on Windows', () => {
     expect(options).toMatchObject({ detached: true, stdio: 'ignore', windowsVerbatimArguments: true, windowsHide: true });
   });
 });
+
+describe('ChromeManager on Windows with a folder name cmd.exe would rewrite', () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', platform);
+    vi.unstubAllGlobals();
+  });
+
+  it('starts the browser directly rather than through cmd /c start (the folder name is kept exactly)', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chrome 50%USERNAME% '));
+    vi.mocked(spawn).mockClear();
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('refused');
+      return { ok: true, json: async () => ({ Browser: 'Chrome/130.0.0.0' }) };
+    });
+    try {
+      const manager = new ChromeManager({ mode: 'dedicated', port: 9556, customProfileDir: dir, chromeExecutablePath: 'C:\\chrome.exe' });
+      await manager.ensureRunning();
+      const [file, args, options] = vi.mocked(spawn).mock.calls[0]! as unknown as [string, string[], Record<string, unknown>];
+      expect(file).toBe('C:\\chrome.exe');
+      expect(args).toContain(`--user-data-dir=${dir}`);
+      expect(options).toMatchObject({ detached: true });
+      expect(options.windowsVerbatimArguments).toBeUndefined();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

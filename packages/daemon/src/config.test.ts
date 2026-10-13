@@ -36,12 +36,18 @@ describe('parseDaemonConfig', () => {
     expect(config.workspaceAllowlist).toEqual(['/Users/kushal/project', '/tmp/work']);
   });
 
-  it('reads a Windows allowlist separated by semicolons, so a drive letter keeps its colon', () => {
-    const config = parseDaemonConfig({
-      ...validEnv,
-      REMOTE_HANDS_WORKSPACE_ALLOWLIST: 'C:\\work;D:\\projects\\app',
-    });
-    expect(config.workspaceAllowlist).toEqual(['C:\\work', 'D:\\projects\\app']);
-    expect(() => parseDaemonConfig({ ...validEnv, REMOTE_HANDS_WORKSPACE_ALLOWLIST: 'C:\\work;;D:\\x' })).toThrow(/empty entry/);
+  it('reads a Windows allowlist separated by semicolons, so a drive letter keeps its colon; elsewhere a semicolon is just a character', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    try {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      const config = parseDaemonConfig({ ...validEnv, REMOTE_HANDS_WORKSPACE_ALLOWLIST: 'C:\\work;D:\\projects\\app' });
+      expect(config.workspaceAllowlist).toEqual(['C:\\work', 'D:\\projects\\app']);
+      expect(() => parseDaemonConfig({ ...validEnv, REMOTE_HANDS_WORKSPACE_ALLOWLIST: 'C:\\work;;D:\\x' })).toThrow(/empty entry/);
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      const mac = parseDaemonConfig({ ...validEnv, REMOTE_HANDS_WORKSPACE_ALLOWLIST: '/Users/Ana/project;archive:/tmp/work' });
+      expect(mac.workspaceAllowlist).toEqual(['/Users/Ana/project;archive', '/tmp/work']);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
   });
 });

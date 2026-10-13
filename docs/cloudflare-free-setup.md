@@ -8,7 +8,7 @@ No Supabase project, Vercel deploy, or Docker containers are required. Everythin
 
 ## Prerequisites
 
-- **Node.js**: `>= 22.0.0`
+- **Node.js**: `>= 22.13.0`
 - **Cloudflare Account**: Free plan (no credit card required)
 - **Anthropic / AI Agent**: `agy` CLI installed locally
 

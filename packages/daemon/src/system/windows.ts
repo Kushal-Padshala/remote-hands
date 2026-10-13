@@ -112,9 +112,13 @@ export function quoteWindowsArg(arg: string): string {
 /**
  * How to start a program so that it is NOT a child of this process. `cmd /c start` hands the program to Windows and
  * exits at once, so the program's parent is gone: ending this process's tree (as `taskkill /T` does for the agent) does
- * not end it. Used for the browser window, which must outlive a cancelled task.
+ * not end it. Used for the browser window, which must outlive a cancelled task. Null when an argument holds a character
+ * cmd.exe would rewrite (% or !).
  */
-export function detachedWindowsLaunch(command: string, args: string[], env: NodeJS.ProcessEnv = process.env): { file: string; args: string[] } {
+export function detachedWindowsLaunch(command: string, args: string[], env: NodeJS.ProcessEnv = process.env): { file: string; args: string[] } | null {
+  // cmd.exe expands %NAME% (even inside quotes) and !NAME!, which would change a folder name that has them: the caller starts
+  // the program directly then
+  if ([command, ...args].some((a) => /[%!]/.test(a))) return null;
   const parts = [quoteWindowsArg(command), ...args.map(quoteWindowsArg)].join(' ');
   // start's first quoted argument is the window title: an empty one keeps a quoted program path from being taken as it
   // the whole command is wrapped in quotes, which /s strips again, so the quotes inside survive

@@ -57,7 +57,7 @@ export async function runDaemonOnce(input: RunDaemonOnceInput): Promise<RunDaemo
   await input.store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
 
   if (running.workspace_path) {
-    const check = isSafeWorkspacePath(running.workspace_path, input.config.workspaceAllowlist);
+    const check = isSafeWorkspacePath(running.workspace_path, input.config.workspaceAllowlist, { windows: process.platform === 'win32' });
     if (!check.allowed) {
       const error = check.reason || 'Workspace path rejected by security policy';
       await input.store.appendEvent(running.id, {

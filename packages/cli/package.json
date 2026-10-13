@@ -48,6 +48,9 @@
     "rh": "dist/index.js",
     "rh-browser": "dist/index.js"
   },
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "type": "module",
   "license": "MIT",
   "files": [

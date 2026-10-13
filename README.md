@@ -6,7 +6,7 @@
 [![npm version](https://img.shields.io/npm/v/remote-hands-cli.svg?style=flat-square&color=blue)](https://www.npmjs.com/package/remote-hands-cli)
 [![CI](https://github.com/Kushal-Padshala/remote-hands/actions/workflows/ci.yml/badge.svg)](https://github.com/Kushal-Padshala/remote-hands/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D22.0.0-black.svg)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%3E%3D22.13.0-black.svg)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9%20strict-blue.svg)](https://www.typescriptlang.org)
 [![Cloudflare](https://img.shields.io/badge/Cloudflare-Workers%20%7C%20D1%20%7C%20DOs-orange.svg)](https://workers.cloudflare.com)
 [![Chrome CDP](https://img.shields.io/badge/Browser-Chrome%20CDP-brightgreen.svg)](https://chromedevtools.github.io/devtools-protocol/)
@@ -152,7 +152,7 @@ remote-hands/
 
 ### Prerequisites
 
-- **Node.js**: `>=22.0.0`
+- **Node.js**: `>=22.13.0`
 - **Cloudflare Account**: Free plan (zero credit card required)
 - **Google Chrome**: Desktop browser installed
 

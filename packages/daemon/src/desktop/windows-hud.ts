@@ -159,6 +159,17 @@ export function ensureWindowsHud(deps: WindowsHudDeps = {}): WindowsHudBuild {
 
 const remoteHandsDir = (home: string): string => path.join(home, '.remote-hands');
 
+/**
+ * The program and its role (the first argument: `supervise`, `listen` or `prompt`) from a process's command line, so a
+ * process is taken for the service by what it is running, not by words that happen to appear in a folder name.
+ */
+export function parseHudCommandLine(line: string): { program: string; role: string } | undefined {
+  const m = /^\s*(?:"([^"]+)"|(\S+))\s+(\S+)/.exec(line);
+  if (!m) return undefined;
+  const program = (m[1] ?? m[2] ?? '').replace(/\//g, '\\');
+  return /rh-hud\.exe$/i.test(program) ? { program, role: m[3]!.replace(/^"|"$/g, '').toLowerCase() } : undefined;
+}
+
 /** What the hotkey listener last said: it holds the keys, or no key was free. */
 export interface HudStatus {
   state: 'ready' | 'failed';
@@ -190,6 +201,11 @@ export function readHudStatus(home: string = os.homedir()): HudStatus | undefine
   } catch {
     return undefined;
   }
+}
+
+/** Forgets a "ready" (the listener that said it has ended) but keeps a "failed", which stays true until a listener says otherwise. */
+export function clearHudReadyStatus(home: string = os.homedir()): void {
+  if (readHudStatus(home)?.state === 'ready') clearHudStatus(home);
 }
 
 export function clearHudStatus(home: string = os.homedir()): void {
