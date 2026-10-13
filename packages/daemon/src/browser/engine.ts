@@ -15,6 +15,7 @@ import { clean, findElements, normalizeSnapshot, renderDelta, renderElement, ren
 import { okSoFar, type BrowserPort, type DoStep } from './port.js';
 import { resolveTarget, type TargetOp } from './targets.js';
 import type { ActionGate } from '../action-gate.js';
+import { ABANDONED, isCallAborted } from '../computer/call-scope.js';
 
 export type BrowserTransportLike = Pick<
   AppleScriptTransport,
@@ -59,6 +60,7 @@ const MAX_TOTAL_WAIT_MS = 30_000;
 /** A browser_do call starts no new step after this long, well before the 90 s tool timeout abandons it. */
 const BATCH_DEADLINE_MS = 60_000;
 const OUT_OF_TIME = 'this call ran out of time (60 s)';
+const abandonedOnly = (): string | null => (isCallAborted() ? ABANDONED : null);
 const INDEX_OPS = new Set<DoStep['op']>(['click', 'type', 'select', 'check', 'hover']);
 const ALL_OPS = new Set<string>(['click', 'type', 'select', 'check', 'hover', 'press', 'scroll', 'wait']);
 const STILL_LOADING = 'note: page still loading';
@@ -265,8 +267,6 @@ export class FastBrowserEngine implements BrowserPort {
   private readonly autoEnable: FastBrowserEngineDeps['autoEnable'];
   private readonly gate: FastBrowserEngineDeps['gate'];
   private readonly autoFailedAt = new Map<string, number>();
-  /** Bumped by abandon(): a browser_do call that started before it must not act any more. */
-  private epoch = 0;
 
   constructor(deps: FastBrowserEngineDeps) {
     this.autoEnable = deps.autoEnable;
@@ -276,11 +276,6 @@ export class FastBrowserEngine implements BrowserPort {
     this.env = deps.env ?? process.env;
     this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.now = deps.now ?? Date.now;
-  }
-
-  /** The tool call that is running was abandoned (its timeout fired): running browser_do calls act no further. */
-  abandon(): void {
-    this.epoch += 1;
   }
 
   /** Forget the pinned tab, the shown page and the fast-path availability cache. */
@@ -733,7 +728,7 @@ export class FastBrowserEngine implements BrowserPort {
     const { shown, el } = this.lookup(index);
     const ctx: Ctx = { browser: shown.browser, target: shown.target };
     await this.ensureRunning(ctx);
-    const res = await this.act(ctx, this.guarded({ op: 'click', node: el.node, label: el.label }, shown.origin), index);
+    const res = await this.act(ctx, this.guarded({ op: 'click', node: el.node, label: el.label }, shown.origin), index, abandonedOnly);
     const state = await this.after(ctx, shown.state, false, shown.origin, false, clickConfirm(el));
     return `clicked [${index}] ${clean(el.label)}\n${state}${res.opened ? `\n${OPENED_NOTE}` : ''}`;
   }
@@ -746,7 +741,7 @@ export class FastBrowserEngine implements BrowserPort {
     const op: PageOp = opts.submit
       ? { op: 'type', node: el.node, label: el.label, text, submit: true }
       : { op: 'type', node: el.node, label: el.label, text };
-    await this.act(ctx, this.guarded(op, shown.origin), index);
+    await this.act(ctx, this.guarded(op, shown.origin), index, abandonedOnly);
     return `typed into [${index}] ${clean(el.label)}\n${await this.after(ctx, shown.state, false, shown.origin, el.value === PASSWORD_MASK, opts.submit ? 'quiet' : null)}`;
   }
 
@@ -871,9 +866,7 @@ export class FastBrowserEngine implements BrowserPort {
   }
 
   private async doSteps(steps: DoStep[], deadline: number): Promise<string> {
-    const epoch = this.epoch;
-    const stopReason = (): string | null =>
-      this.epoch !== epoch ? 'this call was abandoned after the tool timed out' : this.now() > deadline ? OUT_OF_TIME : null;
+    const stopReason = (): string | null => (isCallAborted() ? ABANDONED : this.now() > deadline ? OUT_OF_TIME : null);
     if (this.shown?.mode === 'legacy') return this.legacy.do(steps);
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new Error('browser_do needs at least one step. No steps were run.');
@@ -890,10 +883,13 @@ export class FastBrowserEngine implements BrowserPort {
     const usesIndex = steps.some((s) => named(s) && s.index !== undefined);
     if (usesTargets && shown) {
       // The page may have changed since the model last looked (a second "Save" can appear), so labels
-      // are matched against a fresh look at the same tab, never against the old list.
+      // are matched against a fresh look at the same tab, never against the old list. The fresh look
+      // is only read here: what the model holds (this.shown) stays what the model saw until the call
+      // returns a state, so a refused batch cannot change what a later numeric id means.
       const tab = { browser: shown.browser, target: shown.target };
+      let fresh: { state: PageState; origin: number | string | null };
       try {
-        await this.show(tab);
+        fresh = await this.readState(tab);
       } catch (err) {
         if (err instanceof BrowserAutomationError) {
           this.transportFailed(tab, err);
@@ -901,13 +897,13 @@ export class FastBrowserEngine implements BrowserPort {
         }
         throw err;
       }
-      shown = this.shown?.mode === 'fast' ? this.shown : null;
-      if (usesIndex && modelView && (!shown || (modelView.origin !== null && String(shown.origin) !== String(modelView.origin)))) {
+      if (usesIndex && modelView && modelView.origin !== null && String(fresh.origin) !== String(modelView.origin)) {
         // The numeric ids in this batch belong to a document that is gone; the new one numbers its
         // elements afresh. Forget the old state so no later id can land on the wrong element either.
         this.shown = null;
         throw new Error('The page was reloaded or replaced since you last looked, so the ids you hold no longer apply. Call browser_snapshot. No steps were run.');
       }
+      shown = { ...shown, state: fresh.state, origin: fresh.origin };
     } else if (usesTargets && !usesIndex) {
       // No page shown yet: look first, through the same setup and fallback as browser_snapshot. Never
       // when a step also uses a numeric id: those ids belong to a page the model saw, and a fresh

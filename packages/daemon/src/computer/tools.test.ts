@@ -5,6 +5,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createComputerMcpServer } from './mcp-server.js';
 import { buildComputerTools } from './tools.js';
 import type { ComputerSession } from './session.js';
+import { runInCallScope } from './call-scope.js';
 
 function fakeSession() {
   return {
@@ -292,6 +293,18 @@ describe('buildComputerTools', () => {
     expect(schema.safeParse({ steps: [{ op: 'click', target: '' }] }).success).toBe(false);
     expect(schema.safeParse({ steps: Array.from({ length: 30 }, () => ({ op: 'wait', ms: 1 })) }).success).toBe(true);
     expect(schema.safeParse({ steps: Array.from({ length: 31 }, () => ({ op: 'wait', ms: 1 })) }).success).toBe(false);
+  });
+
+  it('a batch whose call was abandoned runs no further step', async () => {
+    const session = fakeSession();
+    const batch = buildComputerTools(session).find((t) => t.name === 'computer_batch')!;
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    const call = runInCallScope(async () => { await held; return batch.handler({ steps: [{ tool: 'browser_do', args: { steps: [{ op: 'click', index: 1 }] } }] }); });
+    call.abort();
+    release();
+    await expect(call.result).rejects.toThrow('step 1 browser_do failed: this call was abandoned after the tool timed out; remaining steps not run');
+    expect(session.browserDo).not.toHaveBeenCalled();
   });
 
   it('batch validates browser_do steps up front and passes them through', async () => {

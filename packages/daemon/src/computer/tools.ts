@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ComputerSession } from './session.js';
+import { ABANDONED, isCallAborted } from './call-scope.js';
 
 export interface ComputerTool {
   name: string;
@@ -224,6 +225,7 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
         const step = plan[i]!;
         const n = i + 1;
         try {
+          if (isCallAborted()) throw new Error(`${ABANDONED}; remaining steps not run`);
           last = await step.tool.handler(step.args);
         } catch (err: any) {
           const okSoFar = n === 1 ? 'no steps ok' : n === 2 ? 'step 1 ok' : `steps 1-${n - 1} ok`;

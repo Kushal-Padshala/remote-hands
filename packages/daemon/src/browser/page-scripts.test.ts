@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { JSDOM } from 'jsdom';
+import { createRequire } from 'node:module';
 import { DOM_SNAPSHOT_SCRIPT } from '../browser-snapshot.js';
 import { normalizeSnapshot, renderElement } from './render.js';
 import {
@@ -1562,5 +1563,50 @@ describe('page scripts and snapshot (round 4 fixes)', () => {
     const p = makePage('<span id="first-label">First</span><span id="second-label">Second</span><input aria-labelledby="first-label second-label">');
     expect(light(p).actions.map((a: any) => a.label)).toContain('First Second');
   });
+
+  it('cuts very long dropdown choices so the result cannot overflow the bridge, whatever the characters', () => {
+    const long = '€'.repeat(3000);
+    const options = Array.from({ length: 501 }, (_, i) => `<option value="${i}${long}">${long}${i}</option>`).join('');
+    const p = makePage(Array.from({ length: 6 }, (_, i) => `<select aria-label="Pick ${i}">${options}</select>`).join(''));
+    const raw = p.win.eval(buildSnapshotCall()) as string;
+    expect(Buffer.byteLength(raw, 'utf8')).toBeLessThan(8 * 1024 * 1024);
+    const state = normalizeSnapshot(JSON.parse(raw));
+    expect(state.elements.filter((e) => e.kind === 'select')).toHaveLength(6);
+  }, 60_000);
+
+  it('a visibility-hidden display: contents wrapper hides its own text but not a descendant that shows itself', () => {
+    const p = makePage('<main><div id="w" style="display:contents;visibility:hidden">Hidden direct text<span style="visibility:visible">Visible invoice</span></div></main>');
+    p.doc.getElementById('w').checkVisibility = () => false; // no box of its own
+    expect(p.evalJson(buildExtractScript(2000)).text).toBe('Visible invoice');
+  });
+
+  // Building ten thousand nested nodes takes ~20 s in jsdom (quadratic), which starves neighbouring tests when the whole
+  // suite runs in parallel, so it is opt-in: RH_SLOW_TESTS=1 npx vitest run packages/daemon/src/browser/page-scripts.test.ts
+  it.skipIf(!process.env.RH_SLOW_TESTS)('reads a frame under thousands of ordinary ancestors without overflowing the stack', () => {
+    // jsdom itself recurses once per ancestor while a node is added, so its notification hook is switched
+    // off only while the fixture is built (and restored before the snapshot runs).
+    const NodeImpl = createRequire(import.meta.url)('jsdom/lib/jsdom/living/nodes/Node-impl.js').implementation;
+    const original = { added: NodeImpl.prototype._descendantAdded, cleared: NodeImpl.prototype._clearMemoizedQueries };
+    const p = makePage('<div id="root"></div>');
+    NodeImpl.prototype._descendantAdded = function noop() {};
+    NodeImpl.prototype._clearMemoizedQueries = function noop() {};
+    try {
+      let parent = p.doc.getElementById('root');
+      for (let i = 0; i < 10_500; i += 1) {
+        const d = p.doc.createElement('div');
+        parent.appendChild(d);
+        parent = d;
+      }
+      addFrame(p, '<button>Pay</button>', { left: 0, top: 0, width: 200, height: 200 }, parent);
+    } finally {
+      NodeImpl.prototype._descendantAdded = original.added;
+      NodeImpl.prototype._clearMemoizedQueries = original.cleared;
+    }
+    // jsdom's own style resolution recurses per ancestor too; a cheap stand-in keeps the walk under test ours.
+    p.win.getComputedStyle = () => ({ transform: 'none', rotate: 'none', scale: 'none', display: 'block', visibility: 'visible' });
+    const snap = light(p);
+    expect(snap.error).toBeUndefined();
+    expect(snap.actions.map((a: any) => a.label)).toContain('Pay');
+  }, 120_000);
 });
 

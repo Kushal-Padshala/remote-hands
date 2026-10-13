@@ -60,16 +60,6 @@ function makeDeps(overrides: Partial<ComputerSessionDeps> = {}) {
   return deps;
 }
 
-describe('ComputerSession abandon', () => {
-  it('tells the browser engine that the running call was abandoned, and tolerates a port without abandon', () => {
-    const abandon = vi.fn();
-    const deps = makeDeps();
-    new ComputerSession({ ...deps, browser: { ...deps.browser, abandon } }).abandon();
-    expect(abandon).toHaveBeenCalledTimes(1);
-    expect(() => new ComputerSession(makeDeps()).abandon()).not.toThrow();
-  });
-});
-
 describe('ComputerSession desktop', () => {
   it('requires approval for a menu item resolved from an abbreviated query', async () => {
     const exec = vi.fn().mockReturnValue({ status: 0, stderr: '', stdout: JSON.stringify({ success: true, triggeredPath: ['Edit', 'Delete'], appPid: 123 }) });

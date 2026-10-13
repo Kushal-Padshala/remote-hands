@@ -4,6 +4,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { z } from 'zod';
 import { createComputerMcpServer, type ComputerMcpServerOptions } from './mcp-server.js';
 import type { ToolCallRecord } from './call-log.js';
+import { isCallAborted } from './call-scope.js';
 import type { ComputerTool } from './tools.js';
 
 async function connect(tools: ComputerTool[], opts?: ComputerMcpServerOptions) {
@@ -96,20 +97,25 @@ describe('createComputerMcpServer', () => {
     expect(records[0]!.ms).toBe(0);
   });
 
-  it('tells onTimeout when a call is abandoned, then lets the queue move on even if onTimeout throws', async () => {
-    let timeouts = 0;
+  it('marks a timed-out call as abandoned for whatever it is still doing, and leaves the next call alone', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let lateSawAbort: boolean | null = null;
+    let nextSawAbort: boolean | null = null;
     const client = await connect(
       [
-        { name: 'hang', description: 'd', inputSchema: {}, handler: () => new Promise<string>(() => {}) },
-        { name: 'ok', description: 'd', inputSchema: {}, handler: async () => 'fine' },
+        { name: 'hang', description: 'd', inputSchema: {}, handler: async () => { await held; lateSawAbort = isCallAborted(); return 'late'; } },
+        { name: 'ok', description: 'd', inputSchema: {}, handler: async () => { nextSawAbort = isCallAborted(); return 'fine'; } },
       ],
-      { callTimeoutMs: 20, onTimeout: () => { timeouts += 1; throw new Error('boom'); } },
+      { callTimeoutMs: 20 },
     );
     const hung = await client.callTool({ name: 'hang', arguments: {} });
     expect(hung.isError).toBe(true);
-    expect(timeouts).toBe(1);
     expect((await client.callTool({ name: 'ok', arguments: {} })).content).toEqual([{ type: 'text', text: 'fine' }]);
-    expect(timeouts).toBe(1);
+    release();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(lateSawAbort).toBe(true);
+    expect(nextSawAbort).toBe(false);
   });
 
   it('a throwing onCall never breaks the tool call', async () => {

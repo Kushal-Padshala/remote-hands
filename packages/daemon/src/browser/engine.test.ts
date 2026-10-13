@@ -5,6 +5,7 @@ import type { TabInfo } from './transport.js';
 import type { BrowserApp } from './browsers.js';
 import type { BrowserPort, DoStep } from './port.js';
 import { buildReadyProbe, buildSnapshotWithProbe } from './page-scripts.js';
+import { runInCallScope } from '../computer/call-scope.js';
 
 type Responder = string | Error | ((js: string) => string);
 
@@ -1480,30 +1481,55 @@ describe('do: label guards and abandonment (round 4 fixes)', () => {
     expect(t.actionEvals().map(opOf)[0]).toMatchObject({ op: 'click', node: 1, label: 'Open details' }); // the page guard then refuses
   });
 
-  it('refuses to click after an approval wait when the tool call was abandoned meanwhile', async () => {
-    let release!: () => void;
-    const held = new Promise<void>((r) => { release = r; });
-    const gated = new FastBrowserEngine({
-      transport: t, legacy, env: {}, now: () => clock, sleep: async (ms) => { clock += ms; },
-      gate: async () => { await held; },
-    });
-    await gated.snapshot();
-    const running = gated.do([{ op: 'click', index: 12 }]);
-    await Promise.resolve();
-    gated.abandon(); // the MCP timeout fired
-    release();
-    await expect(running).rejects.toThrow('this call was abandoned after the tool timed out; the click was not performed');
+  it('keeps the label the model saw after a refused or finished batch, so a later numeric id cannot take on the new meaning', async () => {
+    const one = (label: string): string => JSON.stringify(page({ page_key: [1], actions: [
+      { node: 1, role: 'button', label, kind: 'click', value: '' },
+      { node: 2, role: 'button', label: 'Menu', kind: 'click', value: '' },
+    ] }));
+    t.snapshots = [one('Open details')];
+    await engine.snapshot();
+    t.snapshots = [one('Delete account')];
+    // a batch that fails before it returns any state (nothing 'Nope' on the page)
+    await expect(engine.do([{ op: 'click', index: 1 }, { op: 'hover', target: 'Nope' }])).rejects.toThrow('no element matches target "Nope"');
+    expect(t.actionEvals()).toHaveLength(0);
+    await engine.click(1); // the model still holds [1] "Open details"
+    expect(t.actionEvals().map(opOf)[0]).toMatchObject({ op: 'click', node: 1, label: 'Open details' });
+  });
+
+  it('refuses to click after an approval wait when the tool call was abandoned meanwhile (browser_do and browser_click)', async () => {
+    for (const run of [(e: FastBrowserEngine) => e.do([{ op: 'click', index: 12 }]), (e: FastBrowserEngine) => e.click(12)]) {
+      let release!: () => void;
+      const held = new Promise<void>((r) => { release = r; });
+      const gated = new FastBrowserEngine({
+        transport: t, legacy, env: {}, now: () => clock, sleep: async (ms) => { clock += ms; },
+        gate: async () => { await held; },
+      });
+      await gated.snapshot();
+      const call = runInCallScope(() => run(gated));
+      await Promise.resolve();
+      call.abort(); // the MCP timeout fired
+      release();
+      await expect(call.result).rejects.toThrow('this call was abandoned after the tool timed out; the click was not performed');
+    }
     expect(t.actionEvals()).toHaveLength(0);
   });
 
-  it('starts no further step once abandoned, and a call that starts afterwards is not affected', async () => {
+  it('starts no further step once abandoned, even when the batch started after the abort, and later calls are unaffected', async () => {
     await engine.snapshot();
-    t.actions = [(): string => { engine.abandon(); return JSON.stringify({ ok: true, label: 'x' }); }];
-    await expect(engine.do([{ op: 'check', index: 9, checked: true }, { op: 'click', index: 12 }])).rejects.toThrow(
-      'step 2 click failed: this call was abandoned after the tool timed out; remaining steps not run (step 1 ok)',
-    );
+    let abort!: () => void;
+    t.actions = [(): string => { abort(); return JSON.stringify({ ok: true, label: 'x' }); }];
+    const call = runInCallScope(() => engine.do([{ op: 'check', index: 9, checked: true }, { op: 'click', index: 12 }]));
+    abort = call.abort;
+    await expect(call.result).rejects.toThrow('step 2 click failed: this call was abandoned after the tool timed out; remaining steps not run (step 1 ok)');
+    expect(t.actionEvals()).toHaveLength(1);
+    // a batch that merely starts inside an already-abandoned call (a resumed computer_batch)
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    const resumed = runInCallScope(async () => { await held; return engine.do([{ op: 'click', index: 12 }]); });
+    resumed.abort();
+    release();
+    await expect(resumed.result).rejects.toThrow('step 1 click failed: this call was abandoned after the tool timed out; remaining steps not run');
     expect(t.actionEvals()).toHaveLength(1);
     await expect(engine.do([{ op: 'click', index: 12 }])).resolves.toContain('did: click');
   });
 });
-

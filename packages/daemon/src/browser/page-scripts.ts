@@ -466,8 +466,15 @@ export function buildExtractScript(maxChars: number): string {
   const hidden = (e) => e.hasAttribute('hidden') || e.getAttribute('aria-hidden') === 'true' || e.hasAttribute('inert') ||
     (typeof e.checkVisibility === 'function' && !e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) &&
       // an element with display: contents has no box but its children are rendered normally
-      !(typeof getComputedStyle === 'function' && getComputedStyle(e).display === 'contents' &&
-        getComputedStyle(e).visibility !== 'hidden' && getComputedStyle(e).visibility !== 'collapse'));
+      !(typeof getComputedStyle === 'function' && getComputedStyle(e).display === 'contents'));
+  // A boxless wrapper that is visibility: hidden hides its own text; descendants decide for themselves.
+  const quietKids = (e) => {
+    // only an element without a box can be display: contents; skip the style read for the rest
+    if (typeof getComputedStyle !== 'function' || typeof e.checkVisibility !== 'function' ||
+        e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
+    const cs = getComputedStyle(e);
+    return cs.display === 'contents' && (cs.visibility === 'hidden' || cs.visibility === 'collapse');
+  };
   const textLen = (e) => (e.textContent || '').length;
   const candidates = Array.from(document.querySelectorAll('main,[role="main"],article')).filter((e) => !hidden(e));
   let root = null;
@@ -486,10 +493,10 @@ export function buildExtractScript(maxChars: number): string {
     if (text.length >= max) full = true;
   };
   let visits = 0;
-  const walk = (n, depth) => {
+  const walk = (n, depth, quiet) => {
     if (truncated) return;
     if (++visits > 200000) { truncated = true; return; }
-    if (n.nodeType === 3) { add(n.textContent || ''); return; }
+    if (n.nodeType === 3) { if (!quiet) add(n.textContent || ''); return; }
     if (n.nodeType !== 1 || SKIP.includes(n.tagName)) return;
     if (n.tagName === 'SLOT' && typeof n.assignedNodes === 'function') {
       // A slot has no box of its own, so checkVisibility cannot judge it; explicit hiding still applies.
@@ -499,7 +506,7 @@ export function buildExtractScript(maxChars: number): string {
         if (cs.display === 'none' || cs.visibility === 'hidden' || cs.visibility === 'collapse') return;
       }
       const assigned = n.assignedNodes({ flatten: true });
-      for (const c of (assigned.length > 0 ? assigned : n.childNodes)) { if (truncated) return; walk(c, depth); }
+      for (const c of (assigned.length > 0 ? assigned : n.childNodes)) { if (truncated) return; walk(c, depth, quiet); }
       return;
     }
     if (hidden(n)) return;
@@ -509,19 +516,20 @@ export function buildExtractScript(maxChars: number): string {
       return;
     }
     if (n.tagName === 'TEXTAREA') { if (n.value) add(n.value); return; }
+    const kidsQuiet = quietKids(n);
     if (n.shadowRoot && depth < 3) {
       // The shadow tree is what is rendered; light children only appear where a slot places them.
-      for (const c of n.shadowRoot.childNodes) { if (truncated) return; walk(c, depth + 1); }
+      for (const c of n.shadowRoot.childNodes) { if (truncated) return; walk(c, depth + 1, kidsQuiet); }
       return;
     }
     if ((n.tagName === 'IFRAME' || n.tagName === 'FRAME') && depth < 3) {
       let d = null;
       try { d = n.contentDocument; } catch (e) { d = null; }
-      if (d && d.body) walk(d.body, depth + 1);
+      if (d && d.body) walk(d.body, depth + 1, false);
     }
-    for (const c of n.childNodes) { if (truncated) return; walk(c, depth); }
+    for (const c of n.childNodes) { if (truncated) return; walk(c, depth, kidsQuiet); }
   };
-  if (root) walk(root, 0);
+  if (root) walk(root, 0, false);
   if (truncated || text.length > max) {
     // Cut at max without splitting a surrogate pair.
     let end = Math.min(max, text.length);

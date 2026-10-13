@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import os from 'node:os';
 import { appendCallRecord, classifyError, type ToolCallRecord } from './call-log.js';
+import { runInCallScope } from './call-scope.js';
 import type { ComputerSession } from './session.js';
 import { buildComputerTools, type ComputerTool } from './tools.js';
 
@@ -26,8 +27,6 @@ export interface ComputerMcpServerOptions {
    * error is ignored.
    */
   onCall?: ((record: ToolCallRecord) => void) | undefined;
-  /** Called when a call hits the per-call timeout, before the queue moves on, so work that is still running can stop acting. */
-  onTimeout?: (() => void) | undefined;
   /** Monotonic milliseconds for timing a call (default performance.now; wall-clock changes must not skew it). */
   now?: (() => number) | undefined;
 }
@@ -37,16 +36,13 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
   const limit = opts.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
   const clock = opts.now ?? (() => performance.now());
   type Result = { isError?: boolean; content: { type: 'text'; text: string }[] };
-  // The abandoned handler keeps running (it is not cancelled); only the queue moves on.
-  const withTimeout = (work: Promise<Result>): Promise<Result> => {
+  // A call that hits the limit is abandoned: its scope is marked, so whatever it is still doing
+  // (a batch, an approval wait) refuses to act any more, and only then does the queue move on.
+  const withTimeout = (work: Promise<Result>, abandon: () => void): Promise<Result> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<Result>((resolve) => {
       timer = setTimeout(() => {
-        try {
-          opts.onTimeout?.();
-        } catch {
-          // stopping stray work must never break the queue
-        }
+        abandon();
         resolve({ isError: true, content: [{ type: 'text', text: formatTimeout(limit) }] });
       }, limit);
     });
@@ -68,15 +64,16 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
         const result = await serialized(() => {
           startedAt = new Date(); // time the work itself, not the wait for earlier calls
           startedMs = clock();
-          return withTimeout(
-            (async (): Promise<Result> => {
+          const { result, abort } = runInCallScope(
+            async (): Promise<Result> => {
               try {
                 return { content: [{ type: 'text' as const, text: await tool.handler(args) }] };
               } catch (err: any) {
                 return { isError: true, content: [{ type: 'text' as const, text: `error: ${err?.message ?? String(err)}` }] };
               }
-            })(),
+            },
           );
+          return withTimeout(result, abort);
         });
         if (opts.onCall) {
           try {
@@ -97,7 +94,7 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
 export async function serveComputerMcp(session: ComputerSession): Promise<void> {
   const server = createComputerMcpServer(
     buildComputerTools(session),
-    { onTimeout: () => session.abandon(), ...(process.env.RH_CALL_LOG === '0' ? {} : { onCall: (record: ToolCallRecord) => appendCallRecord(os.homedir(), record) }) },
+    process.env.RH_CALL_LOG === '0' ? {} : { onCall: (record) => appendCallRecord(os.homedir(), record) },
   );
   await server.connect(new StdioServerTransport());
 }

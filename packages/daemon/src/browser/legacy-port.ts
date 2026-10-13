@@ -4,6 +4,7 @@ import { buildActionScript, buildExtractScript } from './page-scripts.js';
 import { normalizeOpenUrl } from './engine.js';
 import { clean } from './render.js';
 import { okSoFar, type BrowserPort, type DoStep } from './port.js';
+import { ABANDONED, isCallAborted } from '../computer/call-scope.js';
 
 export type LegacyBrowserDriver = Pick<
   BrowserDriver,
@@ -166,6 +167,7 @@ export class LegacyBrowserPort implements BrowserPort {
       const step = steps[i]!;
       const n = i + 1;
       try {
+        if (isCallAborted()) throw new Error(`${ABANDONED}; remaining steps not run`);
         if (this.now() > deadline) throw new Error('this call ran out of time (60 s); remaining steps not run');
         if (step.op === 'wait') {
           await this.sleep(step.ms ?? 0);

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { LegacyBrowserPort, type LegacyBrowserDriver } from './legacy-port.js';
+import { runInCallScope } from '../computer/call-scope.js';
 
 function makeDriver(over: Partial<LegacyBrowserDriver> = {}) {
   return {
@@ -147,4 +148,14 @@ describe('LegacyBrowserPort (previous ComputerSession behaviour)', () => {
     );
     expect(d.clickIndex).toHaveBeenCalledTimes(1);
   });
+
+  it('starts no further step once the tool call was abandoned', async () => {
+    let abort!: () => void;
+    const d = makeDriver({ clickIndex: vi.fn(async () => { await Promise.resolve(); abort(); return { success: true, label: 'Go' }; }) });
+    const call = runInCallScope(() => port(d).do([{ op: 'click', index: 1 }, { op: 'click', index: 2 }]));
+    abort = call.abort;
+    await expect(call.result).rejects.toThrow('step 2 click failed: this call was abandoned after the tool timed out; remaining steps not run (step 1 ok)');
+    expect(d.clickIndex).toHaveBeenCalledTimes(1);
+  });
 });
+

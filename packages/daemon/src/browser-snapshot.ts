@@ -48,6 +48,8 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   const MAX_CONTROLS = 250;
   const MAX_OPTIONS_PER_SELECT = 500;
   const MAX_OPTIONS_TOTAL = 3000;
+  const MAX_OPTION_TEXT = 200;
+  const MAX_CURRENT_TEXT = 500;
   const hostOf = (e) => { const r = e.getRootNode && e.getRootNode(); return r && r.host ? r.host : null; };
   const frameOf = (e) => {
     const view = e.ownerDocument && e.ownerDocument.defaultView;
@@ -138,11 +140,17 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
     }
     return false;
   };
-  const transformed = (n) => {
-    if (!n || typeof getComputedStyle !== 'function') return false;
-    if (transformMemo.has(n)) return transformMemo.get(n);
-    const result = ownTransform(n) || transformed(n.parentElement || hostOf(n) || frameOf(n));
-    transformMemo.set(n, result);
+  // Iterative (ancestry can be thousands deep) and memoised: each ancestor's style is read once.
+  const transformed = (start) => {
+    if (typeof getComputedStyle !== 'function') return false;
+    const chain = [];
+    let result = false;
+    for (let n = start; n; n = n.parentElement || hostOf(n) || frameOf(n)) {
+      if (transformMemo.has(n)) { result = transformMemo.get(n); break; }
+      chain.push(n);
+      if (ownTransform(n)) { result = true; break; }
+    }
+    for (const n of chain) transformMemo.set(n, result);
     return result;
   };
   const intersect = (a, b) => ({ l: Math.max(a.l, b.l), t: Math.max(a.t, b.t), r: Math.min(a.r, b.r), b: Math.min(a.b, b.b) });
@@ -216,13 +224,16 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
       const listedOptions = eligible.slice(0, room);
       optionBudget -= listedOptions.length;
       const cut = eligible.length - listedOptions.length;
-      const current = [...e.selectedOptions].map((opt) => opt.label).join(', ');
+      const clip = (v, max) => (light && v.length > max ? v.slice(0, max) + '…' : v);
+      const current = clip([...e.selectedOptions].map((opt) => opt.label).join(', '), MAX_CURRENT_TEXT);
       listedOptions.forEach((o, i) => {
         // Fast engine: only the first choice carries the control's fields; the rest are just the choice,
         // so a dropdown's label and current value are not repeated hundreds of times.
-        if (light && i > 0) actions.push({ node: base.node, kind: 'select', value: o.value, label: ' → ' + o.label });
+        const text = clip(o.label, MAX_OPTION_TEXT);
+        const value = clip(o.value, MAX_OPTION_TEXT);
+        if (light && i > 0) actions.push({ node: base.node, kind: 'select', value, label: ' → ' + text });
         else {
-          actions.push({ ...base, kind: 'select', value: o.value, current_value: current, label: base.label + ' → ' + o.label,
+          actions.push({ ...base, kind: 'select', value, current_value: current, label: base.label + ' → ' + text,
             ...(cut > 0 ? { options_omitted: cut } : {}) });
         }
       });

@@ -11,6 +11,7 @@ import { LegacyBrowserPort } from '../browser/legacy-port.js';
 import type { BrowserPort, DoStep } from '../browser/port.js';
 import { compactDesktopElements } from './compact.js';
 import type { ActionGate } from '../action-gate.js';
+import { abandonAwareGate } from './call-scope.js';
 
 export interface ComputerSessionDeps {
   desktop: Pick<
@@ -192,13 +193,11 @@ export class ComputerSession {
     return this.deps.browser.extract(maxChars);
   }
 
-  /** The running tool call timed out: browser calls that are still going must not act any more. */
-  abandon(): void {
-    this.deps.browser.abandon?.();
-  }
 }
 
-export function createDefaultComputerSession(gate?: ActionGate): ComputerSession {
+export function createDefaultComputerSession(rawGate?: ActionGate): ComputerSession {
+  // An approval that arrives after the tool call timed out must not let the action run (legacy driver included).
+  const gate = rawGate ? abandonAwareGate(rawGate) : undefined;
   const desktop = new MacOsDriver();
   const transport = new AppleScriptTransport();
   return new ComputerSession({
