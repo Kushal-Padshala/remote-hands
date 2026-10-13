@@ -180,3 +180,50 @@ describe('CLI hud install on Windows', () => {
     expect(failed.out).not.toContain('installed successfully');
   });
 });
+
+describe('CLI hud listen started by the Windows supervisor', () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', platform);
+    delete process.env.RH_HUD_OWNER_PIPE;
+    vi.restoreAllMocks();
+  });
+
+  it('stops when the supervisor\'s pipe closes, so a listener never outlives the service that owns it', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    process.env.RH_HUD_OWNER_PIPE = '1';
+    const handlers = new Map<string, () => void>();
+    const onSpy = vi.spyOn(process.stdin, 'on').mockImplementation(((event: string, fn: () => void) => {
+      handlers.set(event, fn);
+      return process.stdin;
+    }) as never);
+    const resume = vi.spyOn(process.stdin, 'resume').mockImplementation(() => process.stdin);
+    const stop = vi.fn();
+    const coordinator = { startListening: vi.fn().mockReturnValue({ stop }) };
+    let finished = false;
+    const done = hudCommand(['listen', '--skip-permissions'], {
+      coordinator,
+      blockUntilSignal: true,
+      onListenerReady: () => {},
+      stdout: () => {},
+    } as never).then((code) => {
+      finished = true;
+      return code;
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(finished).toBe(false);
+    expect(onSpy).toHaveBeenCalledWith('end', expect.any(Function));
+    expect(resume).toHaveBeenCalled();
+    handlers.get('end')!();
+    expect(await done).toBe(0);
+    expect(stop).toHaveBeenCalled();
+  });
+
+  it('does not watch its input when it was not started by the supervisor (a person running it in a terminal)', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    const onSpy = vi.spyOn(process.stdin, 'on');
+    const coordinator = { startListening: vi.fn().mockReturnValue({ stop: vi.fn() }) };
+    await hudCommand(['listen', '--skip-permissions'], { coordinator, once: true, stdout: () => {} } as never);
+    expect(onSpy).not.toHaveBeenCalledWith('end', expect.any(Function));
+  });
+});

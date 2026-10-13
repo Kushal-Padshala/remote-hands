@@ -123,9 +123,15 @@ export class HudServiceManager {
     ]);
     const parsed = res.status === 0 ? parseHudCommandLine(res.stdout.trim()) : undefined;
     if (!parsed || parsed.role !== 'supervise') return undefined;
-    // and it is OUR program, not a copy somewhere else
-    const ours = windowsHudPaths(this.home).exe.replace(/\//g, '\\').toLowerCase();
-    return parsed.program.toLowerCase() === ours ? pid : undefined;
+    // and it is OUR program, not a copy somewhere else (the same file reached through a short name or a junction still counts)
+    const canonical = (p: string): string => {
+      try {
+        return fs.realpathSync.native(p).toLowerCase();
+      } catch {
+        return p.replace(/\//g, '\\').toLowerCase();
+      }
+    };
+    return canonical(parsed.program) === canonical(windowsHudPaths(this.home).exe) ? pid : undefined;
   }
 
   private windowsSupervisorAlive(): boolean {

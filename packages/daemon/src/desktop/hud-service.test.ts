@@ -197,6 +197,26 @@ describe('HudServiceManager on Windows', () => {
     expect(gone.manager.isRunning()).toBe(false);
   });
 
+  it('recognises the service when its command line reaches the same program through another folder name (a junction or short path)', () => {
+    const { manager, calls, home, cli } = setup({
+      exec: (cmd, _a, h) => {
+        if (cmd !== 'powershell') return ok;
+        // the process was started through an alias of the home folder
+        return commandLine(`"${path.join(h + '-alias', '.remote-hands', 'bin', 'rh-hud.exe')}" supervise`);
+      },
+    });
+    fs.mkdirSync(path.join(home, '.remote-hands', 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.remote-hands', 'bin', 'rh-hud.exe'), 'x');
+    fs.symlinkSync(home, `${home}-alias`);
+    fs.writeFileSync(path.join(home, '.remote-hands', 'hud-supervisor.pid'), '4242');
+    try {
+      manager.install(cli);
+      expect(calls.filter(([c]) => c === 'taskkill').map(([, a]) => a.join(' '))).toEqual(['/PID 4242 /T /F']);
+    } finally {
+      fs.rmSync(`${home}-alias`, { force: true });
+    }
+  });
+
   it('says why when the program cannot be built, and starts nothing', () => {
     const { manager, calls, started } = setup({ built: { ok: false, error: 'the Windows compiler was not found' } });
     const res = manager.install();

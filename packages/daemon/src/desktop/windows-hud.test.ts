@@ -227,7 +227,7 @@ describe('parseHudCommandLine', () => {
     expect(parseHudCommandLine('"C:\\Users\\Ana Lee\\.remote-hands\\bin\\rh-hud.exe" supervise')).toEqual({ program: 'C:\\Users\\Ana Lee\\.remote-hands\\bin\\rh-hud.exe', role: 'supervise' });
     expect(parseHudCommandLine('C:\\h\\rh-hud.exe prompt --app=x')).toEqual({ program: 'C:\\h\\rh-hud.exe', role: 'prompt' });
     expect(parseHudCommandLine('  "C:\\h\\RH-HUD.EXE"   LISTEN  ')).toEqual({ program: 'C:\\h\\RH-HUD.EXE', role: 'listen' });
-    expect(parseHudCommandLine('"C:/h/rh-hud.exe" supervise')).toEqual({ program: 'C:\\h\\rh-hud.exe', role: 'supervise' });
+    expect(parseHudCommandLine('"C:/h/rh-hud.exe" supervise')).toEqual({ program: 'C:/h/rh-hud.exe', role: 'supervise' });
   });
   it('does not mistake another program, or a path that merely mentions the words', () => {
     expect(parseHudCommandLine('"C:\\Windows\\notepad.exe" supervise')).toBeUndefined();

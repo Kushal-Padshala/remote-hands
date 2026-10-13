@@ -112,8 +112,8 @@ describe('quoteWindowsArg and detachedWindowsLaunch', () => {
 
   it('starts a program from outside this process\'s tree, with the whole command in quotes', () => {
     const launch = detachedWindowsLaunch('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', ['--remote-debugging-port=9222', '--user-data-dir=C:\\Users\\José Müller\\.remote-hands\\chrome-profile'], { ComSpec: 'C:\\Windows\\System32\\cmd.exe' });
-    expect(launch!.file).toBe('C:\\Windows\\System32\\cmd.exe');
-    expect(launch!.args).toEqual([
+    expect(launch.file).toBe('C:\\Windows\\System32\\cmd.exe');
+    expect(launch.args).toEqual([
       '/d',
       '/s',
       '/c',
@@ -122,12 +122,22 @@ describe('quoteWindowsArg and detachedWindowsLaunch', () => {
   });
 
   it('falls back to cmd.exe when ComSpec is not set', () => {
-    expect(detachedWindowsLaunch('chrome.exe', [], {})!.file).toBe('cmd.exe');
+    expect(detachedWindowsLaunch('chrome.exe', [], {}).file).toBe('cmd.exe');
   });
 
-  it('does not use cmd.exe for a folder name it would rewrite (% or !), so the caller starts the program directly', () => {
-    expect(detachedWindowsLaunch('chrome.exe', ['--user-data-dir=C:\\Users\\Ana%USERNAME%\\p'], {})).toBeNull();
-    expect(detachedWindowsLaunch('C:\\Users\\Ana!\\chrome.exe', [], {})).toBeNull();
-    expect(detachedWindowsLaunch('chrome.exe', ['--user-data-dir=C:\\Users\\Ana&Lee\\p'], {})).not.toBeNull();
+  it('uses PowerShell, with the program and arguments as data in environment variables, for a folder name cmd.exe would rewrite (% or !)', () => {
+    for (const odd of ['C:\\Users\\Ana%USERNAME%\\p', 'C:\\Users\\Ana!Lee\\p']) {
+      const launch = detachedWindowsLaunch('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', ['--remote-debugging-port=9222', `--user-data-dir=${odd}`], {});
+      expect(launch.file).toBe('powershell.exe');
+      expect(launch.verbatim).toBe(false);
+      // the command text holds no program or path: only the variable names
+      expect(launch.args.at(-1)).toBe('Start-Process -FilePath $env:RH_LAUNCH_FILE -ArgumentList $env:RH_LAUNCH_ARGS');
+      expect(launch.args.join(' ')).not.toContain(odd);
+      expect(launch.env).toEqual({
+        RH_LAUNCH_FILE: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        RH_LAUNCH_ARGS: `--remote-debugging-port=9222 "--user-data-dir=${odd}"`,
+      });
+    }
+    expect(detachedWindowsLaunch('chrome.exe', ['--user-data-dir=C:\\Users\\Ana&Lee\\p'], {}).file).toBe('cmd.exe');
   });
 });

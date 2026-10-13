@@ -64,7 +64,7 @@ import {
 
 import { ChromeManager as ChromeLookup, HudServiceManager, SpotlightHudRunner, hudHotkeyLabel, type BrowserExecutable, type ChromeManager, type DynamicPowerManager } from '@remote-hands/daemon';
 import { defaultAsk } from './browser-setup.js';
-import { AGY_WINDOWS_INSTALL, agyShellCommand, locateAgy } from '../system/agy.js';
+import { AGY_WINDOWS_INSTALL, agyRunOptions, agyShellCommand, locateAgy } from '../system/agy.js';
 import { mcpCommand } from './mcp.js';
 
 export interface CommandContext {
@@ -162,9 +162,11 @@ async function setupAgentAndPermissions(
   }
   // On Windows the full path (a new terminal is not needed for it); elsewhere the plain name, as always.
   const agy = agyShellCommand(agyPath);
+  // Windows: the program is run directly, not through a shell
+  const agyOpts = agyRunOptions(agyPath);
 
   stdout(renderStepInfo('Verifying agy authentication...'));
-  const agyNeedsLogin = await agyNeedsSignIn(runner, agy);
+  const agyNeedsLogin = await agyNeedsSignIn(runner, agy, agyOpts);
 
   if (agyNeedsLogin) {
     stdout(renderStepAction('agy requires sign-in — launching interactive session...'));
@@ -173,9 +175,9 @@ async function setupAgentAndPermissions(
     } else {
       stdout(renderStepInfo('Follow the on-screen instructions to sign in with your Google account.'));
     }
-    await runner(agy, [], { interactive: true });
+    await runner(agy, [], { interactive: true, ...agyOpts });
 
-    const agyRecheck = await runner(agy, ['-p', 'reply with ok', '--print-timeout', '60s']);
+    const agyRecheck = await (agyOpts ? runner(agy, ['-p', 'reply with ok', '--print-timeout', '60s'], agyOpts) : runner(agy, ['-p', 'reply with ok', '--print-timeout', '60s']));
     if (agyRecheck.exitCode !== 0) {
       stderr(renderStepError('agy sign-in was not completed.'));
       stderr('Please run "agy" in your terminal to sign in, then re-run "rh setup".');
@@ -549,13 +551,13 @@ const AUTH_HINTS = ['not authenticated', 'sign in', 'sign-in', 'log in', 'login'
  * timeout (a cold agy takes a while to load its MCP servers: a slow answer is not a
  * missing sign-in). Sign-in is requested only when agy's own output asks for it.
  */
-async function agyNeedsSignIn(runner: CommandRunner, agy = 'agy'): Promise<boolean> {
-  const models = await runner(agy, ['models']);
+async function agyNeedsSignIn(runner: CommandRunner, agy = 'agy', opts?: { shell: false }): Promise<boolean> {
+  const models = await (opts ? runner(agy, ['models'], opts) : runner(agy, ['models']));
   const modelsText = `${models.stdout}\n${models.stderr}`.toLowerCase();
   if (models.exitCode === 0 && /gemini|claude|gpt/.test(modelsText) && !AUTH_HINTS.some((h) => modelsText.includes(h))) {
     return false;
   }
-  const probe = await runner(agy, ['-p', 'reply with ok', '--print-timeout', '60s']);
+  const probe = await (opts ? runner(agy, ['-p', 'reply with ok', '--print-timeout', '60s'], opts) : runner(agy, ['-p', 'reply with ok', '--print-timeout', '60s']));
   const text = `${probe.stdout}\n${probe.stderr}`.toLowerCase();
   return AUTH_HINTS.some((h) => text.includes(h));
 }

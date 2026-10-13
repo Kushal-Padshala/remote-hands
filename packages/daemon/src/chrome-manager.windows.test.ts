@@ -57,7 +57,7 @@ describe('ChromeManager on Windows with a folder name cmd.exe would rewrite', ()
     vi.unstubAllGlobals();
   });
 
-  it('starts the browser directly rather than through cmd /c start (the folder name is kept exactly)', async () => {
+  it('still starts the browser outside the agent\'s process tree: through PowerShell, with the folder name as data', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32' });
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chrome 50%USERNAME% '));
     vi.mocked(spawn).mockClear();
@@ -70,11 +70,12 @@ describe('ChromeManager on Windows with a folder name cmd.exe would rewrite', ()
     try {
       const manager = new ChromeManager({ mode: 'dedicated', port: 9556, customProfileDir: dir, chromeExecutablePath: 'C:\\chrome.exe' });
       await manager.ensureRunning();
-      const [file, args, options] = vi.mocked(spawn).mock.calls[0]! as unknown as [string, string[], Record<string, unknown>];
-      expect(file).toBe('C:\\chrome.exe');
-      expect(args).toContain(`--user-data-dir=${dir}`);
-      expect(options).toMatchObject({ detached: true });
-      expect(options.windowsVerbatimArguments).toBeUndefined();
+      const [file, args, options] = vi.mocked(spawn).mock.calls[0]! as unknown as [string, string[], { env?: Record<string, string>; windowsVerbatimArguments?: boolean }];
+      expect(file).toBe('powershell.exe');
+      expect(args.at(-1)).toBe('Start-Process -FilePath $env:RH_LAUNCH_FILE -ArgumentList $env:RH_LAUNCH_ARGS');
+      expect(options.env?.RH_LAUNCH_FILE).toBe('C:\\chrome.exe');
+      expect(options.env?.RH_LAUNCH_ARGS).toContain(`--user-data-dir=${dir}`);
+      expect(options).toMatchObject({ detached: true, windowsHide: true, windowsVerbatimArguments: false });
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

@@ -85,6 +85,28 @@ describe('Windows workspace paths (opt in)', () => {
   });
 });
 
+describe('Windows drive-relative paths', () => {
+  const win = { windows: true };
+  it('are refused as workspaces: C:work is relative to wherever the program runs, not C:\\work', () => {
+    for (const bad of ['C:work', 'c:work\\app', 'C:', 'D:..\\x']) {
+      const res = isSafeWorkspacePath(bad, ['C:\\work'], win);
+      expect(res.allowed, bad).toBe(false);
+      expect(res.reason).toContain('Drive-relative');
+    }
+    expect(isSafeWorkspacePath('C:\\work', ['C:\\work'], win).allowed).toBe(true);
+    expect(isSafeWorkspacePath('C:/work', ['C:\\work'], win).allowed).toBe(true);
+  });
+
+  it('allow nothing when they are an allowlist entry', () => {
+    expect(isSafeWorkspacePath('C:\\work\\app', ['C:work'], win).allowed).toBe(false);
+    expect(isSafeWorkspacePath('C:\\work\\app', ['C:work', 'C:\\work'], win).allowed).toBe(true);
+  });
+
+  it('are ordinary names without the Windows option', () => {
+    expect(isSafeWorkspacePath('C:work').allowed).toBe(true);
+  });
+});
+
 describe('without the Windows option, paths are checked exactly as before (drive-shaped names are just names)', () => {
   it('keeps case and backslashes as they are', () => {
     // a relative directory literally named "C:" on a case-sensitive file system

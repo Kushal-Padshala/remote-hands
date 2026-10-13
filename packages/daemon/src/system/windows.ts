@@ -109,18 +109,44 @@ export function quoteWindowsArg(arg: string): string {
   return `"${arg.replace(/"/g, '')}"`;
 }
 
+/** How to start a process: the program to run, its command line, and what it needs. */
+export interface WindowsLaunch {
+  file: string;
+  args: string[];
+  /** Extra environment variables for the starter (how data reaches PowerShell without being parsed as code). */
+  env?: Record<string, string> | undefined;
+  /** The command line is already written as Windows wants it (cmd.exe quoting). */
+  verbatim: boolean;
+}
+
 /**
- * How to start a program so that it is NOT a child of this process. `cmd /c start` hands the program to Windows and
- * exits at once, so the program's parent is gone: ending this process's tree (as `taskkill /T` does for the agent) does
- * not end it. Used for the browser window, which must outlive a cancelled task. Null when an argument holds a character
- * cmd.exe would rewrite (% or !).
+ * How to start a program so that it is NOT a child of this process: the starter hands it to Windows and ends, so the
+ * program's parent is gone and ending this process's tree (as `taskkill /T` does for the agent) does not end it. Used for the
+ * browser window, which must outlive a cancelled task.
+ *
+ * Normally `cmd /c start`, which is instant. cmd.exe rewrites `%NAME%` and `!NAME!` even inside quotes, so a folder name that
+ * has them goes through PowerShell's Start-Process instead, with the program and arguments passed in environment variables
+ * (data, never code).
  */
-export function detachedWindowsLaunch(command: string, args: string[], env: NodeJS.ProcessEnv = process.env): { file: string; args: string[] } | null {
-  // cmd.exe expands %NAME% (even inside quotes) and !NAME!, which would change a folder name that has them: the caller starts
-  // the program directly then
-  if ([command, ...args].some((a) => /[%!]/.test(a))) return null;
+export function detachedWindowsLaunch(command: string, args: string[], env: NodeJS.ProcessEnv = process.env): WindowsLaunch {
+  if ([command, ...args].some((a) => /[%!]/.test(a))) {
+    const joined = args.map(quoteWindowsArg).join(' ');
+    return {
+      file: 'powershell.exe',
+      args: [
+        '-NoProfile',
+        '-NonInteractive',
+        '-WindowStyle',
+        'Hidden',
+        '-Command',
+        'Start-Process -FilePath $env:RH_LAUNCH_FILE -ArgumentList $env:RH_LAUNCH_ARGS',
+      ],
+      env: { RH_LAUNCH_FILE: command, RH_LAUNCH_ARGS: joined },
+      verbatim: false,
+    };
+  }
   const parts = [quoteWindowsArg(command), ...args.map(quoteWindowsArg)].join(' ');
-  // start's first quoted argument is the window title: an empty one keeps a quoted program path from being taken as it
-  // the whole command is wrapped in quotes, which /s strips again, so the quotes inside survive
-  return { file: env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', `"start "" ${parts}"`] };
+  // the whole command is wrapped in quotes, which /s strips again, so the quotes inside survive; start's first quoted
+  // argument is the window title, so an empty one keeps a quoted program path from being taken as it
+  return { file: env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', `"start "" ${parts}"`], verbatim: true };
 }

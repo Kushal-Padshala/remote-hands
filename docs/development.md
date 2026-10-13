@@ -4,7 +4,7 @@ This documents the setup for contributors. The default self-hosted control plane
 
 ## Prerequisites
 
-- **Node.js**: `>=22.13.0`
+- **Node.js**: `>=22.13.0 (not 23.0-23.3)`
 - **Docker** *(Optional)*: Only required if you are actively working on or testing the optional `supabase/` backend adapter.
 - `gh`, the GitHub CLI, for opening pull requests.
 

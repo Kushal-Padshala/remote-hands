@@ -45,6 +45,14 @@ describe('scripts/install-windows.ps1', () => {
     expect(code).not.toMatch(/Get-Command\s+(node|npm)/i);
   });
 
+  it('ends only Remote Hands\' own running programs before replacing its Node, never any other node.exe', () => {
+    expect(code).toContain('function Stop-OwnPrograms');
+    expect(code).toContain('StartsWith($target.Folder, [StringComparison]::OrdinalIgnoreCase)');
+    expect(code.indexOf('Stop-OwnPrograms\n            Remove-Item')).toBeGreaterThan(0);
+    expect(code).not.toMatch(/Stop-Process\s+-Name/i);
+    expect(code).not.toMatch(/taskkill/i);
+  });
+
   it('accepts only a Node that has node:sqlite without a flag (22.13+, 23.4+, 24+)', () => {
     expect(code).toContain('if ($major -eq 22) { return ($minor -ge 13) }');
     expect(code).toContain('if ($major -eq 23) { return ($minor -ge 4) }');
@@ -65,6 +73,12 @@ describe('scripts/install-windows.ps1', () => {
     expect(code).toContain("GetEnvironmentVariable('Path', 'Machine')");
     expect(code).toContain('Test-LauncherShadow');
     expect(code).toContain('Another rh command exists');
+    // every spelling PowerShell would run, for both commands, and the final instructions carry the result
+    expect(code).toContain("@('.exe', '.com', '.bat', '.cmd', '.ps1')");
+    expect(code).toContain("@('rh', 'remote-hands')");
+    expect(code).toContain('$shadowed = Test-LauncherShadow');
+    expect(code).toContain('setup --hud" -ForegroundColor Yellow');
+    expect(code).toContain('$rhCommand doctor');
   });
 
   it('hands over to the guided setup with the private Node directly, so PATH does not matter', () => {

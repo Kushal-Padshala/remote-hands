@@ -166,7 +166,7 @@ const remoteHandsDir = (home: string): string => path.join(home, '.remote-hands'
 export function parseHudCommandLine(line: string): { program: string; role: string } | undefined {
   const m = /^\s*(?:"([^"]+)"|(\S+))\s+(\S+)/.exec(line);
   if (!m) return undefined;
-  const program = (m[1] ?? m[2] ?? '').replace(/\//g, '\\');
+  const program = m[1] ?? m[2] ?? '';
   return /rh-hud\.exe$/i.test(program) ? { program, role: m[3]!.replace(/^"|"$/g, '').toLowerCase() } : undefined;
 }
 

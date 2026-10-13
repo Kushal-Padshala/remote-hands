@@ -35,11 +35,11 @@ describe('rh setup --hud on Windows', () => {
   });
 
   async function run(opts: { installs?: boolean; hotkey?: { state: string } | null; browser?: { path: string; kind: 'chrome' | 'edge' } | undefined } = {}) {
-    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const calls: Array<{ cmd: string; args: string[]; options?: Record<string, unknown> }> = [];
     const out: string[] = [];
     const err: string[] = [];
-    const runner: CommandRunner = async (cmd, args) => {
-      calls.push({ cmd, args });
+    const runner: CommandRunner = async (cmd, args, options) => {
+      calls.push({ cmd, args, ...(options ? { options: options as Record<string, unknown> } : {}) });
       if (cmd === 'powershell' && opts.installs !== false) found.agy = 'C:\\Users\\Ana Lee\\AppData\\Local\\agy\\bin\\agy.exe';
       if (args[0] === 'models') return { exitCode: 0, stdout: 'gemini-3.8-flash\tGemini', stderr: '' };
       return { exitCode: 0, stdout: '', stderr: '' };
@@ -67,7 +67,11 @@ describe('rh setup --hud on Windows', () => {
     expect(calls.some((c) => c.cmd === 'which')).toBe(false);
     const agyCalls = calls.filter((c) => c.cmd.includes('agy.exe'));
     expect(agyCalls.length).toBeGreaterThan(0);
-    for (const c of agyCalls) expect(c.cmd).toBe('"C:\\Users\\Ana Lee\\AppData\\Local\\agy\\bin\\agy.exe"');
+    // run directly (no shell), by the exact path: a folder name with a space, & or % reaches agy unchanged
+    for (const c of agyCalls) {
+      expect(c.cmd).toBe('C:\\Users\\Ana Lee\\AppData\\Local\\agy\\bin\\agy.exe');
+      expect(c.options).toMatchObject({ shell: false });
+    }
     expect(out).toContain('Desktop HUD is ready');
     expect(out).toContain('5/5');
   });

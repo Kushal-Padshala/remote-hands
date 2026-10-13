@@ -65,6 +65,9 @@ function normalizeWindowsPath(p: string): string {
   return (prefix + out.join('/')).toLowerCase();
 }
 
+/** `C:work` or `C:` mean "relative to the current folder on drive C": where that is depends on the computer, so it is never checked as `C:\\work`. */
+const isDriveRelative = (p: string): boolean => /^[A-Za-z]:(?![\\/])/.test(p);
+
 export interface WorkspacePathOptions {
   /** Check as a Windows path: either slash, drive letters and shares, case ignored. Off, paths are checked exactly as on Mac and Linux. */
   windows?: boolean | undefined;
@@ -77,6 +80,9 @@ export function isSafeWorkspacePath(
 ): { allowed: boolean; reason?: string } {
   const windows = options.windows === true;
   const normalizePath = windows ? normalizeWindowsPath : normalizePosixPath;
+  if (windows && typeof targetPath === 'string' && isDriveRelative(targetPath.trim())) {
+    return { allowed: false, reason: 'Drive-relative paths (like C:work) are not allowed: write the full path (C:\\work)' };
+  }
   if (!targetPath || typeof targetPath !== 'string') {
     return { allowed: false, reason: 'Invalid workspace path' };
   }
@@ -114,6 +120,8 @@ export function isSafeWorkspacePath(
 
   if (allowlist && allowlist.length > 0) {
     const isAllowed = allowlist.some((allowed) => {
+      // an allowlist entry that is drive-relative names no fixed folder, so it allows nothing
+      if (windows && isDriveRelative(allowed.trim())) return false;
       const trimmedAllowed = normalizePath(allowed.trim());
       return (
         normalized === trimmedAllowed ||

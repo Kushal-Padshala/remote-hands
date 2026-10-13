@@ -916,6 +916,9 @@ namespace RemoteHands
                             psi.WindowStyle = ProcessWindowStyle.Hidden;
                             psi.RedirectStandardOutput = true;
                             psi.RedirectStandardError = true;
+                            // The listener watches this open pipe: if this program ends for any reason, the pipe closes and the listener stops.
+                            psi.RedirectStandardInput = true;
+                            psi.EnvironmentVariables["RH_HUD_OWNER_PIPE"] = "1";
                             using (Process p = Process.Start(psi))
                             {
                                 p.OutputDataReceived += delegate(object s, DataReceivedEventArgs e) { if (e.Data != null) Log(e.Data); };

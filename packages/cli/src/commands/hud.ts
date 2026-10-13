@@ -195,6 +195,13 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
       };
       process.once('SIGINT', shutdown);
       process.once('SIGTERM', shutdown);
+      // Windows: the supervisor that started this listener keeps its input open; when that ends (the supervisor is gone, however
+      // it ended) this listener stops too, so it never lingers holding the shortcut
+      if (process.platform === 'win32' && process.env.RH_HUD_OWNER_PIPE === '1') {
+        process.stdin.on('end', shutdown);
+        process.stdin.on('close', shutdown);
+        process.stdin.resume();
+      }
     });
     return 0;
   }

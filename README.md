@@ -152,7 +152,7 @@ remote-hands/
 
 ### Prerequisites
 
-- **Node.js**: `>=22.13.0`
+- **Node.js**: `>=22.13.0 (not 23.0-23.3)`
 - **Cloudflare Account**: Free plan (zero credit card required)
 - **Google Chrome**: Desktop browser installed
 

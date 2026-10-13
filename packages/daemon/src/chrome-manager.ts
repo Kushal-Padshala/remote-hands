@@ -421,11 +421,12 @@ export class ChromeManager {
     const args = this.buildLaunchArgs(initialUrl);
     // Windows: start the browser from outside this process's tree, so ending the agent (which ends its tree) never closes it
     const detached = process.platform === 'win32' ? detachedWindowsLaunch(this.chromeExecutablePath, args) : null;
-    const launch = detached ?? { file: this.chromeExecutablePath, args };
+    const launch = detached ?? { file: this.chromeExecutablePath, args, env: undefined, verbatim: false };
     this.process = spawn(launch.file, launch.args, {
       detached: true,
       stdio: 'ignore',
-      ...(detached ? { windowsVerbatimArguments: true, windowsHide: true } : {}),
+      ...(launch.env ? { env: { ...process.env, ...launch.env } } : {}),
+      ...(detached ? { windowsVerbatimArguments: launch.verbatim, windowsHide: true } : {}),
     });
     // a program that cannot be started reports it here, later: it must not end this process
     this.process.on('error', () => {
@@ -433,8 +434,9 @@ export class ChromeManager {
     });
     this.process.unref();
 
-    for (let i = 0; i < 20; i++) {
-      await new Promise((r) => setTimeout(r, 200));
+    // Windows starts the browser through a helper process, which takes longer than starting it directly
+    for (let i = 0, tries = process.platform === 'win32' ? 60 : 20; i < tries; i++) {
+      await new Promise((r) => setTimeout(r, 250));
       const status = await this.checkDebuggerStatus();
       if (status.available) {
         return status;

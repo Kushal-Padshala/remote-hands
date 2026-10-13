@@ -60,6 +60,28 @@ function Get-OwnNodeVersion {
     try { return ((& $NodeExe --version) | Out-String).Trim() } catch { return '' }
 }
 
+# Ends the Remote Hands programs that are running from this installation (the HUD and the Node.js under it), so the folder can be
+# replaced. Only programs in Remote Hands' own folders are touched; setup starts the HUD again afterwards.
+function Stop-OwnPrograms {
+    $hudBin = Join-Path $env:USERPROFILE '.remote-hands\bin'
+    $targets = @(
+        @{ Name = 'rh-hud'; Folder = $hudBin },
+        @{ Name = 'node'; Folder = $NodeDir }
+    )
+    foreach ($target in $targets) {
+        foreach ($process in @(Get-Process -Name $target.Name -ErrorAction SilentlyContinue)) {
+            try {
+                $path = $process.Path
+                if ($path -and $path.StartsWith($target.Folder, [StringComparison]::OrdinalIgnoreCase)) {
+                    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+                }
+            }
+            catch { }
+        }
+    }
+    Start-Sleep -Milliseconds 500
+}
+
 # Downloads the current long-term-support Node.js (checked against its published checksum) and unpacks it
 # in %LOCALAPPDATA%\remote-hands\node. Nothing outside your user folder is touched.
 function Install-Node {
@@ -86,7 +108,10 @@ function Install-Node {
         $unpacked = Join-Path $workDir 'unpacked'
         Expand-Archive -Path $zipPath -DestinationPath $unpacked -Force
         $inner = Get-ChildItem -Path $unpacked | Select-Object -First 1
-        if (Test-Path $NodeDir) { Remove-Item -Recurse -Force $NodeDir }
+        if (Test-Path $NodeDir) {
+            Stop-OwnPrograms
+            Remove-Item -Recurse -Force $NodeDir
+        }
         New-Item -ItemType Directory -Path (Split-Path $NodeDir) -Force | Out-Null
         Move-Item -Path $inner.FullName -Destination $NodeDir
         Write-Note "Node.js $version installed."
@@ -112,9 +137,14 @@ function Test-LauncherShadow {
     $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     if ($null -eq $machine) { $machine = '' }
     $shadow = $null
+    $extensions = @('.exe', '.com', '.bat', '.cmd', '.ps1')
     foreach ($folder in @($machine.Split(';') | Where-Object { $_ -ne '' })) {
-        $candidate = Join-Path $folder 'rh.cmd'
-        if (Test-Path $candidate) { $shadow = $candidate; break }
+        foreach ($name in @('rh', 'remote-hands')) {
+            foreach ($extension in $extensions) {
+                $candidate = Join-Path $folder ($name + $extension)
+                if ((-not $shadow) -and (Test-Path $candidate)) { $shadow = $candidate }
+            }
+        }
     }
     if ($null -eq $shadow) {
         Write-Note 'The commands rh and remote-hands are ready in new PowerShell windows.'
@@ -124,6 +154,7 @@ function Test-LauncherShadow {
         Write-Host "   Use this one instead (it always works):  & '$(Join-Path $BinDir 'rh.cmd')' doctor" -ForegroundColor Yellow
         Write-Host '   or remove the old one with:  npm uninstall -g remote-hands-cli' -ForegroundColor Yellow
     }
+    return ($null -ne $shadow)
 }
 
 function Install-RemoteHands {
@@ -159,7 +190,9 @@ function Install-RemoteHands {
     Write-Launchers
     Add-ToUserPathFirst $BinDir
     Write-Note 'Installed.'
-    Test-LauncherShadow
+    $shadowed = Test-LauncherShadow
+    $rhCommand = 'rh'
+    if ($shadowed) { $rhCommand = "& '$(Join-Path $BinDir 'rh.cmd')'" }
 
     Write-Step 'Guided setup (a few questions and one sign-in)'
     Write-Host ''
@@ -167,11 +200,11 @@ function Install-RemoteHands {
     & $NodeExe $CliEntry setup --hud
     if ($LASTEXITCODE -ne 0) {
         Write-Host ''
-        Write-Host 'Setup did not finish. Fix what it says above, then run:  rh setup --hud' -ForegroundColor Yellow
+        Write-Host "Setup did not finish. Fix what it says above, then run:  $rhCommand setup --hud" -ForegroundColor Yellow
         return
     }
     Write-Host ''
-    Write-Host 'Setup finished. To check that everything is ready, open a new PowerShell and type:  rh doctor' -ForegroundColor Green
+    Write-Host "Setup finished. To check that everything is ready, open a new PowerShell and type:  $rhCommand doctor" -ForegroundColor Green
 }
 
 try {

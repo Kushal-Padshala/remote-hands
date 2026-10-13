@@ -7,6 +7,8 @@ export type CommandRunner = (
     cwd?: string | undefined;
     env?: Record<string, string | undefined> | undefined;
     interactive?: boolean | undefined;
+    /** Run the program itself, not through a shell (a path with &, % or ! must reach it exactly as written). Default: through a shell. */
+    shell?: boolean | undefined;
   },
 ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
@@ -16,7 +18,7 @@ export const defaultRunner: CommandRunner = (command, args, options) => {
     const proc = spawn(command, args, {
       cwd: options?.cwd,
       env: { ...process.env, ...options?.env },
-      shell: true,
+      shell: options?.shell ?? true,
       stdio: isInteractive ? 'inherit' : undefined,
     });
     let stdout = '';

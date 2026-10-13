@@ -1,4 +1,4 @@
-import { findAgyOnWindows, shellQuote } from '@remote-hands/daemon';
+import { findAgyOnWindows } from '@remote-hands/daemon';
 import type { CommandRunner } from '../cloudflare/wrangler.js';
 
 /**
@@ -17,9 +17,17 @@ export async function locateAgy(
   return found.length > 0 ? found : undefined;
 }
 
-/** What to type for `agy` when running it through a shell: the plain name, or on Windows its full path (quoted if it has spaces). */
+/** What to run for `agy`: the plain name, or on Windows its full path. */
 export function agyShellCommand(located: string | undefined, platform: NodeJS.Platform = process.platform): string {
-  return platform === 'win32' && located ? shellQuote(located) : 'agy';
+  return platform === 'win32' && located ? located : 'agy';
+}
+
+/**
+ * Extra runner options for agy: on Windows the program is started directly (no shell), so a folder name with &, %, !
+ * or spaces reaches it exactly as it is. Nothing on other systems: their calls are exactly as before.
+ */
+export function agyRunOptions(located: string | undefined, platform: NodeJS.Platform = process.platform): { shell: false } | undefined {
+  return platform === 'win32' && located ? { shell: false } : undefined;
 }
 
 /** The Windows install: Google's own script, run the way it documents (quoted, so the shell does not split it at the pipe). */
