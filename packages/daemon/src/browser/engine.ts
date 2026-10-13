@@ -81,7 +81,7 @@ const NO_CHANGE_NOTE = 'note: no change detected';
 const OPENED_NOTE = 'note: that link opens in a new tab; if the page did not change, use browser_tabs then browser_focus to switch to it';
 
 function focusLine(label: string): string {
-  return `focus now on: "${clean(label, 80).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  return `tab moved focus to: "${clean(label, 80).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 const CONFIRM_DELAY_MS = 150;
 /**
@@ -265,8 +265,6 @@ export class FastBrowserEngine implements BrowserPort {
   private readonly autoEnable: FastBrowserEngineDeps['autoEnable'];
   private readonly gate: FastBrowserEngineDeps['gate'];
   private readonly autoFailedAt = new Map<string, number>();
-  /** Set while a browser_do call runs: no step may start (or pass its approval gate) after it. */
-  private deadlineAt: number | null = null;
 
   constructor(deps: FastBrowserEngineDeps) {
     this.autoEnable = deps.autoEnable;
@@ -579,10 +577,11 @@ export class FastBrowserEngine implements BrowserPort {
   }
 
   /** Runs one page op; throws the model-facing message on failure. */
-  private async act(ctx: Ctx, op: PageOp, index: number | null): Promise<PageOpResult & { ok: true }> {
+  /** `deadline` belongs to one browser_do call (never shared between calls): no click passes its approval gate after it. */
+  private async act(ctx: Ctx, op: PageOp, index: number | null, deadline: number | null = null): Promise<PageOpResult & { ok: true }> {
     if (op.op === 'click') {
       await this.gate?.(op.label);
-      if (this.deadlineAt !== null && this.now() > this.deadlineAt) throw new Error(`${OUT_OF_TIME}; the click was not performed`);
+      if (deadline !== null && this.now() > deadline) throw new Error(`${OUT_OF_TIME}; the click was not performed`);
     }
     let text: string;
     try {
@@ -860,15 +859,10 @@ export class FastBrowserEngine implements BrowserPort {
   }
 
   async do(steps: DoStep[]): Promise<string> {
-    this.deadlineAt = this.now() + BATCH_DEADLINE_MS;
-    try {
-      return await this.doSteps(steps);
-    } finally {
-      this.deadlineAt = null;
-    }
+    return this.doSteps(steps, this.now() + BATCH_DEADLINE_MS);
   }
 
-  private async doSteps(steps: DoStep[]): Promise<string> {
+  private async doSteps(steps: DoStep[], deadline: number): Promise<string> {
     if (this.shown?.mode === 'legacy') return this.legacy.do(steps);
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new Error('browser_do needs at least one step. No steps were run.');
@@ -877,6 +871,9 @@ export class FastBrowserEngine implements BrowserPort {
       throw new Error(`browser_do accepts at most ${MAX_STEPS} steps (got ${steps.length}). No steps were run.`);
     }
     let shown = this.shown?.mode === 'fast' ? this.shown : null;
+    // What the model last saw: results are described relative to it, so a page that changed
+    // underneath is reported as changed instead of silently becoming the new baseline.
+    const modelView = shown;
     const named = (s: DoStep | null | undefined): s is DoStep => s !== null && typeof s === 'object';
     const usesTargets = steps.some((s) => named(s) && s.target !== undefined);
     const usesIndex = steps.some((s) => named(s) && s.index !== undefined);
@@ -894,6 +891,12 @@ export class FastBrowserEngine implements BrowserPort {
         throw err;
       }
       shown = this.shown?.mode === 'fast' ? this.shown : null;
+      if (usesIndex && modelView && (!shown || (modelView.origin !== null && String(shown.origin) !== String(modelView.origin)))) {
+        // The numeric ids in this batch belong to a document that is gone; the new one numbers its
+        // elements afresh. Forget the old state so no later id can land on the wrong element either.
+        this.shown = null;
+        throw new Error('The page was reloaded or replaced since you last looked, so the ids you hold no longer apply. Call browser_snapshot. No steps were run.');
+      }
     } else if (usesTargets && !usesIndex) {
       // No page shown yet: look first, through the same setup and fallback as browser_snapshot. Never
       // when a step also uses a numeric id: those ids belong to a page the model saw, and a fresh
@@ -957,15 +960,16 @@ export class FastBrowserEngine implements BrowserPort {
     for (let i = 0; i < plan.length; i += 1) {
       const p = plan[i]!;
       const n = i + 1;
-      if (this.deadlineAt !== null && this.now() > this.deadlineAt) return fail(n, p.name, new Error(`${OUT_OF_TIME}; remaining steps not run`));
+      if (this.now() > deadline) return fail(n, p.name, new Error(`${OUT_OF_TIME}; remaining steps not run`));
       if (!p.op) {
         await this.sleep(p.ms);
+        focused = null; // a wait gives the page time to move focus itself
         done.push(p.name);
         continue;
       }
       let res: PageOpResult & { ok: true };
       try {
-        res = await this.act(ctx, this.guarded(p.op, origin), p.index);
+        res = await this.act(ctx, this.guarded(p.op, origin), p.index, deadline);
       } catch (err) {
         return fail(n, p.name, err);
       }
@@ -995,7 +999,7 @@ export class FastBrowserEngine implements BrowserPort {
       }
     }
     const passwordTyped = plan.some((p) => p.masked);
-    const body = await this.after(ctx, shown?.state ?? null, unverified, origin, passwordTyped, confirm);
+    const body = await this.after(ctx, modelView?.state ?? shown?.state ?? null, unverified, origin, passwordTyped, confirm);
     if (body.startsWith('changed: page navigated')) focused = null;
     return [
       `did: ${done.join(', ')}`,

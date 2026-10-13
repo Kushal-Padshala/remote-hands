@@ -1399,3 +1399,99 @@ describe('page scripts (round 2 fixes)', () => {
     expect(p.evalJson(buildExtractScript(2000)).text).toBe('Assigned');
   });
 });
+
+describe('page scripts and snapshot (round 3 fixes)', () => {
+  const light = (p: Page): any => p.evalJson(buildSnapshotCall());
+
+  it('keeps 40 long-labelled dropdowns far below the 16 MiB bridge limit, every dropdown still present', () => {
+    const question = 'Q'.repeat(900);
+    const options = Array.from({ length: 501 }, (_, i) => `<option value="${i}">Choice ${i}</option>`).join('');
+    const p = makePage(Array.from({ length: 40 }, (_, i) => `<select aria-label="${question}${i}">${options}</select>`).join(''));
+    const raw = p.win.eval(buildSnapshotCall()) as string;
+    expect(raw.length).toBeLessThan(8 * 1024 * 1024);
+    const snap = JSON.parse(raw);
+    const selects = new Set(snap.actions.filter((a: any) => a.kind === 'select').map((a: any) => a.node));
+    expect(selects.size).toBe(40);
+    expect(snap.actions.filter((a: any) => a.kind === 'select').length).toBeLessThanOrEqual(3000 + 40);
+  }, 60_000);
+
+  it('Tab stops on every standard contenteditable spelling', () => {
+    for (const attr of ['contenteditable', 'contenteditable=""', 'contenteditable="plaintext-only"', 'contenteditable="TRUE"']) {
+      const p = makePage(`<input aria-label="First"><div ${attr} aria-label="Editor"></div><input aria-label="Last">`, { contentEditable: true });
+      p.doc.querySelector('input').focus();
+      expect((p.run({ op: 'press', key: 'Tab' }) as any).focused).toBe('Editor');
+    }
+    const p = makePage('<input aria-label="First"><div contenteditable="false" aria-label="Plain"></div><input aria-label="Last">', { contentEditable: true });
+    p.doc.querySelector('input').focus();
+    expect((p.run({ op: 'press', key: 'Tab' }) as any).focused).toBe('Last');
+  });
+
+  it('Tab does not enter the shadow tree of a host with a negative tabindex', () => {
+    const p = makePage('<input aria-label="First"><div id="host" tabindex="-1"></div><input aria-label="Last">');
+    p.doc.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<input aria-label="Inner">';
+    p.doc.querySelector('input').focus();
+    expect((p.run({ op: 'press', key: 'Tab' }) as any).focused).toBe('Last');
+  });
+
+  it('Tab stops iterating a huge sibling list once its node budget is spent', () => {
+    const p = makePage('<input aria-label="First">');
+    const body = p.doc.body;
+    let yielded = 0;
+    const real = Object.getOwnPropertyDescriptor(p.win.Node.prototype, 'childNodes')!;
+    const big = { [Symbol.iterator]: function* () { for (let i = 0; i < 500_000; i += 1) { yielded += 1; yield p.doc.createComment('x'); } } };
+    Object.defineProperty(body, 'childNodes', { configurable: true, get() { return big; } });
+    p.doc.querySelector('input').focus();
+    p.run({ op: 'press', key: 'Tab' });
+    expect(yielded).toBeLessThan(200_000);
+    Object.defineProperty(body, 'childNodes', real as any);
+  }, 60_000);
+
+  it('a nested click does not hide that the link click was cancelled', () => {
+    const p = makePage('<button id="other">Other</button><a id="l" href="#d" target="_blank">Docs</a>');
+    p.doc.getElementById('l').addEventListener('click', (e: any) => { e.preventDefault(); p.doc.getElementById('other').click(); });
+    p.snapshot();
+    expect((p.run({ op: 'click', node: p.node('#l'), label: 'Docs' }) as any).opened).toBeUndefined();
+  });
+
+  it('makes no new-tab claim when an early capture handler cancels and stops the click', () => {
+    const p = makePage('<a id="l" href="#d" target="_blank">Docs</a>');
+    p.win.addEventListener('click', (e: any) => { e.preventDefault(); e.stopImmediatePropagation(); }, true);
+    p.snapshot();
+    expect((p.run({ op: 'click', node: p.node('#l'), label: 'Docs' }) as any).opened).toBeUndefined();
+  });
+
+  it('reports a frame under a vertical scale, a rotation or a reflection as unreadable, but reads one under a pure translation', () => {
+    const matrixOf = (m: string) => {
+      const frames: Record<string, string> = {};
+      return { frames, m };
+    };
+    void matrixOf;
+    const cases: Array<[string, boolean]> = [
+      ['matrix(1, 0, 0, 0.5, 0, 0)', false],
+      ['matrix(-1, 0, 0, -1, 0, 0)', false],
+      ['matrix(0, 1, -1, 0, 0, 0)', false],
+      ['matrix(1, 0, 0, 1, 40, 20)', true],
+    ];
+    for (const [transform, readable] of cases) {
+      const p = makePage('');
+      p.win.DOMMatrixReadOnly = class {
+        a: number; b: number; c: number; d: number;
+        constructor(s: string) { [this.a, this.b, this.c, this.d] = (s.match(/-?[\d.]+/g) ?? []).map(Number) as [number, number, number, number]; }
+      };
+      const frame = addFrame(p, '<button>Inner</button>', { left: 0, top: 0, width: 200, height: 200 });
+      const original = p.win.getComputedStyle.bind(p.win);
+      p.win.getComputedStyle = (el: any) => (el === frame ? { transform, rotate: 'none', scale: 'none' } : original(el));
+      const snap = light(p);
+      expect(snap.actions.map((a: any) => a.label).includes('Inner')).toBe(readable);
+      if (!readable) expect(snap.frames_blocked).toBe(1);
+    }
+  });
+
+  it('extract reads inside a display: contents host and skips a slot made invisible by CSS visibility', () => {
+    const p = makePage('<main><div id="wrapper" style="display:contents">Wrapped text</div><x-a id="a">Assigned</x-a></main>');
+    p.doc.getElementById('wrapper').checkVisibility = () => false; // no box of its own
+    p.doc.getElementById('a').attachShadow({ mode: 'open' }).innerHTML = '<slot style="visibility:hidden"></slot>';
+    expect(p.evalJson(buildExtractScript(2000)).text).toBe('Wrapped text');
+  });
+});
+

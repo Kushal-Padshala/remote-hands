@@ -1256,17 +1256,17 @@ describe('action hints', () => {
     ]);
     const lines = out.split('\n');
     expect(lines.filter((l) => l === NOTE)).toHaveLength(1);
-    expect(lines.at(-1)).toBe('focus now on: "Go \\"now\\""');
+    expect(lines.at(-1)).toBe('tab moved focus to: "Go \\"now\\""');
   });
 
   it('drops the focus line when any later step (hover, another key) could have moved focus', async () => {
     await engine.snapshot();
     t.actions = [JSON.stringify({ ok: true, focused: 'Second' }), JSON.stringify({ ok: true })];
-    expect(await engine.do([{ op: 'press', key: 'Tab' }, { op: 'hover', index: 12 }])).not.toContain('focus now on');
+    expect(await engine.do([{ op: 'press', key: 'Tab' }, { op: 'hover', index: 12 }])).not.toContain('tab moved focus to');
     t.actions = [JSON.stringify({ ok: true, focused: 'Second' }), JSON.stringify({ ok: true })];
-    expect(await engine.do([{ op: 'press', key: 'Tab' }, { op: 'press', key: 'Escape' }])).not.toContain('focus now on');
+    expect(await engine.do([{ op: 'press', key: 'Tab' }, { op: 'press', key: 'Escape' }])).not.toContain('tab moved focus to');
     t.actions = [JSON.stringify({ ok: true, focused: 'Second' }), JSON.stringify({ ok: true })];
-    expect(await engine.do([{ op: 'press', key: 'Tab' }, { op: 'scroll', delta: 100 }])).toContain('focus now on: "Second"');
+    expect(await engine.do([{ op: 'press', key: 'Tab' }, { op: 'scroll', delta: 100 }])).toContain('tab moved focus to: "Second"');
   });
 });
 
@@ -1319,9 +1319,9 @@ describe('do: label safety (review fixes)', () => {
     await engine.snapshot();
     t.actions = [JSON.stringify({ ok: true, focused: 'Second' }), JSON.stringify({ ok: true, label: 'Next' })];
     const out = await engine.do([{ op: 'press', key: 'Tab' }, { op: 'click', index: 12 }]);
-    expect(out).not.toContain('focus now on');
+    expect(out).not.toContain('tab moved focus to');
     t.actions = [JSON.stringify({ ok: true, label: 'Next' }), JSON.stringify({ ok: true, focused: 'Second' })];
-    expect(await engine.do([{ op: 'click', index: 12 }, { op: 'press', key: 'Tab' }])).toContain('focus now on: "Second"');
+    expect(await engine.do([{ op: 'click', index: 12 }, { op: 'press', key: 'Tab' }])).toContain('tab moved focus to: "Second"');
   });
 
   it('a first label call goes through the same automatic setup as browser_snapshot', async () => {
@@ -1401,3 +1401,69 @@ describe('do and find: fresh labels, deadline, notes (review fixes)', () => {
     expect(out).toContain('note: this page is very large');
   });
 });
+
+describe('do: documents, deadlines and focus (round 3 fixes)', () => {
+  const doc = (origin: number, nodes: Array<[number, string]>): string =>
+    JSON.stringify(page({
+      page_key: [origin],
+      actions: nodes.map(([node, label]) => ({ node, role: 'button', label, kind: 'click', value: '' })),
+    }));
+
+  it('rejects a batch whose numeric ids belong to a document that has been replaced, and forgets the old ids', async () => {
+    t.snapshots = [doc(1, [[1, 'Open details']])];
+    await engine.snapshot();
+    t.snapshots = [doc(2, [[1, 'Delete account'], [2, 'Menu']])]; // the page reloaded; numbering restarted
+    await expect(engine.do([{ op: 'click', index: 1 }, { op: 'hover', target: 'Menu' }])).rejects.toThrow(
+      'The page was reloaded or replaced since you last looked, so the ids you hold no longer apply. Call browser_snapshot. No steps were run.',
+    );
+    expect(t.actionEvals()).toHaveLength(0);
+    // the old ids must not land on the new page afterwards either
+    await expect(engine.click(1)).rejects.toThrow('not on the page I last showed');
+    expect(t.actionEvals()).toHaveLength(0);
+  });
+
+  it('describes a label batch relative to what the model last saw, so a replaced page shows up as changed', async () => {
+    t.snapshots = [doc(1, [[1, 'Open details']])];
+    await engine.snapshot();
+    t.snapshots = [JSON.stringify(page({ url: 'https://example.com/other', title: 'Other', page_key: [2], actions: [{ node: 1, role: 'button', label: 'Menu', kind: 'click', value: '' }] }))];
+    const out = await engine.do([{ op: 'hover', target: 'Menu' }]);
+    expect(out).toContain('changed: page navigated or re-rendered');
+    expect(out).toContain('[1] button "Menu"');
+  });
+
+  it('keeps numeric ids working in a mixed batch when the document is the same', async () => {
+    t.snapshots = [doc(1, [[1, 'Open details'], [2, 'Menu']])];
+    await engine.snapshot();
+    await engine.do([{ op: 'click', index: 1 }, { op: 'hover', target: 'Menu' }]);
+    expect(t.actionEvals().map(opOf)).toEqual([
+      { op: 'click', node: 1, label: 'Open details', origin: 1 },
+      { op: 'hover', node: 2, label: 'Menu', origin: 1 },
+    ]);
+  });
+
+  it('gives each call its own deadline: an overlapping call neither extends nor clears it', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let calls = 0;
+    const gated = new FastBrowserEngine({
+      transport: t, legacy, env: {}, now: () => clock, sleep: async (ms) => { clock += ms; },
+      gate: async () => { calls += 1; if (calls === 1) await held; },
+    });
+    await gated.snapshot();
+    const first = gated.do([{ op: 'click', index: 12 }]); // waits at its approval gate
+    await Promise.resolve();
+    clock += 90_000;
+    await gated.do([{ op: 'click', index: 12 }]); // a later call starts, runs and finishes
+    clock += 2_000;
+    release();
+    await expect(first).rejects.toThrow('this call ran out of time (60 s); the click was not performed');
+    expect(t.actionEvals()).toHaveLength(1); // only the later call acted
+  });
+
+  it('drops the Tab focus line after a wait, which gives the page time to move focus', async () => {
+    await engine.snapshot();
+    t.actions = [JSON.stringify({ ok: true, focused: 'Second' })];
+    expect(await engine.do([{ op: 'press', key: 'Tab' }, { op: 'wait', ms: 10 }])).not.toContain('tab moved focus to');
+  });
+});
+

@@ -47,6 +47,7 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   const MAX_NESTED_TEXT_VISITS = 20000;
   const MAX_CONTROLS = 250;
   const MAX_OPTIONS_PER_SELECT = 500;
+  const MAX_OPTIONS_TOTAL = 3000;
   const hostOf = (e) => { const r = e.getRootNode && e.getRootNode(); return r && r.host ? r.host : null; };
   const frameOf = (e) => {
     const view = e.ownerDocument && e.ownerDocument.defaultView;
@@ -122,6 +123,21 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
   let scanTruncated = false;
   let nestedControls = 0;
   const textRoots = [];
+  // Offsets can only be added through a pure translation: any scale, rotation, skew or reflection
+  // anywhere above the frame (or a size that differs from its layout size) means we cannot map it.
+  const transformed = (host) => {
+    for (let n = host; n; n = n.parentElement || hostOf(n) || frameOf(n)) {
+      if (typeof getComputedStyle !== 'function') return false;
+      const cs = (n.ownerDocument && n.ownerDocument.defaultView || window).getComputedStyle(n);
+      if ((cs.rotate && cs.rotate !== 'none') || (cs.scale && cs.scale !== 'none')) return true;
+      if (cs.transform && cs.transform !== 'none') {
+        if (typeof DOMMatrixReadOnly !== 'function') return true;
+        const m = new DOMMatrixReadOnly(cs.transform);
+        if (Math.abs(m.a - 1) > 0.001 || Math.abs(m.b) > 0.001 || Math.abs(m.c) > 0.001 || Math.abs(m.d - 1) > 0.001) return true;
+      }
+    }
+    return false;
+  };
   const intersect = (a, b) => ({ l: Math.max(a.l, b.l), t: Math.max(a.t, b.t), r: Math.min(a.r, b.r), b: Math.min(a.b, b.b) });
   const gather = (root, dx, dy, depth, clip) => {
     for (const e of root.querySelectorAll(selector)) {
@@ -153,7 +169,8 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
       const box = intersect(clip, { l: dx + r.left + cl, t: dy + r.top + ct, r: dx + r.left + cl + cw, b: dy + r.top + ct + ch });
       if (box.r <= box.l || box.b <= box.t || !visible(host)) continue;
       // A scaled or rotated frame cannot be mapped by adding offsets: do not guess, report it unreadable.
-      const scaled = host.offsetWidth > 0 && Math.abs(r.width - host.offsetWidth) > 1;
+      const scaled = (host.offsetWidth > 0 && Math.abs(r.width - host.offsetWidth) > 1) ||
+        (host.offsetHeight > 0 && Math.abs(r.height - host.offsetHeight) > 1) || transformed(host);
       let doc = null;
       if (depth < MAX_NEST && !scaled) {
         try { doc = host.contentDocument; } catch (err) { doc = null; }
@@ -165,6 +182,7 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
       }
     }
   };
+  let optionBudget = MAX_OPTIONS_TOTAL;
   const actions = [];
   const found = [];
   gather(document, 0, 0, 0, { l: 0, t: 0, r: innerWidth, b: innerHeight });
@@ -185,7 +203,11 @@ export const DOM_SNAPSHOT_SCRIPT = `(() => {
     if (['checkbox', 'radio'].includes(e.type)) base.checked = String(e.checked);
     if (e.tagName === 'SELECT') {
       const eligible = [...e.options].filter((o) => !o.selected && !o.disabled && !o.closest('optgroup[disabled]'));
-      const listedOptions = light ? eligible.slice(0, MAX_OPTIONS_PER_SELECT) : eligible;
+      // One budget for the whole page keeps the result small enough for the browser bridge; every
+      // dropdown still lists at least one choice so the control itself stays visible.
+      const room = light ? Math.max(1, Math.min(MAX_OPTIONS_PER_SELECT, optionBudget)) : eligible.length;
+      const listedOptions = eligible.slice(0, room);
+      optionBudget -= listedOptions.length;
       const cut = eligible.length - listedOptions.length;
       const current = [...e.selectedOptions].map((opt) => opt.label).join(', ');
       for (const o of listedOptions) {

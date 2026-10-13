@@ -120,7 +120,7 @@ const PRELUDE = String.raw`
     }
     return a;
   };
-  const FOCUSABLE = 'a[href],area[href],button,input,select,textarea,summary,[tabindex],[contenteditable="true"]';
+  const FOCUSABLE = 'a[href],area[href],button,input,select,textarea,summary,[tabindex],[contenteditable]';
   const visibleNow = (e) => !composedClosest(e, '[aria-hidden="true"],[inert]') &&
     (typeof e.checkVisibility === 'function' ? e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) : true);
   // Focusable controls in the order the page's flat tree presents them: a shadow host's
@@ -129,16 +129,26 @@ const PRELUDE = String.raw`
   const flatFocusables = () => {
     const found = [];
     let visits = 0;
+    const LIMIT = 100000;
+    const walkAll = (nodes, depth) => {
+      for (const c of nodes) {
+        if (visits > LIMIT) return;
+        walk(c, depth);
+      }
+    };
     const walk = (node, depth) => {
-      if (node.nodeType !== 1 || ++visits > 100000) return;
+      if (++visits > LIMIT || node.nodeType !== 1) return;
       if (node.matches(FOCUSABLE)) found.push(node);
       if (node.shadowRoot && depth < 3) {
-        for (const c of node.shadowRoot.childNodes) walk(c, depth + 1);
+        // A host with a negative tabindex keeps its whole shadow tree out of the tab order.
+        const ti = node.getAttribute('tabindex');
+        if (ti !== null && Number(ti) < 0) return;
+        walkAll(node.shadowRoot.childNodes, depth + 1);
         return;
       }
       if (node.tagName === 'SLOT' && typeof node.assignedNodes === 'function') {
         const assigned = node.assignedNodes({ flatten: true });
-        for (const c of (assigned.length > 0 ? assigned : node.childNodes)) walk(c, depth);
+        walkAll(assigned.length > 0 ? assigned : node.childNodes, depth);
         return;
       }
       if ((node.tagName === 'IFRAME' || node.tagName === 'FRAME') && depth < 3) {
@@ -147,7 +157,7 @@ const PRELUDE = String.raw`
         if (d && d.body) walk(d.body, depth + 1);
         return;
       }
-      for (const c of node.childNodes) walk(c, depth);
+      walkAll(node.childNodes, depth);
     };
     walk(document.documentElement || document.body, 0);
     return found;
@@ -250,10 +260,11 @@ const CLICK = String.raw`
   // the link opens nothing.
   const view = viewOf(el);
   let clickEvent = null;
-  const record = (ev) => { clickEvent = ev; };
+  const record = (ev) => { if (!clickEvent) clickEvent = ev; };
   view.addEventListener('click', record, true);
   try { el.click(); } finally { view.removeEventListener('click', record, true); }
-  if (clickEvent && clickEvent.defaultPrevented) opened = false;
+  // If the event could not be observed, or the page cancelled it, make no claim about a new tab.
+  if (!clickEvent || clickEvent.defaultPrevented) opened = false;
   const result = { ok: true, label: current, navigated: false };
   if (opened) result.opened = true;
   return out(result);
@@ -449,7 +460,9 @@ export function buildExtractScript(maxChars: number): string {
   const SKIP = ['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SELECT', 'OPTION', 'OPTGROUP', 'DATALIST'];
   const VALUE_TYPES = ['text', 'search', 'email', 'url', 'tel', 'number'];
   const hidden = (e) => e.hasAttribute('hidden') || e.getAttribute('aria-hidden') === 'true' || e.hasAttribute('inert') ||
-    (typeof e.checkVisibility === 'function' && !e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
+    (typeof e.checkVisibility === 'function' && !e.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) &&
+      // an element with display: contents has no box but its children are rendered normally
+      !(typeof getComputedStyle === 'function' && getComputedStyle(e).display === 'contents'));
   const textLen = (e) => (e.textContent || '').length;
   const candidates = Array.from(document.querySelectorAll('main,[role="main"],article')).filter((e) => !hidden(e));
   let root = null;
@@ -476,7 +489,10 @@ export function buildExtractScript(maxChars: number): string {
     if (n.tagName === 'SLOT' && typeof n.assignedNodes === 'function') {
       // A slot has no box of its own, so checkVisibility cannot judge it; explicit hiding still applies.
       if (n.hasAttribute('hidden') || n.getAttribute('aria-hidden') === 'true' || n.hasAttribute('inert')) return;
-      if (typeof getComputedStyle === 'function' && getComputedStyle(n).display === 'none') return;
+      if (typeof getComputedStyle === 'function') {
+        const cs = getComputedStyle(n);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || cs.visibility === 'collapse') return;
+      }
       const assigned = n.assignedNodes({ flatten: true });
       for (const c of (assigned.length > 0 ? assigned : n.childNodes)) { if (truncated) return; walk(c, depth); }
       return;
