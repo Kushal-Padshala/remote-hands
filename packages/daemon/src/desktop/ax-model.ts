@@ -15,6 +15,8 @@ export interface ViewItem {
   /** Friendly role: button, textfield, row … */
   role: string;
   label: string;
+  /** The label with almost nothing cut off: what approval is judged on (display labels are shortened). */
+  gateLabel: string;
   line: string;
   interactive: boolean;
   /** Whether it takes typed text. */
@@ -35,6 +37,8 @@ export interface View {
   items: ViewItem[];
   byId: Map<number, ViewItem>;
   fingerprint: string;
+  /** Notes such as "only part of it was read"; a change in them always shows the whole window. */
+  notes: string;
   /** Lines left out of `lines` because of the cap or a filter. */
   hidden: number;
   truncated: boolean;
@@ -46,6 +50,7 @@ export interface ViewOptions {
 }
 
 const MAX_LABEL = 80;
+const MAX_GATE_LABEL = 400;
 const MAX_VALUE = 60;
 const MAX_INDENT = 3;
 const DEFAULT_MAX_LINES = 150;
@@ -149,21 +154,21 @@ interface Ctx {
 }
 
 /** The text a row or control shows: its own label, else the texts and image names inside it. */
-function textOf(ctx: Ctx, node: AxNode, depth = 0): string[] {
-  const own = clean(node.label, MAX_LABEL);
+function textOf(ctx: Ctx, node: AxNode, depth = 0, max = MAX_LABEL): string[] {
+  const own = clean(node.label, max);
   if (own) return [own];
   const parts: string[] = [];
   for (const child of ctx.kids.get(node.id) ?? []) {
     if (parts.length >= 4 || depth > 4) break;
     if (child.role === 'AXStaticText' || child.role === 'AXHeading') {
-      const t = clean(child.value ?? child.label, MAX_LABEL);
+      const t = clean(child.value ?? child.label, max);
       if (t) parts.push(t);
     } else if (child.role === 'AXImage') {
       const t = clean(child.label, 30);
       // an image named "clock" or "folder" is decoration; it only helps when nothing else is there
       if (t && parts.length === 0 && !(ctx.kids.get(node.id) ?? []).some((c) => c.role === 'AXStaticText' && (c.value ?? c.label))) parts.push(t);
     } else if (!LEAF_CONTROLS.has(child.role) && child.role !== 'AXRow' && !LIST_ROLES.has(child.role)) {
-      parts.push(...textOf(ctx, child, depth + 1));
+      parts.push(...textOf(ctx, child, depth + 1, max));
     }
   }
   const unique: string[] = [];
@@ -222,7 +227,7 @@ function valuePart(node: AxNode, role: string, label: string): string {
   return '';
 }
 
-function emit(ctx: Ctx, indent: number, node: AxNode, opts: { role?: string; label: string; interactive: boolean; members: number[]; text?: boolean }): void {
+function emit(ctx: Ctx, indent: number, node: AxNode, opts: { role?: string; label: string; gateLabel?: string; interactive: boolean; members: number[]; text?: boolean }): void {
   const role = opts.role ?? roleName(node);
   const targets = actionTargets(ctx, node, opts.members);
   const notes = annotations(node, role, targets);
@@ -237,6 +242,7 @@ function emit(ctx: Ctx, indent: number, node: AxNode, opts: { role?: string; lab
     id: node.id,
     role,
     label: opts.label,
+    gateLabel: opts.gateLabel ?? opts.label,
     line,
     interactive: opts.interactive,
     editable: TEXT_FIELD_ROLES.has(node.role),
@@ -261,6 +267,7 @@ function hint(ctx: Ctx, indent: number, owner: AxNode): void {
     id: owner.id,
     role: 'hint',
     label: '',
+    gateLabel: '',
     line: `${pad}… ${owner.off} more ${where} (desktop_scroll [${owner.id}])`,
     interactive: false,
     editable: false,
@@ -285,7 +292,7 @@ function visit(ctx: Ctx, node: AxNode, indent: number, inRow: boolean): void {
     const members: number[] = [];
     collectMembers(ctx, node, members);
     if (label || node.selected || Object.keys(actionTargets(ctx, node, members)).length > 0) {
-      emit(ctx, indent, node, { label, interactive: true, members });
+      emit(ctx, indent, node, { label, gateLabel: textOf(ctx, node, 0, MAX_GATE_LABEL).join(' · '), interactive: true, members });
     }
     // controls inside a row (a button, a checkbox, a field) are still their own lines
     for (const child of ctx.kids.get(node.id) ?? []) visitRowChild(ctx, child, indent + 1);
@@ -295,20 +302,29 @@ function visit(ctx: Ctx, node: AxNode, indent: number, inRow: boolean): void {
   if (role === 'AXStaticText' || role === 'AXHeading') {
     if (inRow) return;
     const t = clean(node.value ?? node.label, 120);
-    if (t) emit(ctx, indent, node, { role: role === 'AXHeading' ? 'heading' : 'text', label: t, interactive: false, members: [node.id], text: true });
+    // text that was cut keeps its id, so desktop_read can fetch the rest
+    if (t) emit(ctx, indent, node, { role: role === 'AXHeading' ? 'heading' : 'text', label: t, interactive: false, members: [node.id], text: !t.endsWith('…') });
     return;
   }
 
   if (LEAF_CONTROLS.has(role)) {
     let label = clean(node.label, MAX_LABEL);
+    let gateLabel = clean(node.label, MAX_GATE_LABEL);
     const members = [node.id];
     if (!label) {
       label = textOf(ctx, node).join(' · ');
+      gateLabel = textOf(ctx, node, 0, MAX_GATE_LABEL).join(' · ');
       collectMembers(ctx, node, members);
     }
-    if (!label && TEXT_FIELD_ROLES.has(role)) label = clean(node.placeholder ?? node.help, MAX_LABEL);
-    if (!label) label = clean(node.help, MAX_LABEL);
-    emit(ctx, indent, node, { label, interactive: true, members });
+    if (!label && TEXT_FIELD_ROLES.has(role)) {
+      label = clean(node.placeholder ?? node.help, MAX_LABEL);
+      gateLabel = clean(node.placeholder ?? node.help, MAX_GATE_LABEL);
+    }
+    if (!label) {
+      label = clean(node.help, MAX_LABEL);
+      gateLabel = clean(node.help, MAX_GATE_LABEL);
+    }
+    emit(ctx, indent, node, { label, gateLabel, interactive: true, members });
     return;
   }
 
@@ -445,7 +461,8 @@ export function buildView(snapshot: AxSnapshot, opts: ViewOptions = {}): View {
     text,
     items: shown,
     byId,
-    fingerprint: fingerprintOf([header, ...items.map((i) => i.line)].join('\n')),
+    fingerprint: fingerprintOf([header, ...notes, ...items.map((i) => i.line)].join('\n')),
+    notes: notes.join('\n'),
     hidden,
     truncated: snapshot.truncated || snapshot.timedOut,
   };
@@ -456,7 +473,13 @@ export function buildView(snapshot: AxSnapshot, opts: ViewOptions = {}): View {
  * A different app or window, or a change to most of the lines, is shown whole.
  */
 export function renderDiff(prev: View | null, next: View): string {
-  if (!prev || prev.header !== next.header) return next.text;
+  if (!prev || prev.header !== next.header || prev.notes !== next.notes) return next.text;
+  // a different order of the same lines cannot be told as a list of changes
+  const nextKeys = new Set(next.items.map((i) => i.key));
+  const prevShared = prev.items.map((i) => i.key).filter((k) => nextKeys.has(k));
+  const prevKeys = new Set(prev.items.map((i) => i.key));
+  const nextShared = next.items.map((i) => i.key).filter((k) => prevKeys.has(k));
+  if (prevShared.join(',') !== nextShared.join(',')) return next.text;
   const before = new Map(prev.items.map((i) => [i.key, i]));
   const after = new Set(next.items.map((i) => i.key));
   const out: string[] = [];
@@ -474,8 +497,10 @@ export function renderDiff(prev: View | null, next: View): string {
       unchanged += 1;
     }
   }
-  const gone = prev.items.filter((i) => !after.has(i.key) && i.role !== 'hint');
-  for (const item of gone) out.push(`- ${item.id ? `[${item.id}] ` : ''}${item.role}${item.label ? ` ${quote(item.label)}` : ''}`);
+  const gone = prev.items.filter((i) => !after.has(i.key));
+  for (const item of gone) {
+    out.push(item.role === 'hint' ? `- ${item.line.trim()}` : `- ${item.id ? `[${item.id}] ` : ''}${item.role}${item.label ? ` ${quote(item.label)}` : ''}`);
+  }
   const union = new Set([...before.keys(), ...after]).size;
   if (changed + gone.length > union / 2) return next.text;
   if (out.length === 0) return `${next.header} (same window)\nno visible change`;

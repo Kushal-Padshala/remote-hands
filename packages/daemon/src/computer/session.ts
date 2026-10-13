@@ -144,7 +144,7 @@ export class ComputerSession {
       const engine = this.deps.engine;
       const item = engine.item(index);
       const before = engine.current()?.view ?? null;
-      await this.deps.gate?.(item.label || item.role);
+      await this.deps.gate?.(item.gateLabel);
       const result = await engine.click(index, action);
       const verb = action === 'press' ? 'clicked' : action === 'open' ? 'opened' : action === 'menu' ? 'opened the menu of' : action === 'double' ? 'double-clicked' : 'right-clicked';
       return `${verb} ${this.describeItem(item.id, item.role, item.label)}${result.method === 'click' && action === 'press' ? '\nnote: no native press on this element; clicked at its center' : ''}\n${await this.safeState(targetApp, before)}`;
@@ -188,7 +188,8 @@ export class ComputerSession {
     const item = engine.item(index);
     if (!item.editable) throw new Error(`[${item.id}] ${item.role} is not a text field. Click it first, then type without an index.`);
     const before = engine.current()?.view ?? null;
-    if (submit) await this.deps.gate?.(item.label || item.role);
+    // writing into a labelled field, and submitting it, are judged by the field's full label like a click
+    if (replace || submit) await this.deps.gate?.(item.gateLabel);
     let how = 'typed into';
     if (replace) {
       const done = await engine.setValue(item.id, text);
@@ -197,15 +198,19 @@ export class ComputerSession {
       } else {
         // the field would not take the value directly: select everything in it and type over it
         await engine.focus(item.id);
-        await this.deps.desktop.sendKeyCombo(['a'], ['command']);
-        await engine.typeText(text);
+        await engine.pressKey('selectAll', item.id);
+        await engine.typeText(text, item.id);
         how = 'replaced';
       }
     } else {
       await engine.focus(item.id);
-      await engine.typeText(text);
+      await engine.typeText(text, item.id);
     }
-    if (submit) await this.deps.desktop.sendKeyCombo(['return'], []);
+    if (submit) {
+      // the field must have the cursor, whichever way the text got in
+      await engine.focus(item.id);
+      await engine.pressKey('return', item.id);
+    }
     const what = `${[...text].length} characters`;
     return `${how} [${item.id}] ${item.role}${item.label ? ` "${item.label}"` : ''}: ${what}${submit ? ', pressed Return' : ''}\n${await this.safeState(targetApp, before)}`;
   }
@@ -242,7 +247,7 @@ export class ComputerSession {
     const from = engine.item(fromIndex);
     const to = engine.item(toIndex);
     const before = engine.current()?.view ?? null;
-    await this.deps.gate?.(`drag ${from.label || from.role} to ${to.label || to.role}`);
+    await this.deps.gate?.(`drag ${from.gateLabel} to ${to.gateLabel}`);
     await engine.drag(fromIndex, toIndex);
     return `dragged ${this.describeItem(from.id, from.role, from.label)} to ${this.describeItem(to.id, to.role, to.label)}\n${await this.safeState(targetApp, before)}`;
   }

@@ -87,6 +87,16 @@ describe('buildComputerTools', () => {
     expect(out).toBe('step 1 desktop_type ok\nstep 2 desktop_key ok\npressed');
   });
 
+  it('batch keeps the changes of earlier desktop steps when the last result is only a diff', async () => {
+    const session = fakeSession();
+    session.desktopClick = vi.fn().mockResolvedValue('clicked [2]\napp: Notes (same window)\n+ [9] menuitem "Copy"\n(3 unchanged)');
+    session.desktopKey = vi.fn().mockResolvedValue('pressed tab\napp: Notes (same window)\nno visible change');
+    const batch = buildComputerTools(session).find((t) => t.name === 'computer_batch')!;
+    const out = await batch.handler({ steps: [{ tool: 'desktop_click', args: { index: 2 } }, { tool: 'desktop_key', args: { combo: 'tab' } }] });
+    expect(out).toContain('changes during earlier steps:\n+ [9] menuitem "Copy"');
+    expect(out.endsWith('no visible change')).toBe(true);
+  });
+
   it('batch stops at the first failing step and reports it', async () => {
     const session = fakeSession();
     session.desktopKey = vi.fn().mockRejectedValue(new Error('bad combo'));

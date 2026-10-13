@@ -29,7 +29,7 @@ function fakeHelper(over: { failOps?: Record<string, AxHelperError>; setMatches?
       if (failure) throw failure;
       switch (op.op) {
         case 'snapshot':
-          return { ok: true, app: { name: 'Notes', pid: 1 }, window: { title: 'Doc' }, nodes: fake.nodes, truncated: false, timedOut: false, elapsedMs: 1 } satisfies AxSnapshot;
+          return { ok: true, epoch: 77, app: { name: 'Notes', pid: 1 }, window: { title: 'Doc' }, nodes: fake.nodes, truncated: false, timedOut: false, elapsedMs: 1 } satisfies AxSnapshot;
         case 'setValue':
           if (over.setMatches !== false) fake.nodes = fake.nodes.map((n) => (n.id === op.h ? { ...n, value: String(op.value) } : n));
           return { ok: true, matches: over.setMatches !== false };
@@ -173,7 +173,7 @@ describe('ComputerSession with the fast reader', () => {
     await session.desktopSnapshot('Notes');
     const out = await session.desktopType('héllo 👋\nworld', undefined, { index: 4 });
     expect(helper.calls.filter((c) => c.op === 'focus' || c.op === 'typeText').map((c) => c.op)).toEqual(['focus', 'typeText']);
-    expect(helper.calls.find((c) => c.op === 'typeText')).toMatchObject({ text: 'héllo 👋\nworld' });
+    expect(helper.calls.find((c) => c.op === 'typeText')).toMatchObject({ text: 'héllo 👋\nworld', pid: 1, h: 4, epoch: 77 });
     expect(out).toContain('typed into [4] textfield "Name": 13 characters');
     helper.calls.length = 0;
     const set = await session.desktopType('Ann', undefined, { index: 4, replace: true });
@@ -185,7 +185,8 @@ describe('ComputerSession with the fast reader', () => {
     await second.session.desktopSnapshot('Notes');
     helper.calls.length = 0;
     const replaced = await second.session.desktopType('Bob', undefined, { index: 4, replace: true });
-    expect(second.deps.desktop.sendKeyCombo).toHaveBeenCalledWith(['a'], ['command']);
+    expect(stubborn.calls.find((c) => c.op === 'key')).toMatchObject({ key: 'selectAll', h: 4, pid: 1 });
+    expect(second.deps.desktop.sendKeyCombo).not.toHaveBeenCalled();
     expect(stubborn.calls.some((c) => c.op === 'typeText')).toBe(true);
     expect(replaced).toContain('replaced [4]');
     expect(deps.desktop.typeText).not.toHaveBeenCalled();
@@ -196,9 +197,12 @@ describe('ComputerSession with the fast reader', () => {
     const gate = vi.fn().mockResolvedValue(undefined);
     const { session, deps } = make(helper, { gate });
     await session.desktopSnapshot('Notes');
+    helper.calls.length = 0;
     await session.desktopType('hi', undefined, { index: 4, submit: true });
     expect(gate).toHaveBeenCalledWith('Name');
-    expect(deps.desktop.sendKeyCombo).toHaveBeenCalledWith(['return'], []);
+    // Return goes through the helper, to the field that has the cursor: never a global key press
+    expect(helper.calls.filter((c) => ['focus', 'key'].includes(String(c.op))).map((c) => `${c.op}:${c.key ?? ''}`)).toEqual(['focus:', 'focus:', 'key:return']);
+    expect(deps.desktop.sendKeyCombo).not.toHaveBeenCalled();
   });
 
   it('only types into text fields, and never shows what was typed into a password', async () => {
@@ -220,6 +224,39 @@ describe('ComputerSession with the fast reader', () => {
     await session.desktopType('abc');
     expect(deps.desktop.typeText).toHaveBeenCalledWith('abc');
     await expect(session.desktopType('abc', undefined, { replace: true })).rejects.toThrow('replace needs an index');
+  });
+
+  it('asks the gate before replacing the value of a field, with the full label', async () => {
+    const helper = fakeHelper();
+    const long = `${'x'.repeat(90)} Delete`;
+    helper.nodes = helper.nodes.map((n) => (n.id === 4 ? { ...n, label: long } : n));
+    const gate = vi.fn().mockRejectedValue(new Error('Approval rejected by user.'));
+    const { session } = make(helper, { gate });
+    await session.desktopSnapshot('Notes');
+    await expect(session.desktopType('x', undefined, { index: 4, replace: true })).rejects.toThrow('Approval rejected by user.');
+    expect(gate).toHaveBeenCalledWith(long);
+    expect(helper.calls.some((c) => ['setValue', 'typeText', 'key'].includes(String(c.op)))).toBe(false);
+  });
+
+  it('judges a click by the whole label, not the shortened one on screen', async () => {
+    const helper = fakeHelper();
+    const long = `${'y'.repeat(100)} Delete everything`;
+    helper.nodes = helper.nodes.map((n) => (n.id === 2 ? { ...n, label: long } : n));
+    const gate = vi.fn().mockResolvedValue(undefined);
+    const { session } = make(helper, { gate });
+    const shown = await session.desktopSnapshot('Notes');
+    expect(shown).not.toContain('Delete everything');
+    await session.desktopClick(2);
+    expect(gate).toHaveBeenCalledWith(long);
+  });
+
+  it('every action carries the epoch of the snapshot, so ids from before a helper restart are refused', async () => {
+    const helper = fakeHelper();
+    const { session } = make(helper);
+    await session.desktopSnapshot('Notes');
+    await session.desktopClick(2);
+    await session.desktopScroll(6, 'down', 1);
+    for (const call of helper.calls.filter((c) => ['perform', 'scroll'].includes(String(c.op)))) expect(call.epoch).toBe(77);
   });
 
   it('scrolls and reports the movement', async () => {

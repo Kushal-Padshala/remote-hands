@@ -42,6 +42,8 @@ export interface AxSnapshot {
   truncated: boolean;
   timedOut: boolean;
   enhancedRetry?: boolean;
+  /** Changes whenever the helper restarts or forgets its ids: ids from another epoch are refused. */
+  epoch?: number;
   elapsedMs: number;
 }
 

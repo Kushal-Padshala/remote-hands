@@ -209,6 +209,32 @@ describe('buildView', () => {
   });
 });
 
+describe('labels for approval and reading', () => {
+  it('keeps the whole label for approval while showing a short one', () => {
+    reset();
+    const win = node('AXWindow', 0);
+    const long = `${'a'.repeat(100)} Delete`;
+    const btn = node('AXButton', win.id, { label: long });
+    const row = node('AXRow', win.id);
+    const cell = node('AXCell', row.id);
+    const view = buildView(snap([win, btn, row, cell, node('AXStaticText', cell.id, { value: `${'b'.repeat(120)} Send` })]));
+    const b = view.byId.get(btn.id)!;
+    expect(b.label.length).toBeLessThan(90);
+    expect(b.gateLabel).toBe(long);
+    expect(view.byId.get(row.id)!.gateLabel.endsWith('Send')).toBe(true);
+  });
+
+  it('a long text keeps its id so it can be read in full, a short one does not', () => {
+    reset();
+    const win = node('AXWindow', 0);
+    const long = node('AXStaticText', win.id, { value: 'w '.repeat(100) });
+    const short = node('AXStaticText', win.id, { value: 'Hello' });
+    const lines = buildView(snap([win, long, short])).lines;
+    expect(lines[0]).toMatch(new RegExp(`^\\[${long.id}\\] text ".*…"$`));
+    expect(lines[1]).toBe('text "Hello"');
+  });
+});
+
 describe('fingerprint and diff', () => {
   const mk = (label: string, value?: string): AxSnapshot => {
     reset();
@@ -249,5 +275,29 @@ describe('fingerprint and diff', () => {
     const rewritten = buildView(snap([win, node('AXButton', win.id, { label: 'One' }), node('AXButton', win.id, { label: 'Two' }), node('AXButton', win.id, { label: 'Three' })]));
     expect(renderDiff(base, rewritten)).toBe(rewritten.text);
     expect(renderDiff(null, base)).toBe(base.text);
+  });
+
+  it('shows the whole window when the read became partial, the order changed, or a scroll hint disappeared', () => {
+    reset();
+    const win = node('AXWindow', 0);
+    const a = node('AXButton', win.id, { label: 'A' });
+    const b = node('AXButton', win.id, { label: 'B' });
+    const c = node('AXButton', win.id, { label: 'C' });
+    const base = buildView(snap([win, a, b, c]));
+    const partial = buildView(snap([win, a, b, c], { timedOut: true }));
+    expect(partial.fingerprint).not.toBe(base.fingerprint);
+    expect(renderDiff(base, partial)).toBe(partial.text);
+    expect(partial.text).toContain('only part of it was read');
+    const reordered = buildView(snap([win, b, a, c]));
+    expect(renderDiff(base, reordered)).toBe(reordered.text);
+    reset();
+    const w2 = node('AXWindow', 0);
+    const area = node('AXScrollArea', w2.id, { off: 5, scroll: 0 });
+    const item1 = node('AXButton', area.id, { label: 'One' });
+    const item2 = node('AXButton', area.id, { label: 'Two' });
+    const item3 = node('AXButton', area.id, { label: 'Three' });
+    const withHint = buildView(snap([w2, area, item1, item2, item3]));
+    const noHint = buildView(snap([w2, { ...area, off: 0 }, item1, item2, item3]));
+    expect(renderDiff(withHint, noHint)).toContain('- … 5 more below');
   });
 });

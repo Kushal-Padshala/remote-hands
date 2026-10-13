@@ -258,6 +258,8 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
       });
 
       const lines: string[] = [];
+      // Desktop results list only what changed since the step before, so changes from earlier steps would be lost.
+      const earlierChanges: string[] = [];
       let last = '';
       for (let i = 0; i < plan.length; i += 1) {
         const step = plan[i]!;
@@ -265,6 +267,9 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
         try {
           if (isCallAborted()) throw new Error(`${ABANDONED}; remaining steps not run`);
           last = await step.tool.handler(step.args);
+          if (i < plan.length - 1 && step.name.startsWith('desktop_')) {
+            earlierChanges.push(...last.split('\n').filter((l) => /^[+~-] /.test(l)));
+          }
         } catch (err: any) {
           const okSoFar = n === 1 ? 'no steps ok' : n === 2 ? 'step 1 ok' : `steps 1-${n - 1} ok`;
           const remaining = i < plan.length - 1 ? `; steps after ${n} not run` : '';
@@ -272,7 +277,8 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
         }
         lines.push(`step ${n} ${step.name} ok`);
       }
-      return [...lines, last].join('\n');
+      const earlier = earlierChanges.length > 0 && last.includes('(same window)') ? ['changes during earlier steps:', ...earlierChanges] : [];
+      return [...lines, ...earlier, last].join('\n');
     },
   });
 

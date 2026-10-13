@@ -93,10 +93,16 @@ export class DesktopEngine {
     return item;
   }
 
+  /** A request about the latest snapshot: carries its epoch, so ids from before a helper restart are refused. */
+  private raw<T extends { ok: true }>(op: Record<string, unknown>): Promise<T> {
+    const epoch = this.last?.snapshot.epoch;
+    return this.helper.request<T>(epoch === undefined ? op : { ...op, epoch }, ACTION_TIMEOUT_MS);
+  }
+
   /** A request to the helper whose failures are worded for the model. */
   private async call<T extends { ok: true }>(op: Record<string, unknown>): Promise<T> {
     try {
-      return await this.helper.request<T>(op, ACTION_TIMEOUT_MS);
+      return await this.raw<T>(op);
     } catch (err) {
       if (err instanceof AxHelperError) {
         throw describeHelperError(err, '') ?? new Error('The accessibility helper stopped responding. Call desktop_snapshot again.');
@@ -118,7 +124,7 @@ export class DesktopEngine {
     const target = item.actionTargets[named];
     if (target !== undefined) {
       try {
-        await this.helper.request({ op: 'perform', h: target, action: named }, ACTION_TIMEOUT_MS);
+        await this.raw({ op: 'perform', h: target, action: named });
         return { method: 'ax' };
       } catch (err) {
         // an element that does not do the action natively gets the click a person would make
@@ -138,7 +144,7 @@ export class DesktopEngine {
   /** Sets a field's whole value. `set` is false when it cannot be set directly or did not take. */
   async setValue(id: number, value: string): Promise<{ set: boolean }> {
     try {
-      const res = await this.helper.request<{ ok: true; matches?: boolean; secure?: boolean }>({ op: 'setValue', h: this.item(id).id, value }, ACTION_TIMEOUT_MS);
+      const res = await this.raw<{ ok: true; matches?: boolean; secure?: boolean }>({ op: 'setValue', h: this.item(id).id, value });
       return { set: res.matches === true };
     } catch (err) {
       if (err instanceof AxHelperError && (err.code === 'not_settable' || err.code === 'failed')) return { set: false };
@@ -147,8 +153,22 @@ export class DesktopEngine {
     }
   }
 
-  async typeText(text: string): Promise<void> {
-    await this.call({ op: 'typeText', text });
+  /** Types into the app of the latest snapshot; with an id, only while the cursor is still in that field. */
+  async typeText(text: string, id?: number): Promise<void> {
+    await this.call({ op: 'typeText', text, ...this.keyboardTarget(id) });
+  }
+
+  /** Return or select-all, with the same checks as typing. */
+  async pressKey(key: 'return' | 'selectAll', id?: number): Promise<void> {
+    await this.call({ op: 'key', key, ...this.keyboardTarget(id) });
+  }
+
+  private keyboardTarget(id?: number): Record<string, number> {
+    const pid = this.last?.snapshot.app.pid;
+    return {
+      ...(pid !== undefined ? { pid } : {}),
+      ...(id !== undefined ? { h: this.item(id).id } : {}),
+    };
   }
 
   /** The text of an element; never a password. */

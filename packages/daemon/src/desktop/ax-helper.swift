@@ -39,6 +39,9 @@ final class HandleTable {
     private var buckets: [CFHashCode: [Int]] = [:]
     private var next = 1
     private let limit = 60_000
+    /// Changes whenever the table is emptied, and differs on every launch: ids from an earlier epoch are refused, never reinterpreted.
+    private(set) var epoch = Int.random(in: 1...1_000_000_000)
+    private var signatures: [Int: String] = [:]
 
     func handle(for element: AXUIElement) -> Int {
         let hash = CFHash(element)
@@ -51,6 +54,8 @@ final class HandleTable {
             // Forget everything: old ids then answer "unknown", they never point at something else because `next` keeps counting.
             byHandle = [:]
             buckets = [:]
+            signatures = [:]
+            epoch = Int.random(in: 1...1_000_000_000)
         }
         let h = next
         next += 1
@@ -62,6 +67,10 @@ final class HandleTable {
     func element(_ handle: Int) -> AXUIElement? {
         return byHandle[handle]
     }
+
+    /// What the element looked like (role and name) when the model was shown it.
+    func remember(_ handle: Int, signature: String) { signatures[handle] = signature }
+    func signature(_ handle: Int) -> String? { return signatures[handle] }
 }
 
 let handles = HandleTable()
@@ -115,6 +124,22 @@ func clip(_ s: String, _ max: Int) -> String {
     let one = s.replacingOccurrences(of: "\r", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
     if one.count <= max { return one }
     return String(one.prefix(max - 1)) + "…"
+}
+
+let textRoles: Set<String> = ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField", "AXSecureTextField"]
+
+/// Whether an element is a password field. Fails closed: when the role or subrole cannot be read, it counts as one.
+func classifySecure(_ element: AXUIElement) -> Bool {
+    var role: AnyObject?
+    let roleErr = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+    if roleErr != .success { return true }
+    let r = text(role) ?? ""
+    if r == "AXSecureTextField" { return true }
+    if !textRoles.contains(r) { return false }
+    var sub: AnyObject?
+    let subErr = AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &sub)
+    if subErr == .success { return text(sub) == "AXSecureTextField" }
+    return !(subErr == .noValue || subErr == .attributeUnsupported)
 }
 
 // MARK: - Which apps and windows
@@ -218,13 +243,20 @@ final class Walker {
         self.deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(50, budgetMs)) * 1_000_000
     }
 
-    func children(of element: AXUIElement, role: String) -> [AXUIElement] {
+    /// The children worth visiting, and how many more exist that are known to be out of view.
+    func children(of element: AXUIElement, role: String) -> ([AXUIElement], Int) {
         if listRoles.contains(role) {
-            for name in ["AXVisibleRows", "AXVisibleChildren"] {
-                if let list = attribute(element, name) as? [AXUIElement] { return list }
+            for (name, total) in [("AXVisibleRows", "AXRows"), ("AXVisibleChildren", kAXChildrenAttribute)] {
+                if let list = attribute(element, name) as? [AXUIElement] {
+                    var count: CFIndex = 0
+                    if AXUIElementGetAttributeValueCount(element, total as CFString, &count) == .success, count > list.count {
+                        return (list, count - list.count)
+                    }
+                    return (list, 0)
+                }
             }
         }
-        return (attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? []
+        return ((attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? [], 0)
     }
 
     func visit(_ element: AXUIElement, parent: Int, clip viewport: CGRect?, owner: Int?, depth: Int) {
@@ -263,7 +295,8 @@ final class Walker {
         }
 
         let label = title.isEmpty ? desc : title
-        let secure = (sub == "AXSecureTextField") || role == "AXSecureTextField"
+        let secure = (sub == "AXSecureTextField") || role == "AXSecureTextField" || role.isEmpty
+            || (textRoles.contains(role) && !(value ?? "").isEmpty && classifySecure(element))
         let hasText = !label.isEmpty || !(value ?? "").isEmpty
         let visible = (frame?.width ?? 0) >= 1 && (frame?.height ?? 0) >= 1
         var myIndex: Int? = nil
@@ -295,6 +328,7 @@ final class Walker {
             if viewportRoles.contains(role), let bar = attribute(element, "AXVerticalScrollBar"), CFGetTypeID(bar) == AXUIElementGetTypeID() {
                 if let n = attribute(bar as! AXUIElement, kAXValueAttribute) as? NSNumber { node["scroll"] = n.doubleValue }
             }
+            handles.remember(id, signature: "\(role)|\(clip(label, 200))")
             nodes.append(node)
             myIndex = nodes.count - 1
         }
@@ -308,7 +342,9 @@ final class Walker {
             childOwner = mine
         }
         let parentForChildren = (myIndex != nil) ? id : parent
-        for child in children(of: element, role: role) {
+        let (kids, leftOut) = children(of: element, role: role)
+        if leftOut > 0, let o = childOwner { nodes[o]["off"] = ((nodes[o]["off"] as? Int) ?? 0) + leftOut }
+        for child in kids {
             visit(child, parent: parentForChildren, clip: childClip, owner: childOwner, depth: depth + 1)
             if truncated || timedOut { break }
         }
@@ -388,6 +424,7 @@ func snapshot(_ id: Any?, _ request: [String: Any]) {
         "ok": true,
         "app": ["name": app.localizedName ?? "", "pid": Int(app.processIdentifier), "bundle": app.bundleIdentifier ?? ""],
         "nodes": walker.nodes,
+        "epoch": handles.epoch,
         "truncated": walker.truncated,
         "timedOut": walker.timedOut,
         "enhancedRetry": enhancedRetried,
@@ -400,21 +437,38 @@ func snapshot(_ id: Any?, _ request: [String: Any]) {
 
 // MARK: - Acting on elements
 
-/// The element for a handle, or a reply saying why not. An element that left the screen answers "stale".
-func liveElement(_ id: Any?, _ request: [String: Any], key: String = "h") -> AXUIElement? {
+/// Synthetic input comes from a private event source with no modifiers, so keys the person happens to be holding
+/// (Command, Option, Control) cannot turn a click or a Return into something else.
+let inputSource = CGEventSource(stateID: .privateState)
+
+/// The element for a handle, or a reply saying why not. An element that left the screen, was replaced by another,
+/// or belongs to an earlier run of this helper answers "stale".
+func liveElement(_ id: Any?, _ request: [String: Any], key: String = "h", epochKey: String = "epoch") -> AXUIElement? {
     guard let h = request[key] as? Int else {
         fail(id, "bad_request", "Missing element id.")
+        return nil
+    }
+    if let epoch = request[epochKey] as? Int, epoch != handles.epoch {
+        fail(id, "stale", "The accessibility helper was restarted: take a new snapshot.")
         return nil
     }
     guard let element = handles.element(h) else {
         fail(id, "stale", "Unknown element id \(h): take a new snapshot.")
         return nil
     }
-    var role: AnyObject?
-    let err = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
-    if err == .invalidUIElement || err == .cannotComplete || (err != .success && err != .noValue && err != .attributeUnsupported) {
+    let v = fetch(element, [kAXRoleAttribute, kAXTitleAttribute, kAXDescriptionAttribute])
+    guard let role = text(v[0]) else {
         fail(id, "stale", "That element is no longer on screen: take a new snapshot.")
         return nil
+    }
+    if let seen = handles.signature(h) {
+        let title = text(v[1]) ?? ""
+        let desc = text(v[2]) ?? ""
+        let now = "\(role)|\(clip(title.isEmpty ? desc : title, 200))"
+        if now != seen {
+            fail(id, "stale", "That element changed since the snapshot: take a new snapshot.")
+            return nil
+        }
     }
     return element
 }
@@ -425,34 +479,85 @@ func frameOf(_ element: AXUIElement) -> CGRect? {
     return CGRect(origin: o, size: s)
 }
 
+/// The part of an element that is actually on screen: its frame cut down to the scroll areas and window around it.
+func visibleFrame(_ element: AXUIElement) -> CGRect? {
+    guard var frame = frameOf(element) else { return nil }
+    var current: AXUIElement = element
+    for _ in 0..<16 {
+        guard let parent = attribute(current, kAXParentAttribute), CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
+        let p = parent as! AXUIElement
+        let role = text(attribute(p, kAXRoleAttribute)) ?? ""
+        if viewportRoles.contains(role) || role == "AXWindow" || role == "AXSheet" {
+            if let f = frameOf(p) { frame = frame.intersection(f) }
+            if frame.isNull || frame.width < 1 || frame.height < 1 { return nil }
+        }
+        current = p
+    }
+    return frame
+}
+
 func pidOf(_ element: AXUIElement) -> pid_t? {
     var pid: pid_t = 0
     return AXUIElementGetPid(element, &pid) == .success ? pid : nil
 }
 
-func activate(_ pid: pid_t) {
-    guard let app = NSRunningApplication(processIdentifier: pid), !app.isActive else { return }
+/// Brings an app forward and says whether it really is in front.
+func activate(_ pid: pid_t) -> Bool {
+    guard let app = NSRunningApplication(processIdentifier: pid) else { return false }
+    if app.isActive { return true }
     if #available(macOS 14.0, *) {
         app.activate()
     } else {
         app.activate(options: [.activateIgnoringOtherApps])
     }
-    // give the window server a moment so that what follows lands in this app
-    for _ in 0..<20 {
-        if app.isActive { break }
+    for _ in 0..<40 {
+        if app.isActive { return true }
         usleep(15_000)
     }
-}
-
-/// Which app owns the topmost thing at a screen point.
-func ownerAt(_ p: CGPoint) -> pid_t? {
-    var hit: AXUIElement?
-    guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(p.x), Float(p.y), &hit) == .success, let el = hit else { return nil }
-    return pidOf(el)
+    return app.isActive
 }
 
 func appName(_ pid: pid_t) -> String {
     return NSRunningApplication(processIdentifier: pid)?.localizedName ?? "another app"
+}
+
+func isAncestor(_ ancestor: AXUIElement, of element: AXUIElement) -> Bool {
+    var current = element
+    for _ in 0..<16 {
+        if CFEqual(current, ancestor) { return true }
+        guard let parent = attribute(current, kAXParentAttribute), CFGetTypeID(parent) == AXUIElementGetTypeID() else { return false }
+        current = parent as! AXUIElement
+    }
+    return false
+}
+
+/// Nil when the topmost thing at the point is the element, something inside it, or something it sits inside; otherwise why not.
+/// A hit test that cannot answer counts as covered: input is never sent blind.
+func coverProblem(_ element: AXUIElement, at p: CGPoint) -> String? {
+    var hit: AXUIElement?
+    let err = AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(p.x), Float(p.y), &hit)
+    guard err == .success, let top = hit else { return "Could not confirm that the element is uncovered." }
+    if isAncestor(element, of: top) || isAncestor(top, of: element) { return nil }
+    if let owner = pidOf(top), let mine = pidOf(element), owner != mine { return "\(appName(owner)) is on top of that element." }
+    return "Something else is on top of that element."
+}
+
+/// The point to click for an element: the centre of its visible part, once the element is known to be uncovered.
+func clickTarget(_ id: Any?, _ element: AXUIElement) -> CGPoint? {
+    guard let visible = visibleFrame(element) else {
+        fail(id, "no_frame", "This element is not visible on screen.")
+        return nil
+    }
+    let target = CGPoint(x: visible.midX, y: visible.midY)
+    if let pid = pidOf(element), !activate(pid) {
+        fail(id, "not_active", "\(appName(pid)) could not be brought to the front.")
+        return nil
+    }
+    if let problem = coverProblem(element, at: target) {
+        fail(id, "covered", problem)
+        return nil
+    }
+    return target
 }
 
 func perform(_ id: Any?, _ request: [String: Any]) {
@@ -471,37 +576,19 @@ func perform(_ id: Any?, _ request: [String: Any]) {
 }
 
 func mouseEvent(_ type: CGEventType, _ p: CGPoint, _ button: CGMouseButton, clickState: Int64) -> CGEvent? {
-    let source = CGEventSource(stateID: .hidSystemState)
-    let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: p, mouseButton: button)
+    let event = CGEvent(mouseEventSource: inputSource, mouseType: type, mouseCursorPosition: p, mouseButton: button)
     event?.setIntegerValueField(.mouseEventClickState, value: clickState)
+    event?.flags = []
     return event
 }
 
-/// A real click, posted at the element's centre without moving the cursor. Refuses when another app's window is on top.
+/// A real click, posted at the visible centre of the element without moving the cursor.
 func click(_ id: Any?, _ request: [String: Any]) {
-    var target: CGPoint
-    var owner: pid_t?
-    if let element = (request["h"] != nil ? liveElement(id, request) : nil) {
-        guard let frame = frameOf(element) else {
-            fail(id, "no_frame", "This element has no position on screen.")
-            return
-        }
-        target = CGPoint(x: frame.midX, y: frame.midY)
-        owner = pidOf(element)
-    } else if request["h"] != nil {
-        return // liveElement already replied
-    } else if let x = request["x"] as? Double, let y = request["y"] as? Double {
-        target = CGPoint(x: x, y: y)
-        owner = nil
-    } else {
-        fail(id, "bad_request", "Missing element id or position.")
+    guard request["h"] != nil else {
+        fail(id, "bad_request", "Missing element id.")
         return
     }
-    if let pid = owner, let top = ownerAt(target), top != pid {
-        fail(id, "covered", "\(appName(top)) is on top of that element.")
-        return
-    }
-    if let pid = owner { activate(pid) }
+    guard let element = liveElement(id, request), let target = clickTarget(id, element) else { return }
     let right = (request["button"] as? String) == "right"
     let count = max(1, min(3, (request["count"] as? Int) ?? 1))
     let button: CGMouseButton = right ? .right : .left
@@ -518,23 +605,23 @@ func click(_ id: Any?, _ request: [String: Any]) {
 
 func focus(_ id: Any?, _ request: [String: Any]) {
     guard let element = liveElement(id, request) else { return }
-    if let pid = pidOf(element) { activate(pid) }
-    // raise the window the element lives in
+    if let pid = pidOf(element), !activate(pid) {
+        fail(id, "not_active", "\(appName(pid)) could not be brought to the front.")
+        return
+    }
     if let window = attribute(element, kAXWindowAttribute), CFGetTypeID(window) == AXUIElementGetTypeID() {
         _ = AXUIElementPerformAction(window as! AXUIElement, kAXRaiseAction as CFString)
     }
-    let err = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-    let now = flag(attribute(element, kAXFocusedAttribute)) ?? false
-    if err != .success && !now {
-        fail(id, "failed", "This element cannot take focus.")
+    _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    guard flag(attribute(element, kAXFocusedAttribute)) == true else {
+        fail(id, "focus_failed", "Could not put the cursor in this element. Click it first, then type without an index.")
         return
     }
-    reply(id, ["ok": true, "focused": now])
+    reply(id, ["ok": true, "focused": true])
 }
 
 func isSecureElement(_ element: AXUIElement) -> Bool {
-    let v = fetch(element, [kAXRoleAttribute, kAXSubroleAttribute])
-    return text(v[0]) == "AXSecureTextField" || text(v[1]) == "AXSecureTextField"
+    return classifySecure(element)
 }
 
 func setValue(_ id: Any?, _ request: [String: Any]) {
@@ -549,14 +636,46 @@ func setValue(_ id: Any?, _ request: [String: Any]) {
         fail(id, "not_settable", "The value of this element cannot be set directly.")
         return
     }
+    let secure = isSecureElement(element)
     let err = AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, value as CFTypeRef)
     if err != .success {
         fail(id, "failed", "Setting the value failed (code \(err.rawValue)).")
         return
     }
-    let secure = isSecureElement(element)
+    if secure {
+        // What a password field holds is never read back, so it cannot be confirmed.
+        reply(id, ["ok": true, "matches": true, "value": "", "secure": true])
+        return
+    }
     let after = text(attribute(element, kAXValueAttribute)) ?? ""
-    reply(id, ["ok": true, "matches": after == value, "value": secure ? "" : clip(after, 300), "secure": secure])
+    reply(id, ["ok": true, "matches": after == value, "value": clip(after, 300), "secure": false])
+}
+
+/// Whether keys sent now would reach the element's app (and, when a handle is given, its field).
+func keyboardProblem(_ request: [String: Any]) -> String? {
+    guard let pid = request["pid"] as? Int else { return nil }
+    guard let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier == pid_t(pid) else {
+        return "The app is no longer in front. Take a new snapshot and try again."
+    }
+    if request["h"] != nil, request["h"] is Int {
+        guard let element = handles.element(request["h"] as! Int) else { return "That element is no longer there. Take a new snapshot." }
+        var focused: AnyObject?
+        let err = AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &focused)
+        guard err == .success, let f = focused, CFGetTypeID(f) == AXUIElementGetTypeID(), CFEqual(f, element) else {
+            return "The cursor is not in that field any more. Take a new snapshot and try again."
+        }
+    }
+    return nil
+}
+
+func postKey(_ code: CGKeyCode, command: Bool = false) {
+    if let d = CGEvent(keyboardEventSource: inputSource, virtualKey: code, keyDown: true),
+       let u = CGEvent(keyboardEventSource: inputSource, virtualKey: code, keyDown: false) {
+        d.flags = command ? .maskCommand : []
+        u.flags = command ? .maskCommand : []
+        d.post(tap: .cghidEventTap)
+        u.post(tap: .cghidEventTap)
+    }
 }
 
 /// Keys for characters that are not text.
@@ -567,14 +686,22 @@ func typeText(_ id: Any?, _ request: [String: Any]) {
         fail(id, "bad_request", "Missing text.")
         return
     }
-    if let pid = request["pid"] as? Int { activate(pid_t(pid)) }
-    let source = CGEventSource(stateID: .hidSystemState)
+    if let epoch = request["epoch"] as? Int, epoch != handles.epoch {
+        fail(id, "stale", "The accessibility helper was restarted: take a new snapshot.")
+        return
+    }
+    if let problem = keyboardProblem(request) {
+        fail(id, "wrong_target", problem)
+        return
+    }
     var pending: [UniChar] = []
     func flush() {
         guard !pending.isEmpty else { return }
         var units = pending
-        if let d = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
-           let u = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) {
+        if let d = CGEvent(keyboardEventSource: inputSource, virtualKey: 0, keyDown: true),
+           let u = CGEvent(keyboardEventSource: inputSource, virtualKey: 0, keyDown: false) {
+            d.flags = []
+            u.flags = []
             d.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
             u.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
             d.post(tap: .cghidEventTap)
@@ -587,11 +714,7 @@ func typeText(_ id: Any?, _ request: [String: Any]) {
     for ch in content {
         if let key = specialKeys[ch] {
             flush()
-            if let d = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: true),
-               let u = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: false) {
-                d.post(tap: .cghidEventTap)
-                u.post(tap: .cghidEventTap)
-            }
+            postKey(key)
             usleep(6_000)
         } else {
             let units = Array(String(ch).utf16)
@@ -605,6 +728,44 @@ func typeText(_ id: Any?, _ request: [String: Any]) {
     reply(id, ["ok": true, "chars": count])
 }
 
+/// One key press (Return or select-all) with the same checks as typing.
+func pressKey(_ id: Any?, _ request: [String: Any]) {
+    guard let name = request["key"] as? String, name == "return" || name == "selectAll" else {
+        fail(id, "bad_request", "Unknown key.")
+        return
+    }
+    if let epoch = request["epoch"] as? Int, epoch != handles.epoch {
+        fail(id, "stale", "The accessibility helper was restarted: take a new snapshot.")
+        return
+    }
+    if let problem = keyboardProblem(request) {
+        fail(id, "wrong_target", problem)
+        return
+    }
+    if name == "return" { postKey(36) } else { postKey(0, command: true) }
+    usleep(20_000)
+    reply(id, ["ok": true])
+}
+
+/// The text shown by an element's descendants, for rows and cells whose text lives in children.
+func descendantText(_ element: AXUIElement, budget: inout Int, depth: Int = 0) -> [String] {
+    if depth > 5 || budget <= 0 { return [] }
+    var out: [String] = []
+    for child in (attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
+        budget -= 1
+        if budget <= 0 { break }
+        let v = fetch(child, [kAXRoleAttribute, kAXValueAttribute, kAXTitleAttribute, kAXDescriptionAttribute])
+        let role = text(v[0]) ?? ""
+        if textRoles.contains(role) { continue }
+        if role == "AXStaticText" || role == "AXHeading" {
+            if let t = text(v[1]) ?? text(v[2]) ?? text(v[3]), !t.isEmpty { out.append(t) }
+        } else {
+            out.append(contentsOf: descendantText(child, budget: &budget, depth: depth + 1))
+        }
+    }
+    return out
+}
+
 func readText(_ id: Any?, _ request: [String: Any]) {
     guard let element = liveElement(id, request) else { return }
     if isSecureElement(element) {
@@ -615,6 +776,10 @@ func readText(_ id: Any?, _ request: [String: Any]) {
     let v = fetch(element, [kAXValueAttribute, kAXSelectedTextAttribute, kAXTitleAttribute, kAXDescriptionAttribute, "AXNumberOfCharacters"])
     var content = text(v[0]) ?? ""
     if content.isEmpty { content = text(v[2]) ?? text(v[3]) ?? "" }
+    if content.isEmpty {
+        var budget = 200
+        content = descendantText(element, budget: &budget).joined(separator: "\n")
+    }
     let total = content.count
     var out: [String: Any] = ["ok": true, "length": (v[4] as? NSNumber)?.intValue ?? total, "truncated": total > maxChars]
     out["text"] = total > maxChars ? String(content.prefix(maxChars)) : content
@@ -639,25 +804,15 @@ func scrollPosition(_ element: AXUIElement) -> Double? {
 }
 
 func scroll(_ id: Any?, _ request: [String: Any]) {
-    guard let element = liveElement(id, request) else { return }
-    guard let frame = frameOf(element) else {
-        fail(id, "no_frame", "This element has no position on screen.")
-        return
-    }
+    guard let element = liveElement(id, request), let target = clickTarget(id, element) else { return }
     let dy = Int32(max(-200, min(200, (request["dy"] as? Int) ?? 0)))
     let dx = Int32(max(-200, min(200, (request["dx"] as? Int) ?? 0)))
-    let target = CGPoint(x: frame.midX, y: frame.midY)
-    if let pid = pidOf(element), let top = ownerAt(target), top != pid {
-        fail(id, "covered", "\(appName(top)) is on top of that element.")
-        return
-    }
-    if let pid = pidOf(element) { activate(pid) }
     let before = scrollPosition(element)
 
     func post() {
-        let source = CGEventSource(stateID: .hidSystemState)
-        if let event = CGEvent(scrollWheelEvent2Source: source, units: .line, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0) {
+        if let event = CGEvent(scrollWheelEvent2Source: inputSource, units: .line, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0) {
             event.location = target
+            event.flags = []
             event.post(tap: .cghidEventTap)
         }
         usleep(180_000)
@@ -682,26 +837,31 @@ func scroll(_ id: Any?, _ request: [String: Any]) {
 }
 
 func drag(_ id: Any?, _ request: [String: Any]) {
-    func end(_ key: String) -> (CGPoint, pid_t?)? {
-        guard let spec = request[key] as? [String: Any] else { return nil }
-        if spec["h"] != nil {
-            guard let h = spec["h"] as? Int, let el = handles.element(h), let f = frameOf(el) else { return nil }
-            return (CGPoint(x: f.midX, y: f.midY), pidOf(el))
-        }
-        if let x = spec["x"] as? Double, let y = spec["y"] as? Double { return (CGPoint(x: x, y: y), nil) }
-        return nil
-    }
-    guard let (from, fromPid) = end("from"), let (to, _) = end("to") else {
-        fail(id, "stale", "Could not find both ends of the drag: take a new snapshot.")
+    guard let fromSpec = request["from"] as? [String: Any], let toSpec = request["to"] as? [String: Any] else {
+        fail(id, "bad_request", "Missing drag ends.")
         return
     }
-    if let pid = fromPid, let top = ownerAt(from), top != pid {
-        fail(id, "covered", "\(appName(top)) is on top of that element.")
+    var fromRequest = fromSpec
+    var toRequest = toSpec
+    if let epoch = request["epoch"] { fromRequest["epoch"] = epoch; toRequest["epoch"] = epoch }
+    guard let source = liveElement(id, fromRequest), let destination = liveElement(id, toRequest) else { return }
+    guard let from = clickTarget(id, source) else { return }
+    guard let toVisible = visibleFrame(destination) else {
+        fail(id, "no_frame", "The drop target is not visible on screen.")
         return
     }
-    if let pid = fromPid { activate(pid) }
+    let to = CGPoint(x: toVisible.midX, y: toVisible.midY)
+    if let problem = coverProblem(destination, at: to) {
+        fail(id, "covered", "The drop target is covered. \(problem)")
+        return
+    }
     // A drag needs a real pointer: move it, drag, and put it back where it was.
     let saved = CGEvent(source: nil)?.location ?? from
+    func finish(_ ok: Bool) {
+        usleep(80_000)
+        CGWarpMouseCursorPosition(saved)
+        if ok { reply(id, ["ok": true, "method": "cursor"]) }
+    }
     CGWarpMouseCursorPosition(from)
     usleep(40_000)
     mouseEvent(.leftMouseDown, from, .left, clickState: 1)?.post(tap: .cghidEventTap)
@@ -714,10 +874,17 @@ func drag(_ id: Any?, _ request: [String: Any]) {
         usleep(18_000)
     }
     usleep(80_000)
+    // Check the drop spot again just before letting go; if something moved over it, drop back where the drag started.
+    if let problem = coverProblem(destination, at: to) {
+        mouseEvent(.leftMouseDragged, from, .left, clickState: 1)?.post(tap: .cghidEventTap)
+        usleep(40_000)
+        mouseEvent(.leftMouseUp, from, .left, clickState: 1)?.post(tap: .cghidEventTap)
+        finish(false)
+        fail(id, "covered", "The drop target was covered before releasing, so nothing was moved. \(problem)")
+        return
+    }
     mouseEvent(.leftMouseUp, to, .left, clickState: 1)?.post(tap: .cghidEventTap)
-    usleep(80_000)
-    CGWarpMouseCursorPosition(saved)
-    reply(id, ["ok": true, "method": "cursor"])
+    finish(true)
 }
 
 // MARK: - Requests
@@ -744,6 +911,8 @@ func handle(_ line: String) {
         setValue(id, request)
     case "typeText":
         typeText(id, request)
+    case "key":
+        pressKey(id, request)
     case "read":
         readText(id, request)
     case "scroll":
