@@ -100,3 +100,22 @@ export function killWindowsProcessTree(pid: number | undefined, deps: KillTreeDe
     return false;
   }
 }
+
+/** One argument for a Windows command line: quoted when it has spaces or shell characters, never when it is plain. */
+export function quoteWindowsArg(arg: string): string {
+  if (arg.length > 0 && !/[\s"&|<>^()%!]/.test(arg)) return arg;
+  // a quote inside cannot be written safely for cmd.exe: the arguments Remote Hands passes never contain one
+  return `"${arg.replace(/"/g, '')}"`;
+}
+
+/**
+ * How to start a program so that it is NOT a child of this process. `cmd /c start` hands the program to Windows and
+ * exits at once, so the program's parent is gone: ending this process's tree (as `taskkill /T` does for the agent) does
+ * not end it. Used for the browser window, which must outlive a cancelled task.
+ */
+export function detachedWindowsLaunch(command: string, args: string[], env: NodeJS.ProcessEnv = process.env): { file: string; args: string[] } {
+  const parts = [quoteWindowsArg(command), ...args.map(quoteWindowsArg)].join(' ');
+  // start's first quoted argument is the window title: an empty one keeps a quoted program path from being taken as it
+  // the whole command is wrapped in quotes, which /s strips again, so the quotes inside survive
+  return { file: env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', `"start "" ${parts}"`] };
+}

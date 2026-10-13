@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { agyCommand, describeSpawnError, findAgyOnWindows, findOnWindowsPath, killWindowsProcessTree, shellQuote } from './windows.js';
+import { agyCommand, describeSpawnError, detachedWindowsLaunch, findAgyOnWindows, findOnWindowsPath, killWindowsProcessTree, quoteWindowsArg, shellQuote } from './windows.js';
 
 const present = (...files: string[]) => (f: string) => files.includes(f);
 
@@ -93,5 +93,31 @@ describe('killWindowsProcessTree never targets this program', () => {
     expect(killWindowsProcessTree(process.pid, { platform: 'win32', run })).toBe(false);
     expect(killWindowsProcessTree(process.ppid, { platform: 'win32', run })).toBe(false);
     expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe('quoteWindowsArg and detachedWindowsLaunch', () => {
+  it('quotes only what needs it', () => {
+    expect(quoteWindowsArg('--remote-debugging-port=9222')).toBe('--remote-debugging-port=9222');
+    expect(quoteWindowsArg('--user-data-dir=C:\\Users\\Ana Lee\\.remote-hands\\chrome-profile')).toBe('"--user-data-dir=C:\\Users\\Ana Lee\\.remote-hands\\chrome-profile"');
+    expect(quoteWindowsArg('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe')).toBe('"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"');
+    expect(quoteWindowsArg('https://a.example/?x=1&y=2')).toBe('"https://a.example/?x=1&y=2"');
+    expect(quoteWindowsArg('')).toBe('""');
+    expect(quoteWindowsArg('a"b c')).toBe('"ab c"');
+  });
+
+  it('starts a program from outside this process\'s tree, with the whole command in quotes', () => {
+    const launch = detachedWindowsLaunch('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', ['--remote-debugging-port=9222', '--user-data-dir=C:\\Users\\José Müller\\.remote-hands\\chrome-profile'], { ComSpec: 'C:\\Windows\\System32\\cmd.exe' });
+    expect(launch.file).toBe('C:\\Windows\\System32\\cmd.exe');
+    expect(launch.args).toEqual([
+      '/d',
+      '/s',
+      '/c',
+      '"start "" "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222 "--user-data-dir=C:\\Users\\José Müller\\.remote-hands\\chrome-profile""',
+    ]);
+  });
+
+  it('falls back to cmd.exe when ComSpec is not set', () => {
+    expect(detachedWindowsLaunch('chrome.exe', [], {}).file).toBe('cmd.exe');
   });
 });

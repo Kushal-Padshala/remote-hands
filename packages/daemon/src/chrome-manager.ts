@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { isSafeBrowserUrl } from '@remote-hands/shared';
+import { detachedWindowsLaunch } from './system/windows.js';
 
 export type ChromeProfileMode = 'active' | 'dedicated' | 'none';
 
@@ -418,9 +419,12 @@ export class ChromeManager {
     }
     this.launchError = undefined;
     const args = this.buildLaunchArgs(initialUrl);
-    this.process = spawn(this.chromeExecutablePath, args, {
+    // Windows: start the browser from outside this process's tree, so ending the agent (which ends its tree) never closes it
+    const launch = process.platform === 'win32' ? detachedWindowsLaunch(this.chromeExecutablePath, args) : { file: this.chromeExecutablePath, args };
+    this.process = spawn(launch.file, launch.args, {
       detached: true,
       stdio: 'ignore',
+      ...(process.platform === 'win32' ? { windowsVerbatimArguments: true, windowsHide: true } : {}),
     });
     // a program that cannot be started reports it here, later: it must not end this process
     this.process.on('error', () => {
