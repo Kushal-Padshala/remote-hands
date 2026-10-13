@@ -159,8 +159,12 @@ function textOf(ctx: Ctx, node: AxNode, depth = 0, max = MAX_LABEL): string[] {
   if (own) return [own];
   const parts: string[] = [];
   for (const child of ctx.kids.get(node.id) ?? []) {
-    if (parts.length >= 4 || depth > 4) break;
-    if (child.role === 'AXStaticText' || child.role === 'AXHeading') {
+    if (parts.length >= 5 || depth > 4) break;
+    if (TEXT_FIELD_ROLES.has(child.role) && !isSecure(child)) {
+      // Finder shows a file's name in a text field: inside a row it is part of what the row says
+      const t = clean(child.value ?? child.label, max);
+      if (t) parts.push(t);
+    } else if (child.role === 'AXStaticText' || child.role === 'AXHeading') {
       const t = clean(child.value ?? child.label, max);
       if (t) parts.push(t);
     } else if (child.role === 'AXImage') {
@@ -173,14 +177,14 @@ function textOf(ctx: Ctx, node: AxNode, depth = 0, max = MAX_LABEL): string[] {
   }
   const unique: string[] = [];
   for (const p of parts) if (unique[unique.length - 1] !== p) unique.push(p);
-  return unique.slice(0, 4);
+  return unique.slice(0, 5);
 }
 
 function collectMembers(ctx: Ctx, node: AxNode, into: number[], depth = 0): void {
   into.push(node.id);
   if (depth > 5) return;
   for (const child of ctx.kids.get(node.id) ?? []) {
-    if (LEAF_CONTROLS.has(child.role) && !ROW_ROLES.has(child.role)) continue;
+    if (LEAF_CONTROLS.has(child.role) && !ROW_ROLES.has(child.role) && !(TEXT_FIELD_ROLES.has(child.role) && !isSecure(child))) continue;
     if (child.role === 'AXRow') continue;
     if (child.role === 'AXTable' || child.role === 'AXOutline' || child.role === 'AXList') continue;
     collectMembers(ctx, child, into, depth + 1);
@@ -206,7 +210,7 @@ function annotations(node: AxNode, role: string, targets: Record<string, number>
   if (node.enabled === false) out.push('disabled');
   if (node.selected) out.push('selected');
   if (node.expanded === true) out.push('expanded');
-  else if (node.expanded === false && (role === 'disclosure' || role === 'row')) out.push('collapsed');
+  else if (node.expanded === false && role === 'disclosure') out.push('collapsed');
   if (node.focused && (TEXT_FIELD_ROLES.has(node.role) || role === 'search' || role === 'password')) out.push('focused');
   const names = Object.keys(targets)
     .map((a) => ACTION_NAMES[a])
@@ -357,6 +361,8 @@ function visit(ctx: Ctx, node: AxNode, indent: number, inRow: boolean): void {
 /** Inside a row only controls matter; the row's texts and icons are already in its label. */
 function visitRowChild(ctx: Ctx, node: AxNode, indent: number): void {
   if (LEAF_CONTROLS.has(node.role)) {
+    // a field that only shows the row's own text is already in the row's label
+    if (TEXT_FIELD_ROLES.has(node.role) && !node.label && !node.placeholder && !node.focused && !node.help) return;
     visit(ctx, node, indent, true);
     return;
   }

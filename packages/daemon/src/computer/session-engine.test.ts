@@ -269,6 +269,15 @@ describe('ComputerSession with the fast reader', () => {
     expect(out).toContain('(0% -> 30% of the way down)');
   });
 
+  it('drags between rows by selecting the source row first, and keeps the epoch', async () => {
+    const helper = fakeHelper();
+    const { session } = make(helper);
+    await session.desktopSnapshot('Notes');
+    const out = await session.desktopDrag(7, 8);
+    expect(helper.calls.find((c) => c.op === 'drag')).toMatchObject({ from: { h: 7 }, to: { h: 8 }, select: true, epoch: 77 });
+    expect(out).toContain('dragged [7] row "report.pdf" to [8] row "notes.txt"');
+  });
+
   it('reads the full text of an element', async () => {
     const helper = fakeHelper();
     const { session } = make(helper);

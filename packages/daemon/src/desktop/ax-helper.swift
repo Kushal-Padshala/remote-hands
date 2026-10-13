@@ -510,7 +510,35 @@ func activate(_ pid: pid_t) -> Bool {
     } else {
         app.activate(options: [.activateIgnoringOtherApps])
     }
-    for _ in 0..<40 {
+    for _ in 0..<20 {
+        if app.isActive { return true }
+        usleep(15_000)
+    }
+    // A background helper is not always allowed to take the front directly; asking the system to open the app
+    // ("open -a") is the sanctioned way and brings its windows forward.
+    if let url = app.bundleURL {
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: config, completionHandler: nil)
+    }
+    for _ in 0..<30 {
+        if app.isActive { return true }
+        usleep(15_000)
+    }
+    // Last resort, the way people script it.
+    if let bundle = app.bundleIdentifier {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        task.arguments = ["-e", "tell application id \"\(bundle)\" to activate"]
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
+        if (try? task.run()) != nil {
+            let limit = Date().addingTimeInterval(3)
+            while task.isRunning && Date() < limit { usleep(20_000) }
+            if task.isRunning { task.terminate() }
+        }
+    }
+    for _ in 0..<60 {
         if app.isActive { return true }
         usleep(15_000)
     }
@@ -553,6 +581,11 @@ func clickTarget(_ id: Any?, _ element: AXUIElement) -> CGPoint? {
         fail(id, "not_active", "\(appName(pid)) could not be brought to the front.")
         return nil
     }
+    // Bring the element's own window above the others of its app and of other apps.
+    if let window = attribute(element, kAXWindowAttribute), CFGetTypeID(window) == AXUIElementGetTypeID() {
+        _ = AXUIElementPerformAction(window as! AXUIElement, kAXRaiseAction as CFString)
+        usleep(120_000)
+    }
     if let problem = coverProblem(element, at: target) {
         fail(id, "covered", problem)
         return nil
@@ -575,8 +608,8 @@ func perform(_ id: Any?, _ request: [String: Any]) {
     }
 }
 
-func mouseEvent(_ type: CGEventType, _ p: CGPoint, _ button: CGMouseButton, clickState: Int64) -> CGEvent? {
-    let event = CGEvent(mouseEventSource: inputSource, mouseType: type, mouseCursorPosition: p, mouseButton: button)
+func mouseEvent(_ type: CGEventType, _ p: CGPoint, _ button: CGMouseButton, clickState: Int64, source: CGEventSource? = inputSource) -> CGEvent? {
+    let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: p, mouseButton: button)
     event?.setIntegerValueField(.mouseEventClickState, value: clickState)
     event?.flags = []
     return event
@@ -660,8 +693,9 @@ func keyboardProblem(_ request: [String: Any]) -> String? {
     if request["h"] != nil, request["h"] is Int {
         guard let element = handles.element(request["h"] as! Int) else { return "That element is no longer there. Take a new snapshot." }
         var focused: AnyObject?
-        let err = AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &focused)
-        guard err == .success, let f = focused, CFGetTypeID(f) == AXUIElementGetTypeID(), CFEqual(f, element) else {
+        let err = AXUIElementCopyAttributeValue(AXUIElementCreateApplication(pid_t(pid)), kAXFocusedUIElementAttribute as CFString, &focused)
+        guard err == .success, let f = focused, CFGetTypeID(f) == AXUIElementGetTypeID(),
+              isAncestor(element, of: f as! AXUIElement) || isAncestor(f as! AXUIElement, of: element) else {
             return "The cursor is not in that field any more. Take a new snapshot and try again."
         }
     }
@@ -856,6 +890,7 @@ func drag(_ id: Any?, _ request: [String: Any]) {
         return
     }
     // A drag needs a real pointer: move it, drag, and put it back where it was.
+    let dragSource = CGEventSource(stateID: .combinedSessionState)
     let saved = CGEvent(source: nil)?.location ?? from
     func finish(_ ok: Bool) {
         usleep(80_000)
@@ -863,27 +898,40 @@ func drag(_ id: Any?, _ request: [String: Any]) {
         if ok { reply(id, ["ok": true, "method": "cursor"]) }
     }
     CGWarpMouseCursorPosition(from)
-    usleep(40_000)
-    mouseEvent(.leftMouseDown, from, .left, clickState: 1)?.post(tap: .cghidEventTap)
     usleep(60_000)
-    let steps = 14
+    if (request["select"] as? Bool) == true {
+        // Lists drag what is selected: select the row first so the drag moves it instead of lassoing its neighbours.
+        mouseEvent(.leftMouseDown, from, .left, clickState: 1, source: dragSource)?.post(tap: .cghidEventTap)
+        usleep(30_000)
+        mouseEvent(.leftMouseUp, from, .left, clickState: 1, source: dragSource)?.post(tap: .cghidEventTap)
+        usleep(500_000)
+    }
+    mouseEvent(.mouseMoved, from, .left, clickState: 0, source: dragSource)?.post(tap: .cghidEventTap)
+    usleep(60_000)
+    mouseEvent(.leftMouseDown, from, .left, clickState: 1, source: dragSource)?.post(tap: .cghidEventTap)
+    usleep(150_000)
+    let steps = 30
     for i in 1...steps {
         let t = Double(i) / Double(steps)
         let p = CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
-        mouseEvent(.leftMouseDragged, p, .left, clickState: 1)?.post(tap: .cghidEventTap)
-        usleep(18_000)
+        mouseEvent(.leftMouseDragged, p, .left, clickState: 1, source: dragSource)?.post(tap: .cghidEventTap)
+        usleep(20_000)
     }
-    usleep(80_000)
+    // hold over the drop spot so the target can highlight
+    for _ in 0..<5 {
+        mouseEvent(.leftMouseDragged, to, .left, clickState: 1, source: dragSource)?.post(tap: .cghidEventTap)
+        usleep(60_000)
+    }
     // Check the drop spot again just before letting go; if something moved over it, drop back where the drag started.
     if let problem = coverProblem(destination, at: to) {
-        mouseEvent(.leftMouseDragged, from, .left, clickState: 1)?.post(tap: .cghidEventTap)
+        mouseEvent(.leftMouseDragged, from, .left, clickState: 1, source: dragSource)?.post(tap: .cghidEventTap)
         usleep(40_000)
-        mouseEvent(.leftMouseUp, from, .left, clickState: 1)?.post(tap: .cghidEventTap)
+        mouseEvent(.leftMouseUp, from, .left, clickState: 1, source: dragSource)?.post(tap: .cghidEventTap)
         finish(false)
         fail(id, "covered", "The drop target was covered before releasing, so nothing was moved. \(problem)")
         return
     }
-    mouseEvent(.leftMouseUp, to, .left, clickState: 1)?.post(tap: .cghidEventTap)
+    mouseEvent(.leftMouseUp, to, .left, clickState: 1, source: dragSource)?.post(tap: .cghidEventTap)
     finish(true)
 }
 

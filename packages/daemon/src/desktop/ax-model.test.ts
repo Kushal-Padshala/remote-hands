@@ -35,13 +35,23 @@ describe('buildView', () => {
   it('folds a row with its cell, text and icon into one line and keeps its open action', () => {
     const view = buildView(finderLike());
     const lines = view.lines;
-    expect(lines).toContain('  [5] row "Recents" collapsed {open}');
+    expect(lines).toContain('  [5] row "Recents" {open}');
     expect(lines.filter((l) => l.includes('Recents'))).toHaveLength(1);
     expect(view.text).not.toMatch(/folder|image|scrollbar/i);
     const row = view.items.find((i) => i.label === 'Recents')!;
     // the cell (id 6) supports AXOpen, the row is what the model sees
     expect(row.actionTargets).toEqual({ AXOpen: 6 });
     expect(view.byId.get(7)).toBe(row); // the folded-in text leads to the row
+  });
+
+  it('includes the name text field of a file row in the row, without a separate line for it', () => {
+    reset();
+    const win = node('AXWindow', 0);
+    const row = node('AXRow', win.id, { sub: 'AXOutlineRow', expanded: false });
+    const nameCell = node('AXCell', row.id);
+    const sizeCell = node('AXCell', row.id);
+    const nodes = [win, row, nameCell, node('AXTextField', nameCell.id, { value: 'report.pdf', actions: ['AXOpen'] }), sizeCell, node('AXStaticText', sizeCell.id, { value: '2 MB' })];
+    expect(buildView(snap(nodes)).lines).toEqual([`[${row.id}] row "report.pdf · 2 MB" {open}`]);
   });
 
   it('writes the app and window, then the controls with their state', () => {
@@ -204,7 +214,7 @@ describe('buildView', () => {
 
   it('a filter shows only matches and says when nothing matches', () => {
     const view = buildView(finderLike(), { filter: 'doc' });
-    expect(view.lines.filter((l) => !l.startsWith('…'))).toEqual(['  [13] row "Documents" collapsed {open}']);
+    expect(view.lines.filter((l) => !l.startsWith('…'))).toEqual(['  [13] row "Documents" {open}']);
     expect(buildView(finderLike(), { filter: 'zzz' }).lines).toEqual(['(nothing matches "zzz")']);
   });
 });

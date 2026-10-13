@@ -187,7 +187,9 @@ export class DesktopEngine {
   }
 
   async drag(fromId: number, toId: number): Promise<void> {
-    await this.call({ op: 'drag', from: { h: this.item(fromId).id }, to: { h: this.item(toId).id } });
+    const from = this.item(fromId);
+    // list rows drag what is selected, so the helper selects the row first
+    await this.call({ op: 'drag', from: { h: from.id }, to: { h: this.item(toId).id }, ...(from.role === 'row' ? { select: true } : {}) });
   }
 
   /**
