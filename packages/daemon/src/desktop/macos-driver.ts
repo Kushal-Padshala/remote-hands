@@ -112,6 +112,11 @@ export class MacOsDriver {
   }
 
   async getActiveWindowContext(appOverride?: string, windowTitleOverride?: string): Promise<ActiveWindowContext> {
+    if (process.platform !== 'darwin') {
+      // No System Events here: the program that asked (the HUD) says which app is in front.
+      const app = appOverride || 'Desktop';
+      return { app, title: windowTitleOverride || '', url: '', isBrowser: /chrome|safari|arc|brave|edge|firefox|opera|browser/i.test(app) };
+    }
     const script = `
       (() => {
         const se = Application("System Events");

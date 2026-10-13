@@ -259,3 +259,20 @@ describe('MacOsDriver', () => {
     expect(callArgs.join(' ')).toContain('College Pulse Survey - Guest');
   });
 });
+
+describe('MacOsDriver.getActiveWindowContext off the Mac', () => {
+  it('trusts the app the HUD named and never runs osascript', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    const exec = vi.fn();
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      const driver = new MacOsDriver({ exec } as any);
+      expect(await driver.getActiveWindowContext('msedge', 'Inbox')).toEqual({ app: 'msedge', title: 'Inbox', url: '', isBrowser: true });
+      expect(await driver.getActiveWindowContext('notepad')).toMatchObject({ app: 'notepad', isBrowser: false });
+      expect(await driver.getActiveWindowContext()).toMatchObject({ app: 'Desktop', isBrowser: false });
+      expect(exec).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+  });
+});

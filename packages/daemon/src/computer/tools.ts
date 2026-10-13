@@ -63,7 +63,13 @@ const doStepsSchema = z
     });
   });
 
-export function buildComputerTools(session: ComputerSession): ComputerTool[] {
+export interface ComputerToolsOptions {
+  /** Only the Mac can control native apps; elsewhere the desktop tools are not offered. */
+  platform?: NodeJS.Platform | undefined;
+}
+
+export function buildComputerTools(session: ComputerSession, opts: ComputerToolsOptions = {}): ComputerTool[] {
+  const desktopTools = (opts.platform ?? process.platform) === 'darwin';
   const tools: ComputerTool[] = [
     {
       name: 'desktop_snapshot',
@@ -231,12 +237,16 @@ export function buildComputerTools(session: ComputerSession): ComputerTool[] {
     },
   ];
 
+  if (!desktopTools) {
+    for (let i = tools.length - 1; i >= 0; i -= 1) if (tools[i]!.name.startsWith('desktop_')) tools.splice(i, 1);
+  }
   const byName = new Map(tools.map((t) => [t.name, t]));
 
   tools.push({
     name: 'computer_batch',
-    description:
-      'Run several tool calls in one round trip, validating all steps first and stopping at the first failure. Only DESKTOP indexes shift: every action re-reads the UI, so a desktop_click index refers to the desktop state AFTER the previous step, which you have not seen; typing and key presses can reshape the UI. Batch only desktop steps that do not need an index, with at most one desktop_click first or last. Browser ids are stable numbers, but for browser sequences and forms use browser_do instead: it takes several steps with the ids you already saw and stops when the page navigates. Returns per-step status and the final state.',
+    description: !desktopTools
+      ? 'Run several tool calls in one round trip, validating all steps first and stopping at the first failure. Browser ids are stable numbers, but for browser sequences and forms use browser_do instead: it takes several steps with the ids you already saw and stops when the page navigates. Returns per-step status and the final state.'
+      : 'Run several tool calls in one round trip, validating all steps first and stopping at the first failure. Only DESKTOP indexes shift: every action re-reads the UI, so a desktop_click index refers to the desktop state AFTER the previous step, which you have not seen; typing and key presses can reshape the UI. Batch only desktop steps that do not need an index, with at most one desktop_click first or last. Browser ids are stable numbers, but for browser sequences and forms use browser_do instead: it takes several steps with the ids you already saw and stops when the page navigates. Returns per-step status and the final state.',
     inputSchema: {
       steps: z
         .array(z.object({ tool: z.string(), args: z.record(z.string(), z.unknown()).default({}) }))

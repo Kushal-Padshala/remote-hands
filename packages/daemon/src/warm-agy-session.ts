@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { EventInput } from './task-store.js';
 import { effortFor } from './hud-models.js';
+import { killWindowsProcessTree } from './system/windows.js';
 
 export interface WarmSessionConfig {
   model: string;
@@ -60,6 +61,8 @@ function defaultKill(proc: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): vo
       // fall through to a direct kill
     }
   }
+  // Windows has no process groups: end the agent and the tool servers it started together.
+  if (killWindowsProcessTree(proc.pid)) return;
   proc.kill(signal);
 }
 

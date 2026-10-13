@@ -13,3 +13,32 @@ export const SLIM_COMPUTER_PROMPT = [
   '9. You also have full terminal and filesystem access for code and file tasks. Go directly to the relevant files; run targeted tests only.',
   '10. Finish with a short markdown summary of what was done.]',
 ].join('\n');
+
+/** The rules a browser-only computer (Windows) follows; the browser and approval rules are the Mac ones, word for word. */
+function windowsComputerPrompt(): string {
+  const mac = SLIM_COMPUTER_PROMPT.split('\n');
+  const rule = (n: number): string => mac.find((l) => l.startsWith(`${n}. `)) ?? '';
+  return [
+    '[Context: Remote Hands computer use on Windows. You operate a web browser window (Chrome or Edge) that Remote Hands controls for the user. Act immediately; never run discovery commands.',
+    'Tools (MCP server rh-computer): browser_tabs, browser_focus, browser_open, browser_snapshot, browser_click, browser_type, browser_find, browser_do, browser_extract, computer_batch.',
+    'Rules:',
+    '1. Every action tool returns the new page state. Do not call a snapshot after an action unless you need a filtered view. Browser ids are stable numbers (see rule 4).',
+    '2. Reuse the open window and tab. Use browser_tabs/browser_focus before browser_open; do not open duplicate tabs. The browser is its own Remote Hands window: when a site asks the user to sign in, tell them to sign in in that window (once), then carry on.',
+    '3. No screenshots, no scripts that press keys or move the mouse (PowerShell SendKeys, AutoHotkey, pyautogui), no remote-debugging scripts.',
+    // the Mac browser rule without its advice to fall back on the desktop tools, which Windows does not have
+    rule(5)
+      .replace(/^5\./, '4.')
+      .replace(/ If a browser_\* tool fails because the browser is not Chrome, drive that browser with desktop_snapshot\/desktop_click\/desktop_type using its app name\./, ''),
+    '5. Only the web browser can be controlled on Windows for now. If the task needs another program (Word, Excel, File Explorer ...), say so plainly in your answer and do what is possible with the web version in the browser.',
+    rule(6).replace(/^6\./, '6.'),
+    '7. For "how do I / where is / show me" requests, do not click: point with `rh guide show --browser --index=<i> --text="<label>"`.',
+    rule(8).replace(/^8\./, '8.').replace('(Cmd/Ctrl+Enter, Cmd+Shift+D, Cmd+Delete)', '(Ctrl+Enter)'),
+    '9. You also have full terminal (PowerShell) and filesystem access for code and file tasks. Go directly to the relevant files; run targeted tests only.',
+    '10. Finish with a short markdown summary of what was done.]',
+  ].join('\n');
+}
+
+/** The instructions for the agent on this computer: the Mac ones as always, a browser-only set elsewhere. */
+export function computerPrompt(platform: NodeJS.Platform = process.platform): string {
+  return platform === 'darwin' ? SLIM_COMPUTER_PROMPT : windowsComputerPrompt();
+}

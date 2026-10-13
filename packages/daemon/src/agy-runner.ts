@@ -10,6 +10,7 @@ import { HermesBrain } from './hermes-brain.js';
 import { clearActiveTask, writeActiveTask } from './action-gate.js';
 import type { WarmAgySession, WarmSessionConfig } from './warm-agy-session.js';
 import { effortFor } from './hud-models.js';
+import { killWindowsProcessTree } from './system/windows.js';
 
 export interface AgentRunResult {
   events: readonly EventInput[];
@@ -654,7 +655,7 @@ export class ProcessAgentRunner implements AgentRunner {
               } catch {
                 proc.kill(sig);
               }
-            } else {
+            } else if (!killWindowsProcessTree(proc.pid)) {
               proc.kill(sig);
             }
           }

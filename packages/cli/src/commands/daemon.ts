@@ -9,6 +9,7 @@ import {
   CloudflareTaskStore,
   RealtimeClient,
   ProcessAgentRunner,
+  agyCommand,
   getRuntimeMetadata,
   runDaemonOnce,
   ChromeManager,
@@ -225,7 +226,7 @@ async function runLocalDaemon(
     });
   context.chromeManager = chromeManager;
 
-  const runner: AgentRunner = (context as any).agentRunner ?? new ProcessAgentRunner('agy');
+  const runner: AgentRunner = (context as any).agentRunner ?? new ProcessAgentRunner(agyCommand());
   const machineName = os.hostname() || 'localhost';
   const runtime = getRuntimeMetadata({
     hostname: () => machineName,
@@ -312,7 +313,7 @@ async function runLocalDaemon(
             supabaseUrl: '',
             supabaseAnonKey: '',
             machineName,
-            agyCommand: 'agy',
+            agyCommand: agyCommand(),
             workspaceAllowlist: [],
             pollIntervalMs: 1000,
             heartbeatIntervalMs: 60000,
@@ -423,7 +424,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
     machineId,
   });
 
-  const runner: AgentRunner = (context as any).agentRunner ?? new ProcessAgentRunner('agy');
+  const runner: AgentRunner = (context as any).agentRunner ?? new ProcessAgentRunner(agyCommand());
   const powerManager: DynamicPowerManager = (context as any).powerManager ?? new DynamicPowerManager();
   const runtime = getRuntimeMetadata({
     hostname: () => machineName,
@@ -579,7 +580,7 @@ export async function daemonCommand(args: string[], context: CommandContext = {}
             supabaseUrl: '',
             supabaseAnonKey: '',
             machineName,
-            agyCommand: 'agy',
+            agyCommand: agyCommand(),
             workspaceAllowlist: [],
             pollIntervalMs: 1000,
             heartbeatIntervalMs: 60000,

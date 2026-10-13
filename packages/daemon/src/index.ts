@@ -1,4 +1,5 @@
 export * from './agy-runner.js';
+export * from './system/windows.js';
 export * from './hud-models.js';
 export * from './warm-agy-session.js';
 export * from './computer/prompt.js';

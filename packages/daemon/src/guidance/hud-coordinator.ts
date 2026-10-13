@@ -12,7 +12,8 @@ import type { TaskStore } from '../task-store.js';
 import { ProcessAgentRunner, parseAgyStreamLine, HUD_TASK_MODE, type AgentRunner, type AgentRunResult } from '../agy-runner.js';
 import { HUD_MODELS, hudModelByKey, readHudModelKey, resolveHudModel, writeHudModelKey, type HudModel } from '../hud-models.js';
 import { WarmAgySession } from '../warm-agy-session.js';
-import { SLIM_COMPUTER_PROMPT } from '../computer/prompt.js';
+import { agyCommand } from '../system/windows.js';
+import { computerPrompt } from '../computer/prompt.js';
 import { DynamicPowerManager } from '../system/power-manager.js';
 import { HudFeed, plainSummary } from './hud-feed.js';
 
@@ -345,10 +346,10 @@ export class HudCoordinator {
       this.defaultRunner =
         this.defaultRunnerFactory?.() ??
         new ProcessAgentRunner(
-          'agy',
-          SLIM_COMPUTER_PROMPT,
+          agyCommand(),
+          computerPrompt(),
           undefined,
-          new WarmAgySession({ command: 'agy', parseLine: parseAgyStreamLine, idleMs: HUD_AGY_IDLE_MS }),
+          new WarmAgySession({ command: agyCommand(), parseLine: parseAgyStreamLine, idleMs: HUD_AGY_IDLE_MS }),
         );
     }
     return this.defaultRunner;

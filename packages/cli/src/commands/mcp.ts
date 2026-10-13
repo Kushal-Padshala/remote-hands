@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import { realpathSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createDefaultComputerSession, serveComputerMcp } from '@remote-hands/daemon';
+import { agyCommand, createDefaultComputerSession, serveComputerMcp } from '@remote-hands/daemon';
 import type { CommandContext } from './setup.js';
 import { createActionGate } from '../action-gate.js';
 import { agyMcpRule, ensureAgyMcpPermission, removeAgyMcpPermission } from '../system/agy-permissions.js';
@@ -73,7 +73,7 @@ export async function mcpCommand(args: string[], context: McpCommandContext = {}
   }
 
   if (sub === 'install') {
-    const res = exec('agy', [
+    const res = exec(agyCommand(), [
       'mcp', 'add', AGY_MCP_NAME, '--',
       context.nodePath ?? process.execPath,
       context.cliPath ?? (context.installStableCli ?? installStableCli)(currentCliPath()),
@@ -100,7 +100,7 @@ export async function mcpCommand(args: string[], context: McpCommandContext = {}
   }
 
   if (sub === 'remove') {
-    const res = exec('agy', ['mcp', 'remove', AGY_MCP_NAME]);
+    const res = exec(agyCommand(), ['mcp', 'remove', AGY_MCP_NAME]);
     if (res.status !== 0) {
       stderr(`Failed to remove ${AGY_MCP_NAME}: ${failureDetail(res)}`);
       return 1;

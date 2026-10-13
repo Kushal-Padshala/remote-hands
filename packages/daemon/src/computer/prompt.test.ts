@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SLIM_COMPUTER_PROMPT } from './prompt.js';
+import { SLIM_COMPUTER_PROMPT, computerPrompt } from './prompt.js';
 import { buildComputerTools } from './tools.js';
 
 describe('SLIM_COMPUTER_PROMPT', () => {
@@ -85,5 +85,40 @@ describe('SLIM_COMPUTER_PROMPT', () => {
     expect(rule1).toMatch(/desktop indexes come from the latest/i);
     expect(rule1).toMatch(/browser ids are stable numbers/i);
     expect(rule1).not.toMatch(/^1\. .*Indexes come from the latest state only/);
+  });
+});
+
+describe('computerPrompt', () => {
+  it('is the Mac prompt on a Mac, unchanged', () => {
+    expect(computerPrompt('darwin')).toBe(SLIM_COMPUTER_PROMPT);
+  });
+
+  it('offers a browser-only prompt on Windows that names exactly the tools Windows has', () => {
+    const win = computerPrompt('win32');
+    const mentioned = new Set(win.match(/\b(?:desktop|browser)_[a-z]+\b|\bcomputer_batch\b/g) ?? []);
+    const actual = new Set(buildComputerTools({} as any, { platform: 'win32' }).map((t) => t.name));
+    expect([...mentioned].sort()).toEqual([...actual].sort());
+    expect(win).not.toMatch(/desktop_|Mac|osascript|Cmd\+Shift/);
+    expect(win).toContain('Windows');
+    expect(win).toContain('Only the web browser can be controlled on Windows for now');
+    // the browser and approval rules are the Mac ones
+    expect(win).toContain('Use browser_do to fill and submit a whole form in one call');
+    expect(win).toContain('wait for the user\'s approval on their phone by themselves');
+    expect(win).toContain('Never run `rh browser setup` yourself');
+  });
+});
+
+describe('buildComputerTools off the Mac', () => {
+  it('offers no desktop tool, and the batch tool cannot run one', async () => {
+    const tools = buildComputerTools({} as any, { platform: 'win32' });
+    expect(tools.some((t) => t.name.startsWith('desktop_'))).toBe(false);
+    expect(tools.map((t) => t.name)).toContain('browser_open');
+    const batch = tools.find((t) => t.name === 'computer_batch')!;
+    expect(batch.description).not.toMatch(/desktop/i);
+    await expect(batch.handler({ steps: [{ tool: 'desktop_click', args: { index: 1 } }] })).rejects.toThrow(/unknown or nested tool/);
+  });
+
+  it('keeps every tool on the Mac', () => {
+    expect(buildComputerTools({} as any, { platform: 'darwin' }).filter((t) => t.name.startsWith('desktop_'))).toHaveLength(10);
   });
 });
