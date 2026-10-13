@@ -10,8 +10,7 @@ export interface ToolCallRecord {
   kind?: 'timeout' | 'stale' | 'other';
 }
 
-const TRIM_ABOVE_BYTES = 200_000;
-const KEEP_LINES = 1000;
+const ROTATE_ABOVE_BYTES = 200_000;
 
 export function callLogPath(homeDir: string): string {
   return path.join(homeDir, '.remote-hands', 'computer', 'calls.jsonl');
@@ -24,7 +23,12 @@ export function classifyError(message: string): 'timeout' | 'stale' | 'other' {
   return 'other';
 }
 
-/** Appends a record (known fields only). Never throws: logging must not break a tool call. */
+/**
+ * Appends a record (known fields only). Never throws: logging must not break a tool call.
+ * When the file grows past ROTATE_ABOVE_BYTES it is renamed to `calls.jsonl.1` (replacing the
+ * previous one) and the next call starts a fresh file. Renaming never rewrites existing lines, so
+ * a full disk or a second server process cannot corrupt or drop records that were already written.
+ */
 export function appendCallRecord(homeDir: string, record: ToolCallRecord): void {
   try {
     const safe: ToolCallRecord = { at: record.at, tool: record.tool, ms: Math.round(record.ms), ok: record.ok };
@@ -32,10 +36,7 @@ export function appendCallRecord(homeDir: string, record: ToolCallRecord): void 
     const file = callLogPath(homeDir);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.appendFileSync(file, `${JSON.stringify(safe)}\n`);
-    if (fs.statSync(file).size > TRIM_ABOVE_BYTES) {
-      const lines = fs.readFileSync(file, 'utf8').split('\n').filter((l) => l.trim().startsWith('{'));
-      fs.writeFileSync(file, `${lines.slice(-KEEP_LINES).join('\n')}\n`);
-    }
+    if (fs.statSync(file).size > ROTATE_ABOVE_BYTES) fs.renameSync(file, `${file}.1`);
   } catch {
     // best effort
   }

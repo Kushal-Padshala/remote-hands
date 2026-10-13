@@ -20,13 +20,20 @@ export function formatTimeout(ms: number): string {
 export interface ComputerMcpServerOptions {
   /** Per-call limit so a handler that never settles cannot block the queue (default 90 s). */
   callTimeoutMs?: number | undefined;
-  /** Told about every finished call (tool name, timing, outcome class only). Must not throw; if it does it is ignored. */
+  /**
+   * Told about every finished tool call (tool name, timing, outcome class only). Calls the SDK
+   * rejects for invalid arguments never reach a tool and are not reported. If it throws, the
+   * error is ignored.
+   */
   onCall?: ((record: ToolCallRecord) => void) | undefined;
+  /** Monotonic milliseconds for timing a call (default performance.now; wall-clock changes must not skew it). */
+  now?: (() => number) | undefined;
 }
 
 export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcpServerOptions = {}): McpServer {
   const server = new McpServer({ name: 'remote-hands-computer', version: '0.1.0' });
   const limit = opts.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
+  const clock = opts.now ?? (() => performance.now());
   type Result = { isError?: boolean; content: { type: 'text'; text: string }[] };
   // The abandoned handler keeps running (it is not cancelled); only the queue moves on.
   const withTimeout = (work: Promise<Result>): Promise<Result> => {
@@ -47,9 +54,11 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
       tool.name,
       { description: tool.description, inputSchema: tool.inputSchema },
       async (args: any) => {
-        let started = Date.now();
+        let startedAt = new Date();
+        let startedMs = clock();
         const result = await serialized(() => {
-          started = Date.now(); // time the work itself, not the wait for earlier calls
+          startedAt = new Date(); // time the work itself, not the wait for earlier calls
+          startedMs = clock();
           return withTimeout(
             (async (): Promise<Result> => {
               try {
@@ -62,7 +71,7 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
         });
         if (opts.onCall) {
           try {
-            const record: ToolCallRecord = { at: new Date(started).toISOString(), tool: tool.name, ms: Date.now() - started, ok: result.isError !== true };
+            const record: ToolCallRecord = { at: startedAt.toISOString(), tool: tool.name, ms: Math.max(0, clock() - startedMs), ok: result.isError !== true };
             if (result.isError) record.kind = classifyError(result.content[0]?.text ?? '');
             opts.onCall(record);
           } catch {

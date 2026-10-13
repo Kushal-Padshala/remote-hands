@@ -56,18 +56,27 @@ describe('createComputerMcpServer', () => {
     expect(records.map((r) => [r.tool, r.ok, r.kind])).toEqual([['hang', false, 'timeout']]);
   });
 
-  it('times the work itself, not the wait behind an earlier call', async () => {
+  it('times the work itself on a monotonic clock, not the wait behind an earlier call', async () => {
     const records: ToolCallRecord[] = [];
-    const nap = (name: string, ms: number): ComputerTool => ({
-      name,
-      description: name,
-      inputSchema: {},
-      handler: async () => { await new Promise((r) => setTimeout(r, ms)); return name; },
-    });
-    const client = await connect([nap('slow', 120), nap('quick', 1)], { onCall: (r) => records.push(r) });
+    let clock = 0;
+    const tools: ComputerTool[] = [
+      { name: 'slow', description: 's', inputSchema: {}, handler: async () => { await new Promise((r) => setTimeout(r, 5)); clock += 400; return 'slow'; } },
+      { name: 'quick', description: 'q', inputSchema: {}, handler: async () => { clock += 7; return 'quick'; } },
+    ];
+    const client = await connect(tools, { onCall: (r) => records.push(r), now: () => clock });
     await Promise.all([client.callTool({ name: 'slow', arguments: {} }), client.callTool({ name: 'quick', arguments: {} })]);
-    const quick = records.find((r) => r.tool === 'quick')!;
-    expect(quick.ms).toBeLessThan(100);
+    expect(Object.fromEntries(records.map((r) => [r.tool, r.ms]))).toEqual({ slow: 400, quick: 7 });
+  });
+
+  it('never reports a negative duration, even if the clock misbehaves', async () => {
+    const records: ToolCallRecord[] = [];
+    let clock = 1000;
+    const client = await connect(
+      [{ name: 't', description: 'd', inputSchema: {}, handler: async () => { clock -= 60_000; return 'ok'; } }],
+      { onCall: (r) => records.push(r), now: () => clock },
+    );
+    await client.callTool({ name: 't', arguments: {} });
+    expect(records[0]!.ms).toBe(0);
   });
 
   it('a throwing onCall never breaks the tool call', async () => {

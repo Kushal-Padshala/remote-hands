@@ -405,6 +405,10 @@ describe('buildComputerTools', () => {
     expect(d).not.toContain('up to 15');
     expect(d).not.toContain('do not move focus');
     expect(d).toContain('On the slower fallback path only click, type and wait are supported');
+    expect(d).not.toMatch(/click them instead/i);
+    expect(d).toMatch(/not a substitute/);
+    expect(d).toMatch(/at most 30000 in total/);
+    expect(d).toMatch(/currently visible on screen/);
   });
 
   it('browser_find query description does not promise surrounding-text matching', () => {

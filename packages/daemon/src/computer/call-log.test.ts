@@ -31,14 +31,18 @@ describe('call log', () => {
     expect(() => appendCallRecord(path.join(file, 'nested'), { at: 'a', tool: 't', ms: 1, ok: true })).not.toThrow();
   });
 
-  it('trims a large log to the newest lines', () => {
+  it('rotates a large log by renaming it, so old lines stay intact and new records start a fresh file', () => {
     const file = callLogPath(home);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    const filler = Array.from({ length: 3000 }, (_, i) => JSON.stringify({ at: String(i), tool: 'browser_do', ms: 1, ok: true })).join('\n');
-    fs.writeFileSync(file, `${filler}\n${' '.repeat(200_000)}\n`);
-    appendCallRecord(home, { at: 'last', tool: 'browser_do', ms: 1, ok: true });
-    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
-    expect(lines.length).toBeLessThanOrEqual(1000);
-    expect(JSON.parse(lines.at(-1)!).at).toBe('last');
+    const old = Array.from({ length: 3000 }, (_, i) => JSON.stringify({ at: String(i), tool: 'browser_do', ms: 1, ok: true })).join('\n');
+    fs.writeFileSync(file, `${old}\n${JSON.stringify({ at: 'pad', tool: 'x', ms: 1, ok: true, pad: 'y'.repeat(200_000) })}\n`);
+    appendCallRecord(home, { at: 'newest', tool: 'browser_do', ms: 1, ok: true });
+    const rotated = fs.readFileSync(`${file}.1`, 'utf8').split('\n').filter(Boolean);
+    expect(rotated).toHaveLength(3002);
+    expect(rotated.every((l) => { try { JSON.parse(l); return true; } catch { return false; } })).toBe(true);
+    expect(JSON.parse(rotated.at(-1)!).at).toBe('newest');
+    expect(fs.existsSync(file)).toBe(false);
+    appendCallRecord(home, { at: 'after', tool: 'browser_do', ms: 1, ok: true });
+    expect(fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l).at)).toEqual(['after']);
   });
 });
