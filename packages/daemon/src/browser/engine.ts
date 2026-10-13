@@ -263,6 +263,8 @@ export class FastBrowserEngine implements BrowserPort {
   private envCache: { at: number; value: { frontmost: string | null; running: string[] } } | null = null;
   /** Why no browser could be reached, when the transport said (shown with the slower fallback). */
   private envProblem: string | null = null;
+  /** The tab list the model last saw: a label like w1-t2 means the tab it named there, even if the list has changed since. */
+  private published: TabInfo[] | null = null;
   private pin: (Ctx & { target: TabTarget; at: number; frontAtPin: string }) | null = null;
   private shown: Shown | null = null;
   private readonly disabled = new Map<string, { until: number; reason: string }>();
@@ -287,6 +289,7 @@ export class FastBrowserEngine implements BrowserPort {
     this.shown = null;
     this.disabled.clear();
     this.envCache = null;
+    this.published = null;
   }
 
   private async environment(): Promise<{ frontmost: string | null; running: string[] } | null> {
@@ -795,6 +798,7 @@ export class FastBrowserEngine implements BrowserPort {
     return this.run(
       async (ctx) => {
         const tabs = await this.t.listTabs(ctx.browser);
+        this.published = tabs;
         return [`browser: ${ctx.browser.name}`, ...tabs.map(tabLine)].join('\n');
       },
       () => this.legacy.tabs(),
@@ -805,7 +809,17 @@ export class FastBrowserEngine implements BrowserPort {
   async focus(target: string | number): Promise<string> {
     return this.run(
       async (ctx) => {
-        const tab = matchTab(await this.t.listTabs(ctx.browser), target);
+        const fresh = await this.t.listTabs(ctx.browser);
+        let tab: TabInfo | undefined;
+        // A number or w1-t2 names a place in the list the model saw, which may have been reordered or lost a tab since.
+        const positional = typeof target === 'number' || /^w\d+-t\d+$/i.test(target.trim());
+        const saw = positional && this.published ? matchTab(this.published, target) : undefined;
+        if (saw) {
+          tab = fresh.find((t) => t.windowId === saw.windowId && t.tabKey === saw.tabKey);
+          if (!tab) throw new Error(`The tab "${target}" is gone since browser_tabs. Call browser_tabs again.`);
+        } else {
+          tab = matchTab(fresh, target);
+        }
         if (!tab) throw new Error(`No tab matching "${target}". Call browser_tabs.`);
         return this.focusAndShow(ctx.browser, tab, `focused ${tab.title} - ${tab.url}`);
       },

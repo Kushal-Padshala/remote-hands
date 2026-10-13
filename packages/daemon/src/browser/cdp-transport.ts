@@ -194,11 +194,12 @@ export class CdpTransport {
   private browserConnecting: Promise<CdpConnection | null> | null = null;
   /** Bumped by `dispose`: a connection that finishes opening after that closes itself. */
   private generation = 0;
-  /** A tab keeps the number it first got in its window, so a label like w1-t2 never points at another tab later. */
-  private readonly tabNumber = new Map<string, number>();
-  private readonly tabCounter = new Map<string, number>();
+  /** Tabs in the order they were first seen: the order a window lists its tabs in. */
+  private readonly tabSeq = new Map<string, number>();
+  private tabSeqCounter = 0;
   /** Windows in the order they were first seen; the one the person is using is shown first. */
   private readonly windowSeq = new Map<string, number>();
+  private windowSeqBase = 0;
   private frontWindow: string | null = null;
   private starting: Promise<BrowserStart> | null = null;
   private lastStartFailure = -Infinity;
@@ -303,13 +304,14 @@ export class CdpTransport {
           conn.close();
           return null;
         }
+        if (this.browserConnection && this.browserConnection !== conn) this.browserConnection.close();
         this.browserConnection = conn;
         return conn;
       } catch {
         return null;
       }
     })().finally(() => {
-      this.browserConnecting = null;
+      if (this.browserConnecting === attempt) this.browserConnecting = null;
     });
     this.browserConnecting = attempt;
     return attempt;
@@ -331,6 +333,8 @@ export class CdpTransport {
           conn.close();
           throw new Error('the transport was closed');
         }
+        const old = this.connections.get(target.id);
+        if (old && old !== conn) old.close();
         this.connections.set(target.id, conn);
         return conn;
       })
@@ -338,7 +342,7 @@ export class CdpTransport {
         throw failure('script_error', this.name, `${this.name} did not accept the connection to that tab.`);
       })
       .finally(() => {
-        this.connecting.delete(target.id);
+        if (this.connecting.get(target.id) === attempt) this.connecting.delete(target.id);
       });
     this.connecting.set(target.id, attempt);
     return attempt;
@@ -386,7 +390,7 @@ export class CdpTransport {
     this.name = b.name;
     const pages = await this.pages();
     const present = new Set(pages.map((p) => p.id));
-    for (const id of [...this.tabNumber.keys()]) if (!present.has(id)) this.tabNumber.delete(id);
+    for (const id of [...this.tabSeq.keys()]) if (!present.has(id)) this.tabSeq.delete(id);
     for (const [id, conn] of [...this.connections]) {
       if (!present.has(id)) {
         conn.close();
@@ -397,28 +401,24 @@ export class CdpTransport {
     const windowIds = await Promise.all(pages.map((p) => this.windowOf(p.id)));
     const facts = await Promise.all(pages.map((p) => this.facts(p)));
 
-    // Each tab keeps the number it first got in its window.
-    pages.forEach((p, i) => {
-      if (this.tabNumber.has(p.id)) return;
-      const windowId = windowIds[i]!;
-      const next = (this.tabCounter.get(windowId) ?? 0) + 1;
-      this.tabCounter.set(windowId, next);
-      this.tabNumber.set(p.id, next);
-    });
-    for (const id of windowIds) if (!this.windowSeq.has(id)) this.windowSeq.set(id, this.windowSeq.size);
+    for (const p of pages) if (!this.tabSeq.has(p.id)) this.tabSeq.set(p.id, this.tabSeqCounter++);
+    for (const id of [...this.windowSeq.keys()]) if (!windowIds.includes(id)) this.windowSeq.delete(id);
+    for (const id of windowIds) if (!this.windowSeq.has(id)) this.windowSeq.set(id, this.windowSeq.size + this.windowSeqBase++);
 
-    // The window the person is using is the one with a focused page; with none focused (they are in another program)
-    // the last one seen stays, else the window of the most recently used tab.
+    // The window the person is using is the one with a focused page. A page can lack focus while its window is in front
+    // (the address bar has it), so with none focused the last window stays only while it still shows a page; otherwise
+    // the first window that shows one is taken (a minimized window shows nothing).
     const focusedAt = facts.findIndex((f) => f.focused);
+    const showing = (id: string | null): boolean => id !== null && windowIds.some((w, i) => w === id && facts[i]!.visible);
     if (focusedAt >= 0) this.frontWindow = windowIds[focusedAt]!;
-    else if (!this.frontWindow || !windowIds.includes(this.frontWindow)) this.frontWindow = windowIds[0] ?? null;
+    else if (!showing(this.frontWindow)) this.frontWindow = windowIds.find((_, i) => facts[i]!.visible) ?? windowIds[0] ?? null;
     const windowOrder = [...new Set(windowIds)].sort((a, b2) => {
       if (a === this.frontWindow) return -1;
       if (b2 === this.frontWindow) return 1;
       return (this.windowSeq.get(a) ?? 0) - (this.windowSeq.get(b2) ?? 0);
     });
 
-    const rows = pages.map((p, i) => ({ p, windowId: windowIds[i]!, ...facts[i]!, n: this.tabNumber.get(p.id)! }));
+    const rows = pages.map((p, i) => ({ p, windowId: windowIds[i]!, ...facts[i]!, n: this.tabSeq.get(p.id)! }));
     // The tab showing in each window (the focused one first); a window where none reports showing uses its most recent.
     const activeIn = new Map<string, string>();
     for (const r of rows) if (r.focused && !activeIn.has(r.windowId)) activeIn.set(r.windowId, r.p.id);
@@ -427,17 +427,20 @@ export class CdpTransport {
 
     const tabs: TabInfo[] = [];
     windowOrder.forEach((windowId, w) => {
-      for (const r of rows.filter((x) => x.windowId === windowId).sort((a, b2) => a.n - b2.n)) {
+      rows
+        .filter((x) => x.windowId === windowId)
+        .sort((a, b2) => a.n - b2.n)
+        .forEach((r, i) => {
         tabs.push({
           windowId,
           windowIndex: w + 1,
           tabKey: r.p.id,
-          tabIndex: r.n,
+          tabIndex: i + 1,
           title: r.p.title ?? '',
           url: r.p.url ?? '',
           active: activeIn.get(windowId) === r.p.id,
         });
-      }
+        });
     });
     return tabs;
   }

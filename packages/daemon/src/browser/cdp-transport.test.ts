@@ -383,7 +383,7 @@ describe('CdpTransport: tabs and windows', () => {
     expect(tabs.find((x) => x.tabKey === 'c')!.windowIndex).toBe(1);
   });
 
-  it('keeps the numbers of the other tabs when one is closed, and does not reuse its number', async () => {
+  it('lists each window\'s tabs 1..n in the order they were first seen, however the browser orders its list', async () => {
     const f = fakeBrowser([
       { id: 'a', title: 'A', url: 'https://a.example/', window: 1, visible: true },
       { id: 'b', title: 'B', url: 'https://b.example/', window: 1, visible: false },
@@ -392,9 +392,70 @@ describe('CdpTransport: tabs and windows', () => {
     const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket });
     expect((await t.listTabs(CHROME)).map((x) => [x.tabKey, x.tabIndex])).toEqual([['a', 1], ['b', 2], ['c', 3]]);
     f.state.pages.splice(0, 1);
-    expect((await t.listTabs(CHROME)).map((x) => [x.tabKey, x.tabIndex])).toEqual([['b', 2], ['c', 3]]);
-    f.state.pages.push({ id: 'd', title: 'D', url: 'https://d.example/', window: 1, visible: false });
-    expect((await t.listTabs(CHROME)).map((x) => [x.tabKey, x.tabIndex])).toEqual([['b', 2], ['c', 3], ['d', 4]]);
+    expect((await t.listTabs(CHROME)).map((x) => [x.tabKey, x.tabIndex])).toEqual([['b', 1], ['c', 2]]);
+    // a tab dragged to another window is numbered there, with no duplicate label
+    f.state.pages.find((p) => p.id === 'b')!.window = 2;
+    f.state.pages.push({ id: 'd', title: 'D', url: 'https://d.example/', window: 2, visible: true });
+    const moved = await t.listTabs(CHROME);
+    const labels = moved.map((x) => `w${x.windowIndex}-t${x.tabIndex}`);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it('takes the window that shows a page as the one in use when no page has focus (a minimized window shows none)', async () => {
+    const f = fakeBrowser(pages());
+    const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket });
+    f.state.pages.find((p) => p.id === 'b')!.focused = true;
+    await t.listTabs(CHROME);
+    // window 1 is minimized (its pages hidden); the person is in window 2's address bar, so no page has focus
+    f.state.pages.find((p) => p.id === 'b')!.focused = false;
+    f.state.pages.find((p) => p.id === 'b')!.visible = false;
+    const tabs = await t.listTabs(CHROME);
+    expect(tabs.find((x) => x.tabKey === 'c')!.windowIndex).toBe(1);
+    expect(tabs.find((x) => x.tabKey === 'c')!.active).toBe(true);
+  });
+});
+
+describe('FastBrowserEngine.focus with labels from an earlier list', () => {
+  const legacy: BrowserPort = {
+    tabs: async () => 'legacy', focus: async () => 'legacy', open: async () => 'legacy', snapshot: async () => 'legacy', click: async () => 'legacy',
+    type: async () => 'legacy', find: async () => 'legacy', do: async () => 'legacy', extract: async () => 'legacy',
+  };
+  const engineFor = (f: ReturnType<typeof fakeBrowser>) => {
+    const transport = new CdpTransport({ fetchFn: f.fetchFn, openSocket: f.openSocket });
+    return new FastBrowserEngine({ transport, legacy, sleep: async () => {} });
+  };
+  const snapshotOfPage = (_expr: string, page: FakePage) => ({
+    result: { type: 'string', value: JSON.stringify({ url: page.url, title: page.title, w: 800, h: 600, text: '', scroll: { y: 0, height: 600 }, actions: [] }) },
+  });
+  const three = (): FakePage[] => [
+    { id: 'a', title: 'Alpha', url: 'https://alpha.example/', window: 1, visible: true },
+    { id: 'b', title: 'Beta', url: 'https://beta.example/', window: 1, visible: false },
+    { id: 'c', title: 'Gamma', url: 'https://gamma.example/', window: 1, visible: false },
+  ];
+
+  it('focuses the tab the label named when the list was shown, even after another tab closed', async () => {
+    const f = fakeBrowser(three(), { evalResult: snapshotOfPage });
+    const engine = engineFor(f);
+    expect(await engine.tabs()).toContain('[w1-t2]');
+    f.state.pages.splice(0, 1); // Alpha closes: Beta is now t1, Gamma t2
+    const out = await engine.focus('w1-t2');
+    expect(out).toContain('focused Beta');
+    expect(f.state.calls).toContain('GET /json/activate/b');
+  });
+
+  it('says the tab is gone rather than focusing another one', async () => {
+    const f = fakeBrowser(three());
+    const engine = engineFor(f);
+    await engine.tabs();
+    f.state.pages.splice(1, 1); // Beta closes
+    await expect(engine.focus('w1-t2')).rejects.toThrow(/is gone since browser_tabs/);
+    await expect(engine.focus(2)).rejects.toThrow(/is gone since browser_tabs/);
+    expect(f.state.calls.some((c) => c.includes('/json/activate/c'))).toBe(false);
+  });
+
+  it('still finds a tab by words when no list was shown', async () => {
+    const f = fakeBrowser(three());
+    expect(await engineFor(fakeBrowser(three(), { evalResult: snapshotOfPage })).focus('gamma')).toContain('focused Gamma');
   });
 });
 
@@ -420,6 +481,45 @@ describe('CdpTransport: connections', () => {
     t.dispose();
     await pending;
     await new Promise((r) => setTimeout(r, 10));
+    expect(f.state.open.size).toBe(0);
+  });
+});
+
+describe('CdpTransport: connection attempts that overlap a reset', () => {
+  it('lets a superseded attempt finish without disturbing the newer one, and leaks no socket', async () => {
+    const f = fakeBrowser(pages());
+    const gates: Array<() => void> = [];
+    const open = (url: string): CdpSocket => {
+      const socket = f.openSocket(url);
+      const real = socket.onopen;
+      let fire: (() => void) | null = null;
+      Object.defineProperty(socket, 'onopen', {
+        get: () => real,
+        set: (fn) => {
+          fire = fn;
+        },
+      });
+      // hold the connection open until the test releases it
+      gates.push(() => fire?.());
+      return socket;
+    };
+    const t = new CdpTransport({ fetchFn: f.fetchFn, openSocket: open });
+    const a = t.evaluate(CHROME, { windowId: '1', tabKey: 'a' }, 'x').catch((e) => e);
+    await new Promise((r) => setTimeout(r, 5));
+    t.dispose(); // a reset while attempt A is still opening
+    const b = t.evaluate(CHROME, { windowId: '1', tabKey: 'a' }, 'x').catch((e) => e);
+    await new Promise((r) => setTimeout(r, 5));
+    gates[0]!(); // the old attempt finishes
+    await new Promise((r) => setTimeout(r, 5));
+    const c = t.evaluate(CHROME, { windowId: '1', tabKey: 'a' }, 'x').catch((e) => e); // a third caller must share B's attempt
+    await new Promise((r) => setTimeout(r, 5));
+    gates[1]!();
+    const [, rb, rc] = await Promise.all([a, b, c]);
+    expect(rb).toBe('ok');
+    expect(rc).toBe('ok');
+    expect(f.state.sockets).toBe(2); // A (closed) and B (shared by the third caller)
+    t.dispose();
+    await new Promise((r) => setTimeout(r, 5));
     expect(f.state.open.size).toBe(0);
   });
 });

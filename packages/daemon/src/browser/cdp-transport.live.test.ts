@@ -39,9 +39,10 @@ describe.skipIf(!live)('CdpTransport against a real browser', () => {
   const transport = new CdpTransport({ port: PORT });
 
   beforeAll(async () => {
-    server = http.createServer((_req, res) => {
+    server = http.createServer((req, res) => {
       res.setHeader('content-type', 'text/html');
-      res.end(PAGE);
+      // the form page at /, and a page whose title and text name its own path everywhere else
+      res.end(req.url === '/' || req.url?.startsWith('/?') ? PAGE : `<!doctype html><title>Page ${req.url}</title><h1>Hello ${req.url}</h1>`);
     });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     url = `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
@@ -119,13 +120,16 @@ describe.skipIf(!live)('CdpTransport against a real browser', () => {
     await new Promise((r) => (ws.onmessage = r));
     ws.close();
     const engine = new FastBrowserEngine({ transport, legacy });
+    const before = await transport.listTabs(BROWSER);
     const out = await engine.open(`${url}third-page`);
     expect(out).toContain('opened');
+    // what is shown is the page that was opened, not another tab
+    expect(out).toContain('Page /third-page');
     const tabs = await transport.listTabs(BROWSER);
     expect(new Set(tabs.map((t) => t.windowId)).size).toBeGreaterThanOrEqual(2);
-    const shown = await engine.extract();
-    expect(shown).toContain('Hello');
-    expect(tabs.some((t) => t.url === `${url}third-page`)).toBe(true);
+    const made = tabs.find((t) => !before.some((o) => o.tabKey === t.tabKey) && t.url === `${url}third-page`);
+    expect(made).toBeDefined();
+    expect(await engine.extract()).toContain('Hello /third-page');
   }, 60_000);
 
   it('keeps a query string and a fragment in the address it opens', async () => {
