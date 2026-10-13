@@ -1225,3 +1225,39 @@ describe('do: label targets, hover and limits', () => {
     expect(t.evals).toHaveLength(0);
   });
 });
+
+describe('action hints', () => {
+  const NOTE = 'note: that link opens in a new tab; if the page did not change, use browser_tabs then browser_focus to switch to it';
+
+  it('browser_click adds the new-tab note after the state', async () => {
+    await engine.snapshot();
+    t.actions = [JSON.stringify({ ok: true, label: 'Next', opened: true })];
+    const out = await engine.click(12);
+    expect(out.split('\n')[0]).toBe('clicked [12] Next');
+    expect(out.split('\n').at(-1)).toBe(NOTE);
+  });
+
+  it('browser_click adds nothing for ordinary clicks', async () => {
+    await engine.snapshot();
+    expect(await engine.click(12)).not.toContain('new tab');
+  });
+
+  it('browser_do reports the new-tab note once and the last focus move', async () => {
+    await engine.snapshot();
+    t.actions = [
+      JSON.stringify({ ok: true, opened: true }),
+      JSON.stringify({ ok: true, focused: 'Second' }),
+      JSON.stringify({ ok: true, focused: 'Go "now"' }),
+      JSON.stringify({ ok: true, opened: true }),
+    ];
+    const out = await engine.do([
+      { op: 'hover', index: 12 },
+      { op: 'press', key: 'Tab' },
+      { op: 'press', key: 'Tab' },
+      { op: 'hover', index: 12 },
+    ]);
+    const lines = out.split('\n');
+    expect(lines.filter((l) => l === NOTE)).toHaveLength(1);
+    expect(lines.at(-1)).toBe('focus now on: "Go \\"now\\""');
+  });
+});

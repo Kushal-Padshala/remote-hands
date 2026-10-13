@@ -73,6 +73,11 @@ interface Probe {
 const PASSWORD_MASK = '•'.repeat(8);
 const UNCONFIRMED = 'note: could not confirm the state change';
 const NO_CHANGE_NOTE = 'note: no change detected';
+const OPENED_NOTE = 'note: that link opens in a new tab; if the page did not change, use browser_tabs then browser_focus to switch to it';
+
+function focusLine(label: string): string {
+  return `focus now on: "${clean(label, 80).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
 const CONFIRM_DELAY_MS = 150;
 /**
  * Whether an action may start a navigation late and needs one confirmation read when it
@@ -711,8 +716,9 @@ export class FastBrowserEngine implements BrowserPort {
     const { shown, el } = this.lookup(index);
     const ctx: Ctx = { browser: shown.browser, target: shown.target };
     await this.ensureRunning(ctx);
-    await this.act(ctx, this.guarded({ op: 'click', node: el.node, label: el.label }, shown.origin), index);
-    return `clicked [${index}] ${clean(el.label)}\n${await this.after(ctx, shown.state, false, shown.origin, false, clickConfirm(el))}`;
+    const res = await this.act(ctx, this.guarded({ op: 'click', node: el.node, label: el.label }, shown.origin), index);
+    const state = await this.after(ctx, shown.state, false, shown.origin, false, clickConfirm(el));
+    return `clicked [${index}] ${clean(el.label)}\n${state}${res.opened ? `\n${OPENED_NOTE}` : ''}`;
   }
 
   async type(index: number, text: string, opts: { submit?: boolean } = {}): Promise<string> {
@@ -901,6 +907,8 @@ export class FastBrowserEngine implements BrowserPort {
       throw new Error(`step ${n} ${name} failed: ${msg} (${okSoFar(n)})${state}`);
     };
     let confirm: Confirm = null;
+    let opened = false;
+    let focused: string | null = null;
     for (let i = 0; i < plan.length; i += 1) {
       const p = plan[i]!;
       const n = i + 1;
@@ -916,6 +924,8 @@ export class FastBrowserEngine implements BrowserPort {
         return fail(n, p.name, err);
       }
       if (res.verified === false) unverified = true;
+      if (res.opened) opened = true;
+      if (typeof res.focused === 'string') focused = res.focused;
       done.push(p.name);
       if (p.confirm === 'note' || (p.confirm === 'quiet' && confirm === null)) confirm = p.confirm;
       const op = p.op;
@@ -937,7 +947,13 @@ export class FastBrowserEngine implements BrowserPort {
     }
     const passwordTyped = plan.some((p) => p.masked);
     const body = await this.after(ctx, shown?.state ?? null, unverified, origin, passwordTyped, confirm);
-    return [`did: ${done.join(', ')}`, ...(navigated ? [navigated] : []), body].join('\n');
+    return [
+      `did: ${done.join(', ')}`,
+      ...(navigated ? [navigated] : []),
+      body,
+      ...(opened ? [OPENED_NOTE] : []),
+      ...(focused !== null ? [focusLine(focused)] : []),
+    ].join('\n');
   }
 }
 
