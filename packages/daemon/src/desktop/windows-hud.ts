@@ -25,11 +25,12 @@ export interface WindowsHudDeps {
 export type WindowsHudBuild = { ok: true; path: string } | { ok: false; error: string };
 
 export function windowsHudPaths(home: string = os.homedir()): { dir: string; exe: string; stamp: string } {
-  const root = path.win32.join(home, '.remote-hands');
+  // the paths of the computer this runs on (on Windows these are Windows paths)
+  const root = path.join(home, '.remote-hands');
   return {
-    dir: path.win32.join(root, 'windows-hud'),
-    exe: path.win32.join(root, 'bin', 'rh-hud.exe'),
-    stamp: path.win32.join(root, 'windows-hud', 'built.sha256'),
+    dir: path.join(root, 'windows-hud'),
+    exe: path.join(root, 'bin', 'rh-hud.exe'),
+    stamp: path.join(root, 'windows-hud', 'built.sha256'),
   };
 }
 
@@ -86,7 +87,7 @@ export function ensureWindowsHud(deps: WindowsHudDeps = {}): WindowsHudBuild {
     fs.mkdirSync(path.dirname(exe), { recursive: true });
     const files: string[] = [];
     for (const name of Object.keys(sources)) {
-      const file = path.win32.join(dir, name);
+      const file = path.join(dir, name);
       fs.writeFileSync(file, sources[name]!, 'utf-8');
       files.push(file);
     }
