@@ -1,5 +1,6 @@
 import { AxHelperError, type AxHelperPort, type AxSnapshot } from '../desktop/ax-helper.js';
 import { buildView, renderDiff, type View, type ViewItem } from '../desktop/ax-model.js';
+import { buildOcrView, type OcrItem, type OcrReading, type OcrView } from '../desktop/ocr-model.js';
 
 /**
  * Native-app control on top of the rh-ax helper: a fast snapshot with stable ids, and (added next to it)
@@ -29,6 +30,8 @@ const MAX_NODES = 3000;
 const BUDGET_MS = 3000;
 const ACTION_TIMEOUT_MS = 10_000;
 const SETTLE_MAX_MS = 1500;
+/** Reading a window by sight takes about half a second; this only guards against a helper that hangs. */
+const OCR_TIMEOUT_MS = 15_000;
 
 export type ClickAction = 'press' | 'open' | 'menu' | 'double' | 'right';
 export type ScrollDirection = 'up' | 'down' | 'left' | 'right';
@@ -52,13 +55,25 @@ export function describeHelperError(err: AxHelperError, app: string): Error | nu
       return new Error(app ? `No running app matches "${app}". Use desktop_open to start it.` : 'No app is in front.');
     case 'stale':
       return new StaleElementError('That element is no longer there. Call desktop_snapshot again.');
+    case 'no_screen_recording':
+      return new Error(
+        'Reading this window by sight needs macOS permission to record the screen: a window titled "Screen Recording" may be asking the user to allow "Remote Hands" (if it was dismissed: System Settings > Privacy & Security > Screen Recording > switch on "Remote Hands"; if it is already on, switch it off and on again). Tell the user to do that, then try again in a few seconds. Do not try to work around it.',
+      );
     default:
       return new Error(err.message || 'The accessibility helper reported an error.');
   }
 }
 
+/** A window read by sight: the picture's text, kept until the next action so a click can use its places. */
+export interface OcrState {
+  app: string;
+  reading: OcrReading;
+  view: OcrView;
+}
+
 export class DesktopEngine {
   private last: EngineSnapshot | null = null;
+  private lastOcr: OcrState | null = null;
 
   constructor(private readonly helper: AxHelperPort) {}
 
@@ -125,6 +140,77 @@ export class DesktopEngine {
         const told = describeHelperError(err, app);
         if (told) throw told;
         return null;
+      }
+      throw err;
+    }
+  }
+
+  /** Forgets what was read by sight. Any action may change the screen, so the places read before it are no longer to be trusted. */
+  dropOcr(): void {
+    this.lastOcr = null;
+  }
+
+  /**
+   * LAST RESORT: reads the window of `app` (the front app when empty) by sight, in one picture, and remembers the text
+   * for desktop_click. Slower than Accessibility, so it only runs when asked for. Null: the helper cannot serve.
+   */
+  async readOcr(app: string, opts: { filter?: string } = {}): Promise<string | null> {
+    if (!(await this.helper.ready())) return null;
+    let reading: OcrReading;
+    try {
+      reading = await this.helper.request<OcrReading>({ op: 'ocr', app }, OCR_TIMEOUT_MS);
+    } catch (err) {
+      if (err instanceof AxHelperError) {
+        if (err.code === 'no_app') return null;
+        const told = describeHelperError(err, app);
+        if (told) throw told;
+        return null;
+      }
+      throw err;
+    }
+    // Accessibility text at the same places is not repeated, but only when the last look was at this very app.
+    const axView = this.last && reading.app.name && this.last.app.toLowerCase() === reading.app.name.toLowerCase() ? this.last.view : null;
+    const view = buildOcrView(reading, { ...(opts.filter ? { filter: opts.filter } : {}), axView });
+    this.lastOcr = { app: reading.app.name || app, reading, view };
+    return view.text;
+  }
+
+  /** The text read by sight for an id the model saw in the latest read. */
+  ocrItem(id: number): OcrItem {
+    const item = this.lastOcr?.view.byId.get(id);
+    if (!item) throw new Error(`Index ${id} not in last snapshot. Call desktop_snapshot with ocr=true again.`);
+    return item;
+  }
+
+  /** The window a click on read-by-sight text goes to. */
+  ocrWindow(): OcrReading['window'] & { pid: number } {
+    const state = this.lastOcr;
+    if (!state) throw new Error(`No window was read by sight. Call desktop_snapshot with ocr=true first.`);
+    return { ...state.reading.window, pid: state.reading.app.pid };
+  }
+
+  /**
+   * Clicks text that was read by sight. The helper first checks that the window is still where the picture was taken, in
+   * front, and the one at that spot; otherwise nothing is clicked.
+   */
+  async clickOcr(id: number, action: ClickAction = 'press'): Promise<void> {
+    const item = this.ocrItem(id);
+    const win = this.ocrWindow();
+    const double = action === 'double' || action === 'open';
+    const right = action === 'right' || action === 'menu';
+    try {
+      await this.helper.request(
+        { op: 'clickAt', x: item.x, y: item.y, pid: win.pid, window: { x: win.x, y: win.y, width: win.width, height: win.height }, button: right ? 'right' : 'left', count: double ? 2 : 1 },
+        ACTION_TIMEOUT_MS,
+      );
+    } catch (err) {
+      if (err instanceof AxHelperError) {
+        // the window moved or was replaced since the picture: what was read is out of date
+        if (err.code === 'stale') {
+          this.lastOcr = null;
+          throw new StaleElementError(`${err.message} Call desktop_snapshot with ocr=true again.`);
+        }
+        throw describeHelperError(err, '') ?? new Error('The accessibility helper stopped responding. Call desktop_snapshot again.');
       }
       throw err;
     }

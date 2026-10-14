@@ -1,6 +1,12 @@
 import Cocoa
 import ApplicationServices
 import Foundation
+import Vision
+// Reading a window by sight needs ScreenCaptureKit's screenshot API (macOS 14). On an older compiler or SDK the helper still
+// builds, and the "ocr" request answers that it is not supported.
+#if canImport(ScreenCaptureKit) && compiler(>=5.9)
+import ScreenCaptureKit
+#endif
 
 // rh-ax: a small long-running helper that reads (and later drives) the accessibility tree of native apps.
 // It talks JSON lines on stdin/stdout: one request per line with an "id", one reply per request echoing it.
@@ -1030,6 +1036,292 @@ func drag(_ id: Any?, _ request: [String: Any]) {
     finish(true)
 }
 
+// MARK: - Reading a window by sight (the last resort)
+
+// Accessibility is the fast, exact way to read and drive an app. A few windows show almost nothing through it (games, canvas
+// editors, some Electron and remote-desktop windows); only for those does the model ask to read the window by sight. One
+// picture of that one window is read as text with Vision, and the boxes come back in screen points so a click can use them.
+
+/// Tests hand over a picture instead of capturing the screen (which needs a Screen Recording permission nobody grants a test).
+let ocrFixtureAllowed = ProcessInfo.processInfo.environment["RH_AX_OCR_FIXTURE"] == "1"
+
+func number(_ value: Any?) -> Double? {
+    guard let n = value as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { return nil }
+    return n.doubleValue.isFinite ? n.doubleValue : nil
+}
+
+struct SeenLine {
+    let text: String
+    /// 0...1 of the picture, origin top left.
+    let box: CGRect
+}
+
+func recognizeText(in image: CGImage) -> [SeenLine] {
+    let request = VNRecognizeTextRequest()
+    request.recognitionLevel = .accurate
+    // Labels are read as they are written: "Q3 plan" must not become "Q3 plain".
+    request.usesLanguageCorrection = false
+    do {
+        try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+    } catch {
+        return []
+    }
+    var lines: [SeenLine] = []
+    for observation in request.results ?? [] {
+        guard let best = observation.topCandidates(1).first, best.confidence >= 0.3 else { continue }
+        let t = best.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { continue }
+        let b = observation.boundingBox
+        lines.append(SeenLine(text: t, box: CGRect(x: b.minX, y: 1 - b.maxY, width: b.width, height: b.height)))
+    }
+    // reading order: rows from the top, each row from the left
+    return lines.sorted {
+        let ra = Int(($0.box.midY * 100).rounded()), rb = Int(($1.box.midY * 100).rounded())
+        return ra != rb ? ra < rb : $0.box.minX < $1.box.minX
+    }
+}
+
+let maxSeenLines = 600
+
+func replyOcr(_ id: Any?, image: CGImage, frame: CGRect, app: [String: Any], title: String, captureMs: Int, started: UInt64) {
+    let visionStart = DispatchTime.now().uptimeNanoseconds
+    let seen = recognizeText(in: image)
+    let ocrMs = Int((DispatchTime.now().uptimeNanoseconds - visionStart) / 1_000_000)
+    var lines: [[String: Any]] = []
+    for line in seen.prefix(maxSeenLines) {
+        lines.append([
+            "text": clip(line.text, 200),
+            "x": Int((frame.minX + line.box.minX * frame.width).rounded()),
+            "y": Int((frame.minY + line.box.minY * frame.height).rounded()),
+            "width": max(1, Int((line.box.width * frame.width).rounded())),
+            "height": max(1, Int((line.box.height * frame.height).rounded())),
+        ])
+    }
+    reply(id, [
+        "ok": true,
+        "app": app,
+        "window": [
+            "title": clip(title, 200),
+            "x": Int(frame.minX.rounded()), "y": Int(frame.minY.rounded()),
+            "width": Int(frame.width.rounded()), "height": Int(frame.height.rounded()),
+        ],
+        "lines": lines,
+        "truncated": seen.count > maxSeenLines,
+        "captureMs": captureMs,
+        "ocrMs": ocrMs,
+        "elapsedMs": Int((DispatchTime.now().uptimeNanoseconds - started) / 1_000_000),
+    ])
+}
+
+/// Shows macOS's own Screen Recording dialog, which also lists "Remote Hands" in System Settings. At most once per half hour.
+func askForScreenRecording() {
+    let marker = NSString(string: "~/.remote-hands/screen-prompted").expandingTildeInPath
+    if let attrs = try? FileManager.default.attributesOfItem(atPath: marker),
+       let modified = attrs[.modificationDate] as? Date, Date().timeIntervalSince(modified) < 1800 { return }
+    FileManager.default.createFile(atPath: marker, contents: Data())
+    _ = CGRequestScreenCaptureAccess()
+}
+
+let screenRecordingMessage = "Screen Recording permission is not granted to Remote Hands."
+
+#if canImport(ScreenCaptureKit) && compiler(>=5.9)
+func failCapture(_ id: Any?, _ error: Error?) {
+    let ns = error as NSError?
+    if ns?.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain", ns?.code == -3801 {
+        fail(id, "no_screen_recording", screenRecordingMessage)
+        return
+    }
+    fail(id, "capture_failed", "Could not take a picture of the window: \(error?.localizedDescription ?? "unknown error").")
+}
+
+func overlapRatio(_ a: CGRect, _ b: CGRect) -> CGFloat {
+    let i = a.intersection(b)
+    if i.isNull { return 0 }
+    let inter = i.width * i.height
+    let union = a.width * a.height + b.width * b.height - inter
+    return union > 0 ? inter / union : 0
+}
+
+@available(macOS 14.0, *)
+func ocrCapture(_ id: Any?, _ request: [String: Any], _ started: UInt64) {
+    // Display and capture calls abort the process unless it has joined the window server first (reading accessibility needs no such step).
+    _ = NSApplication.shared
+    let query = (request["app"] as? String) ?? ""
+    guard let app = findApp(query) else {
+        fail(id, "no_app", query.isEmpty ? "No frontmost app." : "No running app matches \"\(query)\".")
+        return
+    }
+    guard CGPreflightScreenCaptureAccess() else {
+        askForScreenRecording()
+        fail(id, "no_screen_recording", screenRecordingMessage)
+        return
+    }
+    let pid = app.processIdentifier
+    let appElement = AXUIElementCreateApplication(pid)
+    let window = chooseWindow(appElement, title: (request["window"] as? String) ?? "")
+    let axFrame = window.flatMap { frameOf($0) }
+    let title = window.flatMap { text(attribute($0, kAXTitleAttribute)) } ?? ""
+    let appInfo: [String: Any] = ["name": app.localizedName ?? "", "pid": Int(pid), "bundle": app.bundleIdentifier ?? ""]
+    let captureStart = DispatchTime.now().uptimeNanoseconds
+
+    SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { content, error in
+        guard let content = content else {
+            failCapture(id, error)
+            return
+        }
+        let mine = content.windows.filter {
+            $0.owningApplication?.processID == pid && $0.windowLayer == 0 && $0.frame.width >= 40 && $0.frame.height >= 40
+        }
+        var chosen: SCWindow? = nil
+        if let ax = axFrame {
+            chosen = mine.max { overlapRatio($0.frame, ax) < overlapRatio($1.frame, ax) }
+            if let c = chosen, overlapRatio(c.frame, ax) < 0.5 { chosen = nil }
+        }
+        if chosen == nil { chosen = mine.max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height } }
+        guard let target = chosen else {
+            fail(id, "no_window", "\(app.localizedName ?? "That app") has no window on screen to read.")
+            return
+        }
+        // Boxes are given in the screen space clicks use: the accessibility frame when it is the same window, else the capture's.
+        var origin = target.frame.origin
+        if let ax = axFrame, abs(ax.width - target.frame.width) < 6, abs(ax.height - target.frame.height) < 6 { origin = ax.origin }
+        let frame = CGRect(origin: origin, size: target.frame.size)
+
+        var display: CGDirectDisplayID = 0
+        var count: UInt32 = 0
+        CGGetDisplaysWithRect(frame, 1, &display, &count)
+        var scale: CGFloat = 2
+        if count > 0, CGDisplayBounds(display).width > 0 { scale = max(1, CGFloat(CGDisplayPixelsWide(display)) / CGDisplayBounds(display).width) }
+        // very wide windows are read at a lower resolution: past about 3000 pixels it only costs time
+        scale = max(0.5, min(scale, 3000 / max(frame.width, 1)))
+
+        let config = SCStreamConfiguration()
+        config.width = max(1, Int((frame.width * scale).rounded()))
+        config.height = max(1, Int((frame.height * scale).rounded()))
+        config.showsCursor = false
+        config.ignoreShadowsSingleWindow = true
+        let filter = SCContentFilter(desktopIndependentWindow: target)
+        SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) { image, error in
+            guard let image = image else {
+                failCapture(id, error)
+                return
+            }
+            let captureMs = Int((DispatchTime.now().uptimeNanoseconds - captureStart) / 1_000_000)
+            DispatchQueue.global(qos: .userInitiated).async {
+                replyOcr(id, image: image, frame: frame, app: appInfo, title: title, captureMs: captureMs, started: started)
+            }
+        }
+    }
+}
+#endif
+
+func ocr(_ id: Any?, _ request: [String: Any]) {
+    let started = DispatchTime.now().uptimeNanoseconds
+    if ocrFixtureAllowed, let path = request["image"] as? String {
+        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+              let w = request["window"] as? [String: Any],
+              let x = number(w["x"]), let y = number(w["y"]), let width = number(w["width"]), let height = number(w["height"]) else {
+            fail(id, "bad_request", "Bad fixture.")
+            return
+        }
+        replyOcr(id, image: image, frame: CGRect(x: x, y: y, width: width, height: height), app: ["name": "Fixture", "pid": 0, "bundle": ""], title: "", captureMs: 0, started: started)
+        return
+    }
+    guard AXIsProcessTrusted() else {
+        askForAccessibility()
+        fail(id, "not_trusted", "Accessibility permission is not granted to Remote Hands.")
+        return
+    }
+    #if canImport(ScreenCaptureKit) && compiler(>=5.9)
+    if #available(macOS 14.0, *) {
+        ocrCapture(id, request, started)
+        return
+    }
+    #endif
+    fail(id, "unsupported", "Reading a window by sight needs macOS 14 or newer.")
+}
+
+/// The ordinary windows on screen, front to back, by owner and bounds. Needs no Screen Recording permission.
+func windowStack() -> [(pid: pid_t, bounds: CGRect)] {
+    guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
+    var stack: [(pid: pid_t, bounds: CGRect)] = []
+    for entry in list {
+        guard (entry[kCGWindowLayer as String] as? Int) == 0,
+              let owner = entry[kCGWindowOwnerPID as String] as? Int,
+              let boundsDictionary = entry[kCGWindowBounds as String] as? NSDictionary,
+              let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary) else { continue }
+        if let alpha = entry[kCGWindowAlpha as String] as? Double, alpha < 0.05 { continue }
+        stack.append((pid_t(owner), bounds))
+    }
+    return stack
+}
+
+func sameFrame(_ a: CGRect, _ b: CGRect, tolerance: CGFloat = 4) -> Bool {
+    return abs(a.minX - b.minX) <= tolerance && abs(a.minY - b.minY) <= tolerance
+        && abs(a.width - b.width) <= tolerance && abs(a.height - b.height) <= tolerance
+}
+
+/// A real click at a point read off a picture. The picture can be out of date, so before anything is sent the window under the
+/// point must still be that very window (same app, same place, same size, on top); otherwise nothing is clicked.
+func clickAt(_ id: Any?, _ request: [String: Any]) {
+    guard AXIsProcessTrusted() else {
+        askForAccessibility()
+        fail(id, "not_trusted", "Accessibility permission is not granted to Remote Hands.")
+        return
+    }
+    guard let x = number(request["x"]), let y = number(request["y"]), let pidValue = request["pid"] as? Int,
+          let w = request["window"] as? [String: Any],
+          let wx = number(w["x"]), let wy = number(w["y"]), let ww = number(w["width"]), let wh = number(w["height"]) else {
+        fail(id, "bad_request", "Missing position or window.")
+        return
+    }
+    let target = CGPoint(x: x, y: y)
+    let expected = CGRect(x: wx, y: wy, width: ww, height: wh)
+    guard expected.insetBy(dx: -1, dy: -1).contains(target) else {
+        fail(id, "bad_request", "That position is outside the window.")
+        return
+    }
+    let pid = pid_t(pidValue)
+    guard activate(pid) else {
+        fail(id, "not_active", "\(appName(pid)) could not be brought to the front.")
+        return
+    }
+    // Bring that window above the others of its app and of other apps.
+    let appElement = AXUIElementCreateApplication(pid)
+    for candidate in (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement]) ?? [] {
+        if let f = frameOf(candidate), sameFrame(f, expected) {
+            _ = AXUIElementPerformAction(candidate, kAXRaiseAction as CFString)
+            usleep(120_000)
+            break
+        }
+    }
+    guard let top = windowStack().first(where: { $0.bounds.contains(target) }) else {
+        fail(id, "covered", "Could not confirm which window is at that spot.")
+        return
+    }
+    guard top.pid == pid else {
+        fail(id, "covered", "\(appName(top.pid)) is on top of that spot.")
+        return
+    }
+    guard sameFrame(top.bounds, expected) else {
+        fail(id, "stale", "The window moved or changed since its text was read: read it again.")
+        return
+    }
+    let right = (request["button"] as? String) == "right"
+    let count = max(1, min(3, (request["count"] as? Int) ?? 1))
+    let button: CGMouseButton = right ? .right : .left
+    let down: CGEventType = right ? .rightMouseDown : .leftMouseDown
+    let up: CGEventType = right ? .rightMouseUp : .leftMouseUp
+    for n in 1...count {
+        mouseEvent(down, target, button, clickState: Int64(n))?.post(tap: .cghidEventTap)
+        usleep(30_000)
+        mouseEvent(up, target, button, clickState: Int64(n))?.post(tap: .cghidEventTap)
+        usleep(60_000)
+    }
+    reply(id, ["ok": true, "x": Int(target.x.rounded()), "y": Int(target.y.rounded())])
+}
+
 // MARK: - Requests
 
 func handle(_ line: String) {
@@ -1068,6 +1360,10 @@ func handle(_ line: String) {
         scroll(id, request)
     case "drag":
         drag(id, request)
+    case "ocr":
+        ocr(id, request)
+    case "clickAt":
+        clickAt(id, request)
     default:
         fail(id, "bad_request", "Unknown op.")
     }

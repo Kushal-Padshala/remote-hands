@@ -206,3 +206,61 @@ describe('DesktopEngine zoom', () => {
     expect(await engine.snapshot('', { index: 3 })).toBeNull();
   });
 });
+
+describe('DesktopEngine reading a window by sight', () => {
+  const reading = {
+    ok: true as const,
+    app: { name: 'Notes', pid: 7 },
+    window: { title: 'All Notes', x: 0, y: 0, width: 800, height: 600 },
+    lines: [{ text: 'Hello', x: 100, y: 100, width: 50, height: 20 }],
+    truncated: false,
+    captureMs: 1,
+    ocrMs: 2,
+    elapsedMs: 3,
+  };
+
+  it('asks the helper for the app and remembers the text for clicks', async () => {
+    const helper = fake((op) => (op.op === 'ocr' ? reading : snapshotOf([WIN, BTN])));
+    const engine = new DesktopEngine(helper);
+    const text = await engine.readOcr('Notes');
+    expect(helper.calls[0]).toEqual({ op: 'ocr', app: 'Notes' });
+    expect(text).toContain('[100001] "Hello"');
+    expect(engine.ocrItem(100001)).toMatchObject({ text: 'Hello', x: 125, y: 110 });
+  });
+
+  it('forgets the text on dropOcr, so a click on it is refused', async () => {
+    const engine = new DesktopEngine(fake(() => reading));
+    await engine.readOcr('Notes');
+    engine.dropOcr();
+    expect(() => engine.ocrItem(100001)).toThrow('not in last snapshot');
+    await expect(engine.clickOcr(100001)).rejects.toThrow('not in last snapshot');
+  });
+
+  it('answers null when the helper is not ready, and for an app it cannot find', async () => {
+    expect(await new DesktopEngine(fake(() => reading, false)).readOcr('Notes')).toBeNull();
+    expect(await new DesktopEngine(fake(() => new AxHelperError('no_app', 'x'))).readOcr('Nope')).toBeNull();
+    expect(await new DesktopEngine(fake(() => new AxHelperError('timeout', 'x'))).readOcr('Notes')).toBeNull();
+  });
+
+  it('turns a missing Screen Recording permission into words for the model', async () => {
+    await expect(new DesktopEngine(fake(() => new AxHelperError('no_screen_recording', 'x'))).readOcr('Notes')).rejects.toThrow(/Screen Recording/);
+    expect(describeHelperError(new AxHelperError('no_screen_recording', 'x'), '')?.message).toContain('switch it off and on again');
+  });
+
+  it('passes other helper messages through (no window, capture failed, macOS too old)', async () => {
+    for (const code of ['no_window', 'capture_failed', 'unsupported']) {
+      await expect(new DesktopEngine(fake(() => new AxHelperError(code, `msg for ${code}`))).readOcr('Notes')).rejects.toThrow(`msg for ${code}`);
+    }
+  });
+
+  it('sends the click with the window it was read in and the right button and count', async () => {
+    const helper = fake(() => reading);
+    const engine = new DesktopEngine(helper);
+    await engine.readOcr('Notes');
+    await engine.clickOcr(100001, 'right');
+    await engine.clickOcr(100001, 'open');
+    const clicks = helper.calls.filter((c) => c.op === 'clickAt');
+    expect(clicks[0]).toEqual({ op: 'clickAt', x: 125, y: 110, pid: 7, window: { x: 0, y: 0, width: 800, height: 600 }, button: 'right', count: 1 });
+    expect(clicks[1]).toMatchObject({ button: 'left', count: 2 });
+  });
+});
