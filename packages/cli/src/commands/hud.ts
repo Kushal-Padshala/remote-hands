@@ -154,7 +154,7 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
       }
     }
     if (process.platform === 'darwin' && !context.runner && !args.includes('--skip-permissions') && !checkMacScreenCapture()) {
-      await ensureMacPermissions(stdout);
+      await ensureMacPermissions(stdout, 74, { fullDiskAccessOptional: true });
     }
 
     // Local fast lane (off unless `rh fast-lane enable` was run); absent when the model is not installed.

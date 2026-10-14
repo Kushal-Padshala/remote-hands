@@ -225,7 +225,7 @@ async function setupAgentAndPermissions(
 
   if (process.platform === 'darwin' && !context.runner && !args.includes('--skip-permissions')) {
     stdout(renderStepAction('Verifying macOS system permissions (Screen Recording, Full Disk Access, Accessibility)...'));
-    await ensureMacPermissions((msg) => stdout(msg));
+    await ensureMacPermissions((msg) => stdout(msg), 74, { fullDiskAccessOptional: true });
   }
 
   return null;
