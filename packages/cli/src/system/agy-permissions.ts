@@ -245,11 +245,126 @@ export async function checkAgyPermissions(
   }
 }
 
+const SETTINGS_BACKUP_SUFFIX = '.bak-rh';
+
+function remoteHandsHome(): string {
+  return path.join(os.homedir(), '.remote-hands');
+}
+
+const consentPath = (): string => path.join(remoteHandsHome(), 'agy-consent.json');
+const undoPath = (): string => path.join(remoteHandsHome(), 'agy-undo.json');
+
+/** What setup is about to change in the person's agy settings, in plain words (shown before anything is written). */
+export function agyPermissionDisclosure(): string[] {
+  return [
+    'To work without asking you about every step, Remote Hands changes your agy settings:',
+    '  - agy may read and write files and run commands without asking each time',
+    '    (permissions.defaultAction = allow, disableAllPrompts = true)',
+    '  - your home folder is marked as a trusted workspace',
+    '  - this applies to agy itself and to the Antigravity IDE, not only to Remote Hands',
+    'Your settings files are backed up first (settings.json.bak-rh) and the exact changes are recorded,',
+    'so "rh permissions revert" puts them back.',
+  ];
+}
+
+export type AgyConsentState = 'granted' | 'revoked' | 'none';
+
+export async function readAgyConsent(fs: FileSystemAdapter = defaultFileSystem): Promise<AgyConsentState> {
+  try {
+    if (!(await fs.exists(consentPath()))) return 'none';
+    const parsed = JSON.parse(await fs.readFile(consentPath()));
+    return parsed?.state === 'granted' || parsed?.state === 'revoked' ? parsed.state : 'none';
+  } catch {
+    return 'none';
+  }
+}
+
+async function writeAgyConsent(fs: FileSystemAdapter, state: 'granted' | 'revoked'): Promise<void> {
+  try {
+    await fs.writeFile(consentPath(), JSON.stringify({ state, at: new Date().toISOString() }, null, 2));
+  } catch {
+    // the settings themselves are what matters; the note is best effort
+  }
+}
+
+interface UndoEntry {
+  defaultAction: { had: boolean; value?: unknown };
+  disableAllPrompts: { had: boolean; value?: unknown };
+  addedAllow: string[];
+  addedWorkspaces: string[];
+}
+
+type UndoManifest = { version: 1; files: Record<string, UndoEntry> };
+
+async function readUndo(fs: FileSystemAdapter): Promise<UndoManifest> {
+  try {
+    if (await fs.exists(undoPath())) {
+      const parsed = JSON.parse(await fs.readFile(undoPath()));
+      if (parsed && typeof parsed === 'object' && parsed.files && typeof parsed.files === 'object') return parsed as UndoManifest;
+    }
+  } catch {
+    // an unreadable record is replaced by a fresh one
+  }
+  return { version: 1, files: {} };
+}
+
+/**
+ * Puts the agy settings back the way they were before Remote Hands changed them: only what was added is taken out, and
+ * the two permission switches return to their earlier values. Later calls by background services (the HUD, doctor)
+ * leave the settings alone until someone sets them up again on purpose.
+ */
+export async function revertAgyPermissions(
+  fs: FileSystemAdapter = defaultFileSystem,
+): Promise<{ restored: string[]; skipped: { path: string; reason: string }[] }> {
+  const undo = await readUndo(fs);
+  const restored: string[] = [];
+  const skipped: { path: string; reason: string }[] = [];
+  const remaining: Record<string, UndoEntry> = {};
+  for (const [file, entry] of Object.entries(undo.files)) {
+    try {
+      if (!(await fs.exists(file))) continue;
+      const settings = JSON.parse(await fs.readFile(file));
+      if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('not a JSON object');
+      const permissions = settings.permissions && typeof settings.permissions === 'object' ? settings.permissions : {};
+      if (entry.defaultAction.had) permissions.defaultAction = entry.defaultAction.value;
+      else delete permissions.defaultAction;
+      if (entry.disableAllPrompts.had) permissions.disableAllPrompts = entry.disableAllPrompts.value;
+      else delete permissions.disableAllPrompts;
+      if (Array.isArray(permissions.allow)) {
+        permissions.allow = permissions.allow.filter((r: unknown) => !entry.addedAllow.includes(r as string));
+      }
+      settings.permissions = permissions;
+      if (Array.isArray(settings.trustedWorkspaces)) {
+        settings.trustedWorkspaces = settings.trustedWorkspaces.filter((w: unknown) => !entry.addedWorkspaces.includes(w as string));
+      }
+      await fs.writeFile(file, JSON.stringify(settings, null, 2));
+      restored.push(file);
+    } catch (err) {
+      skipped.push({ path: file, reason: err instanceof Error ? err.message : String(err) });
+      remaining[file] = entry;
+    }
+  }
+  await fs.writeFile(undoPath(), JSON.stringify({ version: 1, files: remaining }, null, 2));
+  await writeAgyConsent(fs, 'revoked');
+  return { restored, skipped };
+}
+
+export interface EnsureAgyPermissionsOptions {
+  /**
+   * The person asked for this (setup, `rh permissions fix`, `rh hud install`). Without it, a background caller does
+   * nothing after the person reverted the settings.
+   */
+  explicit?: boolean | undefined;
+}
+
 export async function ensureAgyPermissions(
   fs: FileSystemAdapter = defaultFileSystem,
   workspacePath?: string,
+  options: EnsureAgyPermissionsOptions = {},
 ): Promise<boolean> {
   try {
+    if (!options.explicit && (await readAgyConsent(fs)) === 'revoked') return false;
+
     const settingsPaths = [
       path.join(os.homedir(), '.gemini/antigravity-cli/settings.json'),
       path.join(os.homedir(), '.gemini/settings.json'),
@@ -258,6 +373,7 @@ export async function ensureAgyPermissions(
     ];
 
     let anySucceeded = false;
+    const undo = await readUndo(fs);
 
     for (const settingsPath of settingsPaths) {
       const parentDir = path.dirname(settingsPath);
@@ -269,21 +385,17 @@ export async function ensureAgyPermissions(
       }
 
       let settingsObj: any = {};
+      let originalRaw: string | null = null;
       if (fileExists) {
         try {
-          settingsObj = JSON.parse(await fs.readFile(settingsPath));
+          originalRaw = await fs.readFile(settingsPath);
+          settingsObj = JSON.parse(originalRaw);
         } catch {}
       }
 
       settingsObj.permissions = settingsObj.permissions || {};
-      settingsObj.permissions.defaultAction = 'allow';
-      settingsObj.permissions.disableAllPrompts = true;
-      const existingAllow: string[] = Array.isArray(settingsObj.permissions.allow)
-        ? settingsObj.permissions.allow
-        : [];
-      const mergedAllow = Array.from(new Set([...existingAllow, ...STANDARD_AGY_PERMISSIONS]));
-      settingsObj.permissions.allow = mergedAllow;
-
+      const permissions = settingsObj.permissions;
+      const existingAllow: string[] = Array.isArray(permissions.allow) ? permissions.allow : [];
       const existingWorkspaces: string[] = Array.isArray(settingsObj.trustedWorkspaces)
         ? settingsObj.trustedWorkspaces
         : [];
@@ -296,13 +408,44 @@ export async function ensureAgyPermissions(
       if (workspacePath) {
         workspacesToAdd.push(path.resolve(workspacePath));
       }
-      const mergedWorkspaces = Array.from(new Set([...existingWorkspaces, ...workspacesToAdd]));
-      settingsObj.trustedWorkspaces = mergedWorkspaces;
+
+      // what is new here, recorded (once) so it can be undone exactly
+      const previous = undo.files[settingsPath];
+      const entry: UndoEntry = previous ?? {
+        defaultAction: 'defaultAction' in permissions ? { had: true, value: permissions.defaultAction } : { had: false },
+        disableAllPrompts: 'disableAllPrompts' in permissions ? { had: true, value: permissions.disableAllPrompts } : { had: false },
+        addedAllow: [],
+        addedWorkspaces: [],
+      };
+      for (const rule of STANDARD_AGY_PERMISSIONS) {
+        if (!existingAllow.includes(rule) && !entry.addedAllow.includes(rule)) entry.addedAllow.push(rule);
+      }
+      for (const ws of workspacesToAdd) {
+        if (!existingWorkspaces.includes(ws) && !entry.addedWorkspaces.includes(ws)) entry.addedWorkspaces.push(ws);
+      }
+
+      permissions.defaultAction = 'allow';
+      permissions.disableAllPrompts = true;
+      permissions.allow = Array.from(new Set([...existingAllow, ...STANDARD_AGY_PERMISSIONS]));
+      settingsObj.trustedWorkspaces = Array.from(new Set([...existingWorkspaces, ...workspacesToAdd]));
 
       try {
+        // a one-time copy of the file as it was, before the first change
+        if (originalRaw !== null && originalRaw.trim() !== '' && !previous) {
+          const backup = `${settingsPath}${SETTINGS_BACKUP_SUFFIX}`;
+          if (!(await fs.exists(backup))) await fs.writeFile(backup, originalRaw);
+        }
         await fs.writeFile(settingsPath, JSON.stringify(settingsObj, null, 2));
+        undo.files[settingsPath] = entry;
         anySucceeded = true;
       } catch {}
+    }
+
+    if (anySucceeded) {
+      try {
+        await fs.writeFile(undoPath(), JSON.stringify(undo, null, 2));
+      } catch {}
+      if (options.explicit) await writeAgyConsent(fs, 'granted');
     }
 
     try {
@@ -314,4 +457,3 @@ export async function ensureAgyPermissions(
     return false;
   }
 }
-

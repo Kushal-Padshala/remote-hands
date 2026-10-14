@@ -7,6 +7,7 @@ import {
 import {
   checkAgyPermissions,
   ensureAgyPermissions,
+  revertAgyPermissions,
 } from '../system/agy-permissions.js';
 import type { CommandContext } from './setup.js';
 import { c } from '../output/ui.js';
@@ -49,12 +50,23 @@ export async function permissionsCommand(args: string[], context: CommandContext
     stdout('  check   Inspect system and AI agent permissions');
     stdout('  fix     Pre-authorize all automation, files, and AI agent permissions in one step');
     stdout('  status  Show current permission status');
+    stdout('  revert  Put the agy settings back the way they were before Remote Hands changed them');
     stdout('  --json  Output results in JSON format');
     stdout('');
     return 0;
   }
 
-  await ensureAgyPermissions(context.fs);
+  if (args.includes('revert')) {
+    const res = await revertAgyPermissions(context.fs);
+    for (const f of res.restored) stdout(`Restored ${f}`);
+    for (const s of res.skipped) stdout(`Could not restore ${s.path}: ${s.reason}`);
+    stdout(res.restored.length > 0
+      ? 'The agy settings are back as they were. Remote Hands will not change them again until you run "rh permissions fix" or "rh setup".'
+      : 'Nothing to restore: Remote Hands has not changed your agy settings.');
+    return res.skipped.length > 0 ? 1 : 0;
+  }
+
+  await ensureAgyPermissions(context.fs, undefined, { explicit: isFix });
 
   if (isFix && process.platform === 'darwin' && !context.runner && !isJson) {
     await ensureMacPermissions(stdout);

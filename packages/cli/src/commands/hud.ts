@@ -49,7 +49,7 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
 
   if (subcommand === 'install') {
     stdout('Configuring system permissions for desktop overlay assistant...');
-    await ensureAgyPermissions(context.fs);
+    await ensureAgyPermissions(context.fs, undefined, { explicit: true });
     stdout('Installing Remote Hands Desktop Overlay background service...');
     const res = serviceManager.install();
     if (res.success) {
@@ -83,6 +83,7 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
     const uninstalled = serviceManager.uninstall();
     if (uninstalled) {
       stdout('✓ Remote Hands Desktop Overlay background service removed.');
+      stdout('  Your agy settings were not touched. To put them back as they were: rh permissions revert');
     } else {
       stdout('No active Desktop Overlay service found to remove.');
     }

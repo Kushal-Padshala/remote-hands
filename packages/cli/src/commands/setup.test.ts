@@ -651,6 +651,65 @@ describe('Setup Command Flow', () => {
       }
     });
 
+    describe('agy settings consent', () => {
+      function freshFs(): { fs: FileSystemAdapter; files: Record<string, string> } {
+        const f: Record<string, string> = {};
+        return {
+          files: f,
+          fs: {
+            readFile: async (p) => f[p] ?? '',
+            writeFile: async (p, content) => {
+              f[p] = content;
+            },
+            exists: async (p) => p in f,
+          },
+        };
+      }
+      const touchedSettings = (f: Record<string, string>): string[] => Object.keys(f).filter((k) => k.endsWith('settings.json'));
+      const base = { runner: hudRunner([]), projectRoot: '/project', hudServiceManager: { install: () => ({ success: true, plistPath: '/mock.plist' }) }, browserSetup: readyBrowserSetup([]) };
+
+      it('shows what changes and stops, touching nothing, when the person says no', async () => {
+        const { fs, files } = freshFs();
+        const out: string[] = [];
+        const err: string[] = [];
+        const code = await setupCommand(['--hud'], { ...base, fs, stdout: (l) => out.push(l), stderr: (l) => err.push(l), isTTY: true, ask: async () => 'n' });
+        expect(code).toBe(1);
+        expect(out.join('\n')).toContain('disableAllPrompts');
+        expect(out.join('\n')).toContain('rh permissions revert');
+        expect(err.join('\n')).toContain('Nothing was changed');
+        expect(touchedSettings(files)).toEqual([]);
+      });
+
+      it('goes ahead on yes (and on a plain Enter), and records consent', async () => {
+        for (const answer of ['y', '']) {
+          const { fs, files } = freshFs();
+          const asked: string[] = [];
+          const code = await setupCommand(['--hud'], { ...base, fs, stdout: () => {}, isTTY: true, ask: async (q) => { asked.push(q); return answer; } });
+          expect(code).toBe(0);
+          expect(asked.filter((q) => q.includes('Allow this?'))).toHaveLength(1);
+          expect(touchedSettings(files).length).toBeGreaterThan(0);
+        }
+      });
+
+      it('--yes and a missing terminal do not ask', async () => {
+        for (const [args, tty] of [[['--hud', '--yes'], true], [['--hud'], false]] as const) {
+          const { fs } = freshFs();
+          const asked: string[] = [];
+          const code = await setupCommand([...args], { ...base, fs, stdout: () => {}, isTTY: tty, ask: async (q) => { asked.push(q); return 'y'; } });
+          expect(code).toBe(0);
+          expect(asked.filter((q) => q.includes('Allow this?'))).toEqual([]);
+        }
+      });
+
+      it('does not ask again once the settings are in place', async () => {
+        const { fs } = freshFs();
+        await setupCommand(['--hud'], { ...base, fs, stdout: () => {}, isTTY: false });
+        const asked: string[] = [];
+        await setupCommand(['--hud'], { ...base, fs, stdout: () => {}, isTTY: true, ask: async (q) => { asked.push(q); return 'y'; } });
+        expect(asked.filter((q) => q.includes('Allow this?'))).toEqual([]);
+      });
+    });
+
     it('--hud fails loudly (exit 1) when the hotkey helper cannot be built', async () => {
       if (process.platform !== 'darwin') return;
       const out: string[] = [];
@@ -688,8 +747,8 @@ describe('Setup Command Flow', () => {
         },
       });
       expect(code).toBe(0);
-      expect(asked).toHaveLength(2);
-      expect(asked[0]).toContain('Choose 1 or 2');
+      const modeQuestions = asked.filter((q) => q.includes('Choose 1 or 2'));
+      expect(modeQuestions).toHaveLength(2);
       expect(out.join('\n')).toContain('Desktop HUD');
       expect(out.join('\n')).toContain('Please type 1 or 2.');
       expect(out.join('\n')).toContain('Desktop HUD is ready');

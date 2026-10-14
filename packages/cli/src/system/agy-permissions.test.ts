@@ -7,6 +7,7 @@ import {
   ensureAgyMcpPermission,
   ensureAgyPermissions,
   removeAgyMcpPermission,
+  revertAgyPermissions,
 } from './agy-permissions.js';
 import type { FileSystemAdapter } from '../cloudflare/project.js';
 
@@ -222,5 +223,81 @@ describe('AGY Headless Permissions', () => {
     expect(parsed.permissions.allow).toContain('command(git)');
     expect(parsed.trustedWorkspaces).toContain('/existing/trusted/path');
     expect(parsed.trustedWorkspaces).toContain(path.resolve('/new/workspace'));
+  });
+});
+
+describe('agy settings are backed up, recorded and revertible', () => {
+  const GLOBAL = path.join(os.homedir(), '.gemini/antigravity-cli/settings.json');
+  const CONSENT = path.join(os.homedir(), '.remote-hands', 'agy-consent.json');
+  const original = {
+    model: 'Custom',
+    permissions: { defaultAction: 'ask', allow: ['command(custom-tool)', 'read_file'], deny: ['x'] },
+    trustedWorkspaces: ['/mine'],
+  };
+
+  it('copies the file once before the first change and never overwrites that copy', async () => {
+    const raw = JSON.stringify(original);
+    const { fs, files } = memoryFs({ [GLOBAL]: raw });
+    await ensureAgyPermissions(fs, undefined, { explicit: true });
+    expect(files[`${GLOBAL}.bak-rh`]).toBe(raw);
+    await ensureAgyPermissions(fs, undefined, { explicit: true });
+    expect(files[`${GLOBAL}.bak-rh`]).toBe(raw);
+  });
+
+  it('revert puts back exactly what was there and keeps what the person added later', async () => {
+    const { fs, files } = memoryFs({ [GLOBAL]: JSON.stringify(original) });
+    await ensureAgyPermissions(fs, '/ws', { explicit: true });
+    // the person adds a rule of their own afterwards
+    const changed = JSON.parse(files[GLOBAL]!);
+    expect(changed.permissions.defaultAction).toBe('allow');
+    expect(changed.permissions.disableAllPrompts).toBe(true);
+    changed.permissions.allow.push('command(later)');
+    files[GLOBAL] = JSON.stringify(changed);
+
+    const res = await revertAgyPermissions(fs);
+    expect(res.restored).toEqual([GLOBAL]);
+    const back = JSON.parse(files[GLOBAL]!);
+    expect(back.model).toBe('Custom');
+    expect(back.permissions.defaultAction).toBe('ask');
+    expect('disableAllPrompts' in back.permissions).toBe(false);
+    expect(back.permissions.deny).toEqual(['x']);
+    expect(back.permissions.allow).toEqual(['command(custom-tool)', 'read_file', 'command(later)']);
+    expect(back.trustedWorkspaces).toEqual(['/mine']);
+  });
+
+  it('a second run does not record its own earlier additions as the person\'s', async () => {
+    const { fs, files } = memoryFs({ [GLOBAL]: JSON.stringify(original) });
+    await ensureAgyPermissions(fs, undefined, { explicit: true });
+    await ensureAgyPermissions(fs, undefined, { explicit: true });
+    await revertAgyPermissions(fs);
+    const back = JSON.parse(files[GLOBAL]!);
+    expect(back.permissions.allow).toEqual(['command(custom-tool)', 'read_file']);
+    expect(back.permissions.defaultAction).toBe('ask');
+  });
+
+  it('after a revert, background callers leave the settings alone until someone asks again', async () => {
+    const { fs, files } = memoryFs({ [GLOBAL]: JSON.stringify(original) });
+    await ensureAgyPermissions(fs, undefined, { explicit: true });
+    await revertAgyPermissions(fs);
+    const reverted = files[GLOBAL];
+    expect(await ensureAgyPermissions(fs)).toBe(false);
+    expect(files[GLOBAL]).toBe(reverted);
+    expect(JSON.parse(files[CONSENT]!).state).toBe('revoked');
+    expect(await ensureAgyPermissions(fs, undefined, { explicit: true })).toBe(true);
+    expect(JSON.parse(files[GLOBAL]!).permissions.defaultAction).toBe('allow');
+    expect(JSON.parse(files[CONSENT]!).state).toBe('granted');
+  });
+
+  it('revert with nothing recorded changes nothing', async () => {
+    const { fs, files } = memoryFs({ [GLOBAL]: JSON.stringify(original) });
+    const res = await revertAgyPermissions(fs);
+    expect(res.restored).toEqual([]);
+    expect(JSON.parse(files[GLOBAL]!)).toEqual(original);
+  });
+
+  it('background callers still set things up as before when nothing was ever reverted', async () => {
+    const { fs, files } = memoryFs({});
+    expect(await ensureAgyPermissions(fs)).toBe(true);
+    expect(JSON.parse(files[GLOBAL]!).permissions.defaultAction).toBe('allow');
   });
 });

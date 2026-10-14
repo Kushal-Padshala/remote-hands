@@ -46,7 +46,7 @@ import {
 import { writeWranglerConfig, defaultFileSystem, type FileSystemAdapter } from '../cloudflare/project.js';
 import { ensureBrowserHarness } from '../system/browser-harness.js';
 import { ensureRemoteHandsOperatorSkill } from '../system/operator-skill.js';
-import { ensureAgyPermissions } from '../system/agy-permissions.js';
+import { agyPermissionDisclosure, checkAgyPermissions, ensureAgyPermissions, readAgyConsent } from '../system/agy-permissions.js';
 import { ensureMacPermissions } from '../system/mac-permissions.js';
 import { ensureCloudflaredBinary } from '../system/tunnel.js';
 import { generatePairingCode } from '@remote-hands/control-plane';
@@ -188,7 +188,21 @@ async function setupAgentAndPermissions(
     stdout(renderStepSuccess('agy is installed and authenticated'));
   }
 
-  const permissionsOk = await ensureAgyPermissions(fs, projectRoot);
+  // The agy settings change is shown and agreed to first (a terminal is asked; --yes or no terminal goes ahead, as before)
+  const alreadyApplied = (await readAgyConsent(fs)) === 'granted' || (await checkAgyPermissions(fs));
+  if (!alreadyApplied) {
+    for (const line of agyPermissionDisclosure()) stdout(renderStepInfo(line));
+    const interactive = context.isTTY ?? Boolean(process.stdin.isTTY);
+    if (interactive && !args.includes('--yes')) {
+      const answer = (await (context.ask ?? defaultAsk)('Allow this? [Y/n] ')).trim().toLowerCase();
+      if (answer !== '' && answer !== 'y' && answer !== 'yes') {
+        stderr(renderStepError('Remote Hands cannot run tasks without these agy settings, so setup stops here. Nothing was changed.'));
+        stderr('Run "rh setup" again whenever you are ready.');
+        return 1;
+      }
+    }
+  }
+  const permissionsOk = await ensureAgyPermissions(fs, projectRoot, { explicit: true });
   if (permissionsOk) {
     stdout(renderStepSuccess('Configured headless tool permissions and trusted workspaces for agy'));
   }
