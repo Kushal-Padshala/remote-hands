@@ -1083,7 +1083,36 @@ func recognizeText(in image: CGImage) -> [SeenLine] {
 
 let maxSeenLines = 600
 
-func replyOcr(_ id: Any?, image: CGImage, frame: CGRect, app: [String: Any], title: String, captureMs: Int, started: UInt64) {
+// Requests that answer later (the picture is taken and read off the main queue). The helper must not exit at the end of its
+// input while one is still on its way, or the caller would never get its answer.
+var asyncPending = 0
+let asyncLock = NSLock()
+
+func beginAsync() {
+    asyncLock.lock()
+    asyncPending += 1
+    asyncLock.unlock()
+}
+
+func endAsync() {
+    asyncLock.lock()
+    asyncPending = max(0, asyncPending - 1)
+    asyncLock.unlock()
+}
+
+func asyncIdle() -> Bool {
+    asyncLock.lock()
+    defer { asyncLock.unlock() }
+    return asyncPending == 0
+}
+
+/// Exits once the answers still on their way are written (at most 30 seconds).
+func exitWhenIdle(waited: Int = 0) {
+    if asyncIdle() || waited >= 600 { exit(0) }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { exitWhenIdle(waited: waited + 1) }
+}
+
+func replyOcr(_ id: Any?, image: CGImage, frame: CGRect, app: [String: Any], title: String, windowId: Int, captureMs: Int, started: UInt64) {
     let visionStart = DispatchTime.now().uptimeNanoseconds
     let seen = recognizeText(in: image)
     let ocrMs = Int((DispatchTime.now().uptimeNanoseconds - visionStart) / 1_000_000)
@@ -1102,6 +1131,7 @@ func replyOcr(_ id: Any?, image: CGImage, frame: CGRect, app: [String: Any], tit
         "app": app,
         "window": [
             "title": clip(title, 200),
+            "id": windowId,
             "x": Int(frame.minX.rounded()), "y": Int(frame.minY.rounded()),
             "width": Int(frame.width.rounded()), "height": Int(frame.height.rounded()),
         ],
@@ -1129,9 +1159,16 @@ func failCapture(_ id: Any?, _ error: Error?) {
     let ns = error as NSError?
     if ns?.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain", ns?.code == -3801 {
         fail(id, "no_screen_recording", screenRecordingMessage)
-        return
+    } else {
+        fail(id, "capture_failed", "Could not take a picture of the window: \(error?.localizedDescription ?? "unknown error").")
     }
-    fail(id, "capture_failed", "Could not take a picture of the window: \(error?.localizedDescription ?? "unknown error").")
+    endAsync()
+}
+
+/// Answers an ocr request that cannot go on, and ends it.
+func failAsync(_ id: Any?, _ code: String, _ message: String) {
+    fail(id, code, message)
+    endAsync()
 }
 
 func overlapRatio(_ a: CGRect, _ b: CGRect) -> CGFloat {
@@ -1147,13 +1184,20 @@ func ocrCapture(_ id: Any?, _ request: [String: Any], _ started: UInt64) {
     // Display and capture calls abort the process unless it has joined the window server first (reading accessibility needs no such step).
     _ = NSApplication.shared
     let query = (request["app"] as? String) ?? ""
-    guard let app = findApp(query) else {
-        fail(id, "no_app", query.isEmpty ? "No frontmost app." : "No running app matches \"\(query)\".")
+    // The app is pinned by process id when the caller has one: "the front app" may be another one by the time this runs.
+    var found: NSRunningApplication? = nil
+    if let pinned = request["pid"] as? Int, pinned > 0 {
+        found = NSRunningApplication(processIdentifier: pid_t(pinned))
+    } else {
+        found = findApp(query)
+    }
+    guard let app = found else {
+        failAsync(id, "no_app", query.isEmpty ? "No frontmost app." : "No running app matches \"\(query)\".")
         return
     }
     guard CGPreflightScreenCaptureAccess() else {
         askForScreenRecording()
-        fail(id, "no_screen_recording", screenRecordingMessage)
+        failAsync(id, "no_screen_recording", screenRecordingMessage)
         return
     }
     let pid = app.processIdentifier
@@ -1179,7 +1223,7 @@ func ocrCapture(_ id: Any?, _ request: [String: Any], _ started: UInt64) {
         }
         if chosen == nil { chosen = mine.max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height } }
         guard let target = chosen else {
-            fail(id, "no_window", "\(app.localizedName ?? "That app") has no window on screen to read.")
+            failAsync(id, "no_window", "\(app.localizedName ?? "That app") has no window on screen to read.")
             return
         }
         // Boxes are given in the screen space clicks use: the accessibility frame when it is the same window, else the capture's.
@@ -1208,7 +1252,8 @@ func ocrCapture(_ id: Any?, _ request: [String: Any], _ started: UInt64) {
             }
             let captureMs = Int((DispatchTime.now().uptimeNanoseconds - captureStart) / 1_000_000)
             DispatchQueue.global(qos: .userInitiated).async {
-                replyOcr(id, image: image, frame: frame, app: appInfo, title: title, captureMs: captureMs, started: started)
+                replyOcr(id, image: image, frame: frame, app: appInfo, title: title, windowId: Int(target.windowID), captureMs: captureMs, started: started)
+                endAsync()
             }
         }
     }
@@ -1225,7 +1270,7 @@ func ocr(_ id: Any?, _ request: [String: Any]) {
             fail(id, "bad_request", "Bad fixture.")
             return
         }
-        replyOcr(id, image: image, frame: CGRect(x: x, y: y, width: width, height: height), app: ["name": "Fixture", "pid": 0, "bundle": ""], title: "", captureMs: 0, started: started)
+        replyOcr(id, image: image, frame: CGRect(x: x, y: y, width: width, height: height), app: ["name": "Fixture", "pid": 0, "bundle": ""], title: "", windowId: 0, captureMs: 0, started: started)
         return
     }
     guard AXIsProcessTrusted() else {
@@ -1235,6 +1280,7 @@ func ocr(_ id: Any?, _ request: [String: Any]) {
     }
     #if canImport(ScreenCaptureKit) && compiler(>=5.9)
     if #available(macOS 14.0, *) {
+        beginAsync()
         ocrCapture(id, request, started)
         return
     }
@@ -1242,17 +1288,32 @@ func ocr(_ id: Any?, _ request: [String: Any]) {
     fail(id, "unsupported", "Reading a window by sight needs macOS 14 or newer.")
 }
 
-/// The ordinary windows on screen, front to back, by owner and bounds. Needs no Screen Recording permission.
-func windowStack() -> [(pid: pid_t, bounds: CGRect)] {
+/// Whether a process runs from Remote Hands' own folder (its HUD, its cursor overlay): those windows ignore the mouse.
+func isRemoteHandsProcess(_ pid: pid_t) -> Bool {
+    var buffer = [CChar](repeating: 0, count: 4096)
+    let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+    if length <= 0 { return false }
+    return String(cString: buffer).contains("/.remote-hands/bin/")
+}
+
+/// The windows on screen, front to back, by number, owner and bounds. Floating panels and other layers are included, because
+/// a click lands on whatever is on top; only Remote Hands' own windows (which do not take clicks) are left out.
+/// Needs no Screen Recording permission.
+func windowStack() -> [(number: Int, pid: pid_t, bounds: CGRect)] {
     guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
-    var stack: [(pid: pid_t, bounds: CGRect)] = []
+    var stack: [(number: Int, pid: pid_t, bounds: CGRect)] = []
+    var ours: [pid_t: Bool] = [:]
     for entry in list {
-        guard (entry[kCGWindowLayer as String] as? Int) == 0,
+        guard let number = entry[kCGWindowNumber as String] as? Int,
               let owner = entry[kCGWindowOwnerPID as String] as? Int,
               let boundsDictionary = entry[kCGWindowBounds as String] as? NSDictionary,
               let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary) else { continue }
         if let alpha = entry[kCGWindowAlpha as String] as? Double, alpha < 0.05 { continue }
-        stack.append((pid_t(owner), bounds))
+        let pid = pid_t(owner)
+        if pid == getpid() { continue }
+        if ours[pid] == nil { ours[pid] = isRemoteHandsProcess(pid) }
+        if ours[pid] == true { continue }
+        stack.append((number, pid, bounds))
     }
     return stack
 }
@@ -1302,6 +1363,11 @@ func clickAt(_ id: Any?, _ request: [String: Any]) {
     }
     guard top.pid == pid else {
         fail(id, "covered", "\(appName(top.pid)) is on top of that spot.")
+        return
+    }
+    // The very window that was read, not another one of the app that now sits in the same place.
+    if let wanted = request["windowId"] as? Int, wanted != 0, wanted != top.number {
+        fail(id, "stale", "That window was replaced by another since its text was read: read it again.")
         return
     }
     guard sameFrame(top.bounds, expected) else {
@@ -1405,7 +1471,7 @@ Thread.detachNewThread {
         DispatchQueue.main.async { handle(line) }
     }
     // queued behind the requests already read, so their replies are written first
-    DispatchQueue.main.async { exit(0) }
+    DispatchQueue.main.async { exitWhenIdle() }
 }
 
 dispatchMain()

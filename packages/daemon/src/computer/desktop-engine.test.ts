@@ -224,16 +224,16 @@ describe('DesktopEngine reading a window by sight', () => {
     const engine = new DesktopEngine(helper);
     const text = await engine.readOcr('Notes');
     expect(helper.calls[0]).toEqual({ op: 'ocr', app: 'Notes' });
-    expect(text).toContain('[100001] "Hello"');
-    expect(engine.ocrItem(100001)).toMatchObject({ text: 'Hello', x: 125, y: 110 });
+    expect(text).toContain('[1000001] "Hello"');
+    expect(engine.ocrItem(1000001)).toMatchObject({ text: 'Hello', x: 125, y: 110 });
   });
 
   it('forgets the text on dropOcr, so a click on it is refused', async () => {
     const engine = new DesktopEngine(fake(() => reading));
     await engine.readOcr('Notes');
     engine.dropOcr();
-    expect(() => engine.ocrItem(100001)).toThrow('not in last snapshot');
-    await expect(engine.clickOcr(100001)).rejects.toThrow('not in last snapshot');
+    expect(() => engine.ocrItem(1000001)).toThrow('not in last snapshot');
+    await expect(engine.clickOcr(1000001)).rejects.toThrow('not in last snapshot');
   });
 
   it('answers null when the helper is not ready, and for an app it cannot find', async () => {
@@ -257,8 +257,8 @@ describe('DesktopEngine reading a window by sight', () => {
     const helper = fake(() => reading);
     const engine = new DesktopEngine(helper);
     await engine.readOcr('Notes');
-    await engine.clickOcr(100001, 'right');
-    await engine.clickOcr(100001, 'open');
+    await engine.clickOcr(1000001, 'right');
+    await engine.clickOcr(1000001, 'open');
     const clicks = helper.calls.filter((c) => c.op === 'clickAt');
     expect(clicks[0]).toEqual({ op: 'clickAt', x: 125, y: 110, pid: 7, window: { x: 0, y: 0, width: 800, height: 600 }, button: 'right', count: 1 });
     expect(clicks[1]).toMatchObject({ button: 'left', count: 2 });

@@ -154,11 +154,14 @@ export class DesktopEngine {
    * LAST RESORT: reads the window of `app` (the front app when empty) by sight, in one picture, and remembers the text
    * for desktop_click. Slower than Accessibility, so it only runs when asked for. Null: the helper cannot serve.
    */
-  async readOcr(app: string, opts: { filter?: string } = {}): Promise<string | null> {
+  async readOcr(app: string, opts: { filter?: string; pid?: number } = {}): Promise<string | null> {
+    // what was read before is gone the moment a new read starts: a failed read leaves nothing to click
+    this.lastOcr = null;
     if (!(await this.helper.ready())) return null;
     let reading: OcrReading;
     try {
-      reading = await this.helper.request<OcrReading>({ op: 'ocr', app }, OCR_TIMEOUT_MS);
+      // pinned to the process of the Accessibility snapshot: "the front app" may be another app by now
+      reading = await this.helper.request<OcrReading>({ op: 'ocr', app, ...(opts.pid !== undefined ? { pid: opts.pid } : {}) }, OCR_TIMEOUT_MS);
     } catch (err) {
       if (err instanceof AxHelperError) {
         if (err.code === 'no_app') return null;
@@ -168,11 +171,24 @@ export class DesktopEngine {
       }
       throw err;
     }
+    if (opts.pid !== undefined && reading.app.pid !== opts.pid) {
+      throw new Error('The app changed while its window was being read. Call desktop_snapshot with ocr=true again.');
+    }
     // Accessibility text at the same places is not repeated, but only when the last look was at this very app.
     const axView = this.last && reading.app.name && this.last.app.toLowerCase() === reading.app.name.toLowerCase() ? this.last.view : null;
     const view = buildOcrView(reading, { ...(opts.filter ? { filter: opts.filter } : {}), axView });
     this.lastOcr = { app: reading.app.name || app, reading, view };
     return view.text;
+  }
+
+  /** Whether an id belongs to the latest read by sight. */
+  hasOcrItem(id: number): boolean {
+    return this.lastOcr?.view.byId.has(id) === true;
+  }
+
+  /** The process whose window was read by sight, if any. */
+  ocrPid(): number | undefined {
+    return this.lastOcr?.reading.app.pid;
   }
 
   /** The text read by sight for an id the model saw in the latest read. */
@@ -200,7 +216,7 @@ export class DesktopEngine {
     const right = action === 'right' || action === 'menu';
     try {
       await this.helper.request(
-        { op: 'clickAt', x: item.x, y: item.y, pid: win.pid, window: { x: win.x, y: win.y, width: win.width, height: win.height }, button: right ? 'right' : 'left', count: double ? 2 : 1 },
+        { op: 'clickAt', x: item.x, y: item.y, pid: win.pid, ...(win.id !== undefined ? { windowId: win.id } : {}), window: { x: win.x, y: win.y, width: win.width, height: win.height }, button: right ? 'right' : 'left', count: double ? 2 : 1 },
         ACTION_TIMEOUT_MS,
       );
     } catch (err) {

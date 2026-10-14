@@ -8,7 +8,7 @@ import type { View } from './ax-model.js';
  */
 
 /** Ids of text read by sight start here, far above any accessibility id, so the two can never be mistaken for each other. */
-export const OCR_ID_BASE = 100_000;
+export const OCR_ID_BASE = 1_000_000;
 
 /** The first words of the block: what the HUD feed and the tests recognise it by. */
 export const OCR_HEADER = 'read by sight (OCR)';
@@ -17,7 +17,8 @@ export const OCR_HEADER = 'read by sight (OCR)';
 export interface OcrReading {
   ok: true;
   app: { name: string; pid: number; bundle?: string };
-  window: { title: string; x: number; y: number; width: number; height: number };
+  /** `id` is the window's number: a click is refused when another window sits where this one was. */
+  window: { title: string; id?: number; x: number; y: number; width: number; height: number };
   lines: Array<{ text: string; x: number; y: number; width: number; height: number }>;
   truncated: boolean;
   captureMs: number;
@@ -27,7 +28,10 @@ export interface OcrReading {
 
 export interface OcrItem {
   id: number;
+  /** As shown to the model: cut short. */
   text: string;
+  /** Almost all of what was read: what approval and the filter are judged on, so a risky word late in a long line still counts. */
+  full: string;
   /** The point a click goes to: the middle of the text. */
   x: number;
   y: number;
@@ -41,6 +45,7 @@ export interface OcrView {
 
 const MAX_LINES = 120;
 const MAX_TEXT = 80;
+const MAX_FULL = 400;
 
 const normalize = (s: string): string => s.toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -89,13 +94,14 @@ export function buildOcrView(reading: OcrReading, opts: { filter?: string; axVie
   for (const line of reading.lines) {
     const text = clipText(line.text);
     if (!text) continue;
+    const full = line.text.replace(/\s+/g, ' ').trim().slice(0, MAX_FULL);
     const x = Math.round(line.x + line.width / 2);
     const y = Math.round(line.y + line.height / 2);
-    if (coveredByAccessibility(text, x, y, opts.axView ?? null)) {
+    if (coveredByAccessibility(full, x, y, opts.axView ?? null)) {
       repeated += 1;
       continue;
     }
-    if (filter && !normalize(text).includes(filter)) {
+    if (filter && !normalize(full).includes(filter)) {
       hiddenByFilter += 1;
       continue;
     }
@@ -104,7 +110,7 @@ export function buildOcrView(reading: OcrReading, opts: { filter?: string; axVie
       continue;
     }
     id += 1;
-    items.push({ id, text, x, y });
+    items.push({ id, text, full, x, y });
     const px = win.width > 0 ? Math.round(((x - win.x) / win.width) * 100) : 0;
     const py = win.height > 0 ? Math.round(((y - win.y) / win.height) * 100) : 0;
     shown.push(`[${id}] "${text.replace(/"/g, "'")}" @${Math.max(0, Math.min(100, px))},${Math.max(0, Math.min(100, py))}`);

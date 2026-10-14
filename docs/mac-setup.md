@@ -51,6 +51,12 @@ including the Antigravity IDE, so read it. Your settings files are copied first 
 
 Full Disk Access is optional for the HUD. Without it, macOS may ask "allow access to your Documents folder" now and then.
 
+**Rare: apps that show nothing to Accessibility.** A few windows (some games, drawing canvases, remote-desktop windows) do not
+expose their buttons. Only for those, as a last resort, the agent reads the window by sight, which is a bit slower; the HUD
+then says "Reading this window by sight". The first time, macOS asks to let **Remote Hands** record the screen: click **Open
+System Settings** and switch **Remote Hands** on (it is a second entry in the Screen & System Audio Recording list, next to
+node). Nothing else changes, and everything that Accessibility can read is still read without it.
+
 **The background HUD check.** The HUD runs as a login service, which macOS treats as a different program from your terminal.
 Setup asks the HUD itself whether it can see the screen. If not, it tells you the exact `node` to switch on, waits, restarts the
 HUD and checks again.

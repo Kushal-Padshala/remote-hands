@@ -15,7 +15,7 @@ const SAVE: AxNode = { id: 4, parent: 1, role: 'AXButton', label: 'Save', action
 const READING: OcrReading = {
   ok: true,
   app: { name: 'Game', pid: 321 },
-  window: { title: 'Lobby', x: 100, y: 100, width: 800, height: 600 },
+  window: { title: 'Lobby', id: 55, x: 100, y: 100, width: 800, height: 600 },
   lines: [
     { text: 'Play', x: 400, y: 300, width: 60, height: 20 },
     { text: 'Settings', x: 400, y: 340, width: 80, height: 20 },
@@ -126,7 +126,7 @@ describe('reading a window by sight is the last resort', () => {
     const { session } = make(helper);
     const text = await session.desktopSnapshot('Game', undefined, undefined, true);
     expect(text).toContain('[4] button "Save"');
-    expect(text).not.toMatch(/\[1000\d\d\] "Save"/);
+    expect(text).not.toMatch(/\[10000\d\d\] "Save"/);
     expect(text).toContain('already listed above by Accessibility');
   });
 
@@ -160,7 +160,7 @@ describe('clicking text read by sight', () => {
     const { helper, session } = await sighted();
     const out = await session.desktopClick(OCR_ID_BASE + 1);
     const click = ops(helper, 'clickAt')[0]!;
-    expect(click).toMatchObject({ op: 'clickAt', x: 430, y: 310, pid: 321, button: 'left', count: 1, window: { x: 100, y: 100, width: 800, height: 600 } });
+    expect(click).toMatchObject({ op: 'clickAt', x: 430, y: 310, pid: 321, windowId: 55, button: 'left', count: 1, window: { x: 100, y: 100, width: 800, height: 600 } });
     expect(out.startsWith(`clicked [${OCR_ID_BASE + 1}] text "Play" (read by sight)`)).toBe(true);
     // the click redrew the window: it is read again so the next click has fresh places
     expect(ops(helper, 'ocr')).toHaveLength(1);
@@ -233,6 +233,59 @@ describe('clicking text read by sight', () => {
     }) as AxHelperPort['request'];
     const out = await made.session.desktopClick(OCR_ID_BASE + 1);
     expect(out).toContain('could not read the window by sight afterwards');
+  });
+
+  it('the approval is judged on everything that was read, not only the shortened line the model saw', async () => {
+    const long = `Continue with the selected operation for the current project and all of its resources, including every file, folder and shared link that was ever created in it by anyone: Delete`;
+    const gate = vi.fn().mockResolvedValue(undefined);
+    const reading: OcrReading = { ...READING, lines: [{ text: long, x: 200, y: 300, width: 400, height: 20 }] };
+    const { session } = await sighted({ ocr: reading }, { gate });
+    await session.desktopClick(OCR_ID_BASE + 1);
+    const judged = gate.mock.calls[0]![0] as string;
+    expect(judged).toBe(long);
+    expect(judged).toMatch(/Delete$/);
+  });
+
+  it('a filter finds a word that is past the shortened line', async () => {
+    const long = `${'word '.repeat(30)}Delete`;
+    const helper = fakeHelper({ ocr: { ...READING, lines: [{ text: long, x: 200, y: 300, width: 400, height: 20 }] } });
+    const { session } = make(helper);
+    const text = await session.desktopSnapshot('Game', 'delete', undefined, true);
+    expect(text).toContain(`[${OCR_ID_BASE + 1}]`);
+  });
+
+  it('the picture is pinned to the app the Accessibility snapshot read, and a different app is refused', async () => {
+    const helper = fakeHelper();
+    const { session } = make(helper);
+    await session.desktopSnapshot(undefined, undefined, undefined, true);
+    expect(ops(helper, 'ocr')[0]).toMatchObject({ op: 'ocr', pid: 321 });
+    const other = fakeHelper({ ocr: { ...READING, app: { name: 'Mail', pid: 999 } } });
+    await expect(make(other).session.desktopSnapshot(undefined, undefined, undefined, true)).rejects.toThrow('app changed');
+  });
+
+  it('a read that fails, or an indexed snapshot, leaves no old places to click', async () => {
+    const helper = fakeHelper();
+    const made = make(helper);
+    await made.session.desktopSnapshot('Game', undefined, undefined, true);
+    const original = helper.request;
+    helper.request = (async (op: Record<string, unknown>) => {
+      if (op.op === 'ocr') throw new AxHelperError('capture_failed', 'boom');
+      return original.call(helper, op);
+    }) as AxHelperPort['request'];
+    await expect(made.session.desktopSnapshot('Game', undefined, undefined, true)).rejects.toThrow('boom');
+    helper.request = original;
+    await expect(made.session.desktopClick(OCR_ID_BASE + 1)).rejects.toThrow('not in last snapshot');
+
+    await made.session.desktopSnapshot('Game', undefined, undefined, true);
+    await made.session.desktopSnapshot('Game', undefined, 2).catch(() => undefined);
+    await expect(made.session.desktopClick(OCR_ID_BASE + 1)).rejects.toThrow('not in last snapshot');
+  });
+
+  it('an action that fails half way still forgets the old places', async () => {
+    const { helper, session } = await sighted();
+    await expect(session.desktopType('x', undefined, { index: 2, submit: true })).rejects.toBeDefined();
+    await expect(session.desktopClick(OCR_ID_BASE + 1)).rejects.toThrow('not in last snapshot');
+    expect(ops(helper, 'clickAt')).toHaveLength(0);
   });
 
   it('text read by sight can only be clicked: other tools say so', async () => {

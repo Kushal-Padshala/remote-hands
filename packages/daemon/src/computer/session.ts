@@ -17,7 +17,7 @@ import type { View } from '../desktop/ax-model.js';
 import { abandonAwareGate } from './call-scope.js';
 import { DesktopEngine, type ClickAction, type ScrollDirection } from './desktop-engine.js';
 import { AxHelperClient, axHelperEnabledByDefault } from '../desktop/ax-helper.js';
-import { BLIND_NOTE, OCR_ID_BASE, looksBlind } from '../desktop/ocr-model.js';
+import { BLIND_NOTE, looksBlind } from '../desktop/ocr-model.js';
 
 export interface ComputerSessionDeps {
   desktop: Pick<
@@ -107,9 +107,11 @@ export class ComputerSession {
 
   async desktopSnapshot(app?: string, filter?: string, index?: number, ocr?: boolean): Promise<string> {
     const engine = this.deps.engine;
+    if (index !== undefined && !ocr) this.rejectSightId('desktop_snapshot with index', index);
+    // whatever happens next, text read by sight earlier is not to be clicked any more
+    engine?.dropOcr();
     if (ocr) return this.desktopSnapshotBySight(app, filter, index);
     if (index !== undefined) {
-      this.rejectSightId('desktop_snapshot with index', index);
       // reading one part of the latest window: the ids it names came from the fast reader
       const fast = this.activeEngine('desktop_snapshot with index');
       this.snapshotApp(app);
@@ -119,7 +121,6 @@ export class ComputerSession {
       return text;
     }
     if (engine) {
-      engine.dropOcr();
       const text = await engine.snapshot(app ?? '', filter ? { filter } : {});
       if (text !== null) {
         this.mode = 'engine';
@@ -150,14 +151,16 @@ export class ComputerSession {
     this.mode = 'engine';
     const front = engine.current()?.app || app || '';
     this.cache = { app: app || front, elements: [] };
-    const sight = await engine.readOcr(app ?? '', filter ? { filter } : {});
+    // pinned to the app the snapshot above just read, whatever is in front a moment later
+    const pid = engine.current()?.snapshot.app.pid;
+    const sight = await engine.readOcr(app ?? '', { ...(filter ? { filter } : {}), ...(pid !== undefined ? { pid } : {}) });
     if (sight === null) throw new Error(unavailable);
     return `${ax}\n${sight}`;
   }
 
   /** Text read by sight can only be clicked: say so, instead of "not in last snapshot". */
   private rejectSightId(tool: string, index: number): void {
-    if (index >= OCR_ID_BASE) {
+    if (this.deps.engine?.hasOcrItem(index)) {
       throw new Error(`[${index}] was read by sight, so ${tool} cannot use it: only desktop_click can. To type, click the field first, then call desktop_type without an index.`);
     }
   }
@@ -185,7 +188,8 @@ export class ComputerSession {
 
   async desktopClick(index: number, app?: string, action: ClickAction = 'press'): Promise<string> {
     const targetApp = this.snapshotApp(app);
-    if (index >= OCR_ID_BASE) return this.desktopClickBySight(index, targetApp, action);
+    if (this.deps.engine?.hasOcrItem(index)) return this.desktopClickBySight(index, targetApp, action);
+    this.deps.engine?.dropOcr();
     if (this.mode === 'engine' && this.deps.engine) {
       const engine = this.deps.engine;
       const item = engine.item(index);
@@ -227,14 +231,16 @@ export class ComputerSession {
     if (!engine || this.mode !== 'engine') throw new Error('Text read by sight can only be clicked with the fast reader, which is not available right now. Take a desktop_snapshot again.');
     const item = engine.ocrItem(index);
     const before = engine.current()?.view ?? null;
-    await this.deps.gate?.(item.text);
+    // judged on the whole text that was read, not the shortened line the model saw
+    await this.deps.gate?.(item.full);
     await engine.clickOcr(index, action);
     const verb = action === 'press' ? 'clicked' : action === 'open' ? 'opened' : action === 'menu' ? 'opened the menu of' : action === 'double' ? 'double-clicked' : 'right-clicked';
     const changed = await this.safeState(targetApp, before);
     let sight: string;
     try {
       // the window was drawn again by the click; what is shown now is read by sight again so the next click has fresh places
-      sight = (await engine.readOcr(targetApp, {})) ?? 'note: could not read the window by sight afterwards; call desktop_snapshot with ocr=true';
+      const pid = engine.ocrPid();
+      sight = (await engine.readOcr(targetApp, pid !== undefined ? { pid } : {})) ?? 'note: could not read the window by sight afterwards; call desktop_snapshot with ocr=true';
     } catch (err) {
       sight = `note: could not read the window by sight afterwards (${err instanceof Error ? err.message : String(err)}); call desktop_snapshot with ocr=true`;
     }
@@ -243,13 +249,15 @@ export class ComputerSession {
 
   async desktopType(text: string, app?: string, opts: { index?: number; replace?: boolean; submit?: boolean } = {}): Promise<string> {
     const { index, replace, submit } = opts;
+    if (index !== undefined) this.rejectSightId('desktop_type', index);
+    // typing changes the window, even if a later step of this call fails: the places read by sight before it are no longer to be trusted
+    this.deps.engine?.dropOcr();
     if (index === undefined) {
       if (replace) throw new Error('replace needs an index: say which field to replace.');
       await this.deps.desktop.typeText(text);
       if (submit) await this.deps.desktop.sendKeyCombo(['return'], []);
       return `typed ${text.length} characters${submit ? ' and pressed Return' : ''}\n${await this.safeState(app ?? (this.cache?.app || undefined))}`;
     }
-    this.rejectSightId('desktop_type', index);
     const targetApp = this.snapshotApp(app);
     const engine = this.activeEngine('desktop_type with an index');
     const item = engine.item(index);
@@ -284,6 +292,7 @@ export class ComputerSession {
 
   async desktopScroll(index: number, direction: ScrollDirection, amount: number, app?: string): Promise<string> {
     this.rejectSightId('desktop_scroll', index);
+    this.deps.engine?.dropOcr();
     const targetApp = this.snapshotApp(app);
     const engine = this.activeEngine('desktop_scroll');
     const item = engine.item(index);
@@ -313,6 +322,7 @@ export class ComputerSession {
   async desktopDrag(fromIndex: number, toIndex: number, app?: string): Promise<string> {
     this.rejectSightId('desktop_drag', fromIndex);
     this.rejectSightId('desktop_drag', toIndex);
+    this.deps.engine?.dropOcr();
     const targetApp = this.snapshotApp(app);
     const engine = this.activeEngine('desktop_drag');
     const from = engine.item(fromIndex);
@@ -324,6 +334,7 @@ export class ComputerSession {
   }
 
   async desktopKey(combo: string, app?: string): Promise<string> {
+    this.deps.engine?.dropOcr();
     const parts = combo
       .toLowerCase()
       .split('+')
@@ -343,12 +354,14 @@ export class ComputerSession {
   }
 
   async desktopOpen(app: string): Promise<string> {
+    this.deps.engine?.dropOcr();
     await this.deps.desktop.openApp(app);
     await this.deps.desktop.focusWindow(app).catch(() => {});
     return `opened ${app}\n${await this.safeState(app)}`;
   }
 
   async desktopMenu(app: string, query: string): Promise<string> {
+    this.deps.engine?.dropOcr();
     const res = await this.deps.menuSearch(app, query, undefined, this.deps.gate);
     if (!res.success) throw new Error(res.error ?? `No menu item matching "${query}" in ${app}`);
     return `menu ${(res.triggeredPath ?? []).join(' > ')}\n${await this.safeState(app)}`;

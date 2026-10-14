@@ -216,9 +216,10 @@ describe('plainSummary', () => {
       expect(lines(later).filter((l) => l === NOTICE)).toHaveLength(2);
     });
 
-    it('a click on text read by sight is announced like any click, by its words', () => {
-      const out = run([mcp('1', 'desktop_click', { index: 100003 }), done('1', 'clicked [100003] text "Play" (read by sight)\nread by sight (OCR) of Game window')]);
-      expect(lines(out)).toEqual(['Clicked "Play"']);
+    it('a click on text read by sight is announced with a fixed sentence, never with what the text said', () => {
+      const out = run([mcp('1', 'desktop_click', { index: 1000003 }), done('1', 'clicked [1000003] text "Secret account number 1234" (read by sight)\nread by sight (OCR) of Game window')]);
+      expect(lines(out)).toEqual(['Clicked some text on the screen']);
+      expect(JSON.stringify(out)).not.toMatch(/Secret|1234/);
     });
   });
 });

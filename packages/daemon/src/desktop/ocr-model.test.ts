@@ -44,7 +44,7 @@ describe('buildOcrView', () => {
   it('numbers lines from the base and gives the place in the window in percent', () => {
     const view = buildOcrView(reading([{ text: 'Play', x: 280, y: 340, width: 40, height: 20 }]));
     // middle: x 300, y 350 -> (300-100)/400 = 50%, (350-200)/300 = 50%
-    expect(view.items).toEqual([{ id: OCR_ID_BASE + 1, text: 'Play', x: 300, y: 350 }]);
+    expect(view.items).toEqual([{ id: OCR_ID_BASE + 1, text: 'Play', full: 'Play', x: 300, y: 350 }]);
     expect(view.text.split('\n')[1]).toBe(`[${OCR_ID_BASE + 1}] "Play" @50,50`);
     expect(view.text.startsWith(`${OCR_HEADER} of Game window "Lobby": 1 text line in 330 ms.`)).toBe(true);
     expect(view.byId.get(OCR_ID_BASE + 1)?.text).toBe('Play');
@@ -60,7 +60,15 @@ describe('buildOcrView', () => {
   it('cuts long text and keeps quotes from breaking the line', () => {
     const view = buildOcrView(reading([{ text: `say "hi" ${'x'.repeat(200)}`, x: 100, y: 200, width: 10, height: 10 }]));
     expect(view.items[0]!.text.length).toBeLessThanOrEqual(80);
-    expect(view.text.split('\n')[1]).toMatch(/^\[100001\] "say 'hi' x+…" @/);
+    expect(view.text.split('\n')[1]).toMatch(/^\[1000001\] "say 'hi' x+…" @/);
+  });
+
+  it('keeps the whole text for approval and the filter, and cuts only what is shown', () => {
+    const long = `${'a'.repeat(120)} Delete`;
+    const view = buildOcrView(reading([{ text: long, x: 100, y: 200, width: 10, height: 10 }]), { filter: 'delete' });
+    expect(view.items).toHaveLength(1);
+    expect(view.items[0]!.text.length).toBeLessThanOrEqual(80);
+    expect(view.items[0]!.full).toBe(long);
   });
 
   it('keeps places inside 0..100 even for text on the edge', () => {

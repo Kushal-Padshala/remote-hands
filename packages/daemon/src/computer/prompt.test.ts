@@ -126,7 +126,7 @@ describe('reading a window by sight in the prompts', () => {
     expect(snapshot.description).toMatch(/LAST RESORT/);
     expect(snapshot.description).toMatch(/slower/);
     expect(Object.keys(snapshot.inputSchema)).toContain('ocr');
-    expect(tools.find((t) => t.name === 'desktop_click')!.description).toMatch(/100001 and up/);
+    expect(tools.find((t) => t.name === 'desktop_click')!.description).toMatch(/1000001 and up/);
   });
 });
 

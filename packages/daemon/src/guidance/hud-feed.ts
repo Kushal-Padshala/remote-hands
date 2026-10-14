@@ -1,4 +1,5 @@
 import type { HudUpdateSender } from '../desktop/spotlight-hud.js';
+import { OCR_ID_BASE } from '../desktop/ocr-model.js';
 
 /**
  * What the HUD shows while the agent works: a short pill word ("READING", "CLICKING") and, for
@@ -233,6 +234,8 @@ function planMcp(name: string, args: Record<string, unknown>): Planned {
     case 'browser_do':
       return planBrowserDo(args);
     case 'desktop_click':
+      // text read by sight is whatever was on the screen: never quoted, however the result words it
+      if (typeof args.index === 'number' && args.index >= OCR_ID_BASE) return { pill: 'CLICKING', after: () => 'Clicked some text on the screen' };
       return {
         pill: 'CLICKING',
         after: (r) => {
