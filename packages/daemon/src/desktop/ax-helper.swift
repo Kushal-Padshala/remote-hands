@@ -1112,9 +1112,11 @@ func exitWhenIdle(waited: Int = 0) {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { exitWhenIdle(waited: waited + 1) }
 }
 
-func replyOcr(_ id: Any?, image: CGImage, frame: CGRect, app: [String: Any], title: String, windowId: Int, captureMs: Int, started: UInt64) {
+func replyOcr(_ id: Any?, image: CGImage, frame: CGRect, app: [String: Any], title: String, windowId: Int, filter: String, captureMs: Int, started: UInt64) {
     let visionStart = DispatchTime.now().uptimeNanoseconds
-    let seen = recognizeText(in: image)
+    var seen = recognizeText(in: image)
+    // A search is applied before the cap, so a word far down a very dense window can still be found.
+    if !filter.isEmpty { seen = seen.filter { $0.text.localizedCaseInsensitiveContains(filter) } }
     let ocrMs = Int((DispatchTime.now().uptimeNanoseconds - visionStart) / 1_000_000)
     var lines: [[String: Any]] = []
     for line in seen.prefix(maxSeenLines) {
@@ -1184,6 +1186,7 @@ func ocrCapture(_ id: Any?, _ request: [String: Any], _ started: UInt64) {
     // Display and capture calls abort the process unless it has joined the window server first (reading accessibility needs no such step).
     _ = NSApplication.shared
     let query = (request["app"] as? String) ?? ""
+    let searchText = ((request["filter"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     // The app is pinned by process id when the caller has one: "the front app" may be another one by the time this runs.
     var found: NSRunningApplication? = nil
     if let pinned = request["pid"] as? Int, pinned > 0 {
@@ -1252,7 +1255,7 @@ func ocrCapture(_ id: Any?, _ request: [String: Any], _ started: UInt64) {
             }
             let captureMs = Int((DispatchTime.now().uptimeNanoseconds - captureStart) / 1_000_000)
             DispatchQueue.global(qos: .userInitiated).async {
-                replyOcr(id, image: image, frame: frame, app: appInfo, title: title, windowId: Int(target.windowID), captureMs: captureMs, started: started)
+                replyOcr(id, image: image, frame: frame, app: appInfo, title: title, windowId: Int(target.windowID), filter: searchText, captureMs: captureMs, started: started)
                 endAsync()
             }
         }
@@ -1270,7 +1273,7 @@ func ocr(_ id: Any?, _ request: [String: Any]) {
             fail(id, "bad_request", "Bad fixture.")
             return
         }
-        replyOcr(id, image: image, frame: CGRect(x: x, y: y, width: width, height: height), app: ["name": "Fixture", "pid": 0, "bundle": ""], title: "", windowId: 0, captureMs: 0, started: started)
+        replyOcr(id, image: image, frame: CGRect(x: x, y: y, width: width, height: height), app: ["name": "Fixture", "pid": 0, "bundle": ""], title: "", windowId: 0, filter: (request["filter"] as? String) ?? "", captureMs: 0, started: started)
         return
     }
     guard AXIsProcessTrusted() else {
@@ -1288,21 +1291,18 @@ func ocr(_ id: Any?, _ request: [String: Any]) {
     fail(id, "unsupported", "Reading a window by sight needs macOS 14 or newer.")
 }
 
-/// The pointer overlay Remote Hands shows when it explains where something is: a transparent, click-through panel the size of a
-/// display, made by osascript. It takes no clicks. Nothing else is skipped: any other window above the target, including
-/// Remote Hands' own HUD, is something a click would land on.
-func isPointerOverlay(_ pid: pid_t, bounds: CGRect, layer: Int) -> Bool {
-    if layer <= 0 { return false }
+/// The process of the pointer overlay Remote Hands shows when it explains where something is: a transparent, click-through,
+/// display-sized panel made by an osascript it started and whose process id it wrote to ~/.remote-hands/desktop-overlay.pid.
+/// Its windows take no clicks. Nothing else is skipped: any other window above the target, including Remote Hands' own HUD and any
+/// other osascript, is something a click would land on.
+func pointerOverlayPid() -> pid_t? {
+    let file = NSString(string: "~/.remote-hands/desktop-overlay.pid").expandingTildeInPath
+    guard let content = try? String(contentsOfFile: file, encoding: .utf8),
+          let value = Int32(content.trimmingCharacters(in: .whitespacesAndNewlines)), value > 1 else { return nil }
+    // a recycled process id must not exempt an unrelated program
     var buffer = [CChar](repeating: 0, count: 4096)
-    guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0, String(cString: buffer) == "/usr/bin/osascript" else { return false }
-    var displays = [CGDirectDisplayID](repeating: 0, count: 16)
-    var count: UInt32 = 0
-    guard CGGetActiveDisplayList(UInt32(displays.count), &displays, &count) == .success else { return false }
-    for display in displays.prefix(Int(count)) {
-        let screen = CGDisplayBounds(display)
-        if abs(bounds.width - screen.width) <= 30 && abs(bounds.height - screen.height) <= 60 { return true }
-    }
-    return false
+    guard proc_pidpath(value, &buffer, UInt32(buffer.count)) > 0, String(cString: buffer) == "/usr/bin/osascript" else { return nil }
+    return value
 }
 
 /// The windows on screen, front to back, by number, owner and bounds. Floating panels and other layers are included, because
@@ -1310,6 +1310,7 @@ func isPointerOverlay(_ pid: pid_t, bounds: CGRect, layer: Int) -> Bool {
 func windowStack() -> [(number: Int, pid: pid_t, bounds: CGRect)] {
     guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
     var stack: [(number: Int, pid: pid_t, bounds: CGRect)] = []
+    let overlay = pointerOverlayPid()
     for entry in list {
         guard let number = entry[kCGWindowNumber as String] as? Int,
               let owner = entry[kCGWindowOwnerPID as String] as? Int,
@@ -1317,7 +1318,7 @@ func windowStack() -> [(number: Int, pid: pid_t, bounds: CGRect)] {
               let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary) else { continue }
         if let alpha = entry[kCGWindowAlpha as String] as? Double, alpha < 0.05 { continue }
         if pid_t(owner) == getpid() { continue }
-        if isPointerOverlay(pid_t(owner), bounds: bounds, layer: (entry[kCGWindowLayer as String] as? Int) ?? 0) { continue }
+        if let overlay = overlay, pid_t(owner) == overlay, ((entry[kCGWindowLayer as String] as? Int) ?? 0) > 0 { continue }
         stack.append((number, pid_t(owner), bounds))
     }
     return stack

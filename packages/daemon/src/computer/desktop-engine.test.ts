@@ -228,6 +228,12 @@ describe('DesktopEngine reading a window by sight', () => {
     expect(engine.ocrItem(1000001)).toMatchObject({ text: 'Hello', x: 125, y: 110 });
   });
 
+  it('sends the search to the helper, so it is applied before the helper caps the lines', async () => {
+    const helper = fake(() => reading);
+    await new DesktopEngine(helper).readOcr('Notes', { filter: 'hello', pid: 7 });
+    expect(helper.calls[0]).toEqual({ op: 'ocr', app: 'Notes', pid: 7, filter: 'hello' });
+  });
+
   it('forgets the text on dropOcr, so a click on it is refused', async () => {
     const engine = new DesktopEngine(fake(() => reading));
     await engine.readOcr('Notes');

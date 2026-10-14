@@ -165,7 +165,7 @@ export class DesktopEngine {
     let reading: OcrReading;
     try {
       // pinned to the process of the Accessibility snapshot: "the front app" may be another app by now
-      reading = await this.helper.request<OcrReading>({ op: 'ocr', app, ...(opts.pid !== undefined ? { pid: opts.pid } : {}) }, OCR_TIMEOUT_MS);
+      reading = await this.helper.request<OcrReading>({ op: 'ocr', app, ...(opts.pid !== undefined ? { pid: opts.pid } : {}), ...(opts.filter ? { filter: opts.filter } : {}) }, OCR_TIMEOUT_MS);
     } catch (err) {
       if (err instanceof AxHelperError) {
         if (err.code === 'no_app') return null;
