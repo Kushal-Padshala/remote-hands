@@ -83,7 +83,8 @@ main() {
   printf '\n'
   # Piped from curl, this script owns the keyboard input; the questions must be read from the real terminal.
   if ( : </dev/tty ) 2>/dev/null; then
-    if "$NODE_BIN" "$CLI_ENTRY" setup --hud </dev/tty; then
+    # agy installs into ~/.local/bin, which a new Mac's PATH does not list yet; the private Node's npx must be found too
+    if PATH="${NODE_DIR}/bin:${BIN_DIR}:${HOME}/.local/bin:${PATH}" "$NODE_BIN" "$CLI_ENTRY" setup --hud </dev/tty; then
       printf '\nSetup finished. To check that everything is ready, open a new Terminal window and type:  rh doctor\n'
     else
       printf '\nSetup did not finish. Fix what it says above, then run:  rh setup --hud\n' >&2
@@ -140,13 +141,19 @@ install_node() {
   trap - EXIT INT TERM
 }
 
-# Launchers that always run Remote Hands with its own Node.js, whatever else is installed or first on PATH.
+# Launchers that always run Remote Hands with its own Node.js, whatever else is installed or first on PATH. The private Node's
+# folder is put on PATH for what Remote Hands starts (npx for the phone setup), but not for the person's own shell.
 write_launchers() {
   for name in rh remote-hands rh-browser; do
+    # rh-browser is the same program started as "rh browser" (it used to find that out from its own file name)
+    extra=""
+    if [ "$name" = "rh-browser" ]; then extra=" browser"; fi
     {
       printf '#!/bin/sh\n'
       printf '# Written by the Remote Hands installer.\n'
-      printf 'exec "$HOME/.remote-hands/node/bin/node" "$HOME/.remote-hands/npm/lib/node_modules/remote-hands-cli/dist/index.js" "$@"\n'
+      printf 'PATH="$HOME/.remote-hands/node/bin:$PATH"\n'
+      printf 'export PATH\n'
+      printf 'exec "$HOME/.remote-hands/node/bin/node" "$HOME/.remote-hands/npm/lib/node_modules/remote-hands-cli/dist/index.js"%s "$@"\n' "$extra"
     } > "$BIN_DIR/$name"
     chmod 755 "$BIN_DIR/$name"
   done

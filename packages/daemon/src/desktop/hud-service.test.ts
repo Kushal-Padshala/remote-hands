@@ -85,15 +85,88 @@ describe('HudServiceManager', () => {
       const nodeDir = path.dirname(process.execPath);
       const found = spawnSync('/bin/sh', [script], { env: { HOME: home, PATH: `${nodeDir}:/usr/bin:/bin` }, encoding: 'utf-8' });
       expect(found.stdout.trim()).toBe('ok');
-      // with no Node anywhere (and none at the fixed Homebrew places) it fails loudly with exit 78
-      if (!fs.existsSync('/opt/homebrew/bin/node') && !fs.existsSync('/usr/local/bin/node')) {
-        const none = spawnSync('/bin/sh', [script], { env: { HOME: home, PATH: '/usr/bin:/bin' }, encoding: 'utf-8' });
-        expect(none.status).toBe(78);
-        expect(none.stderr).toContain('Node.js was not found');
-      }
+      // with no Node anywhere it fails loudly with exit 78 (the fixed Homebrew places are left out so this holds on any Mac)
+      fs.writeFileSync(script, generateHudLauncherScript([]), { mode: 0o755 });
+      const none = spawnSync('/bin/sh', [script], { env: { HOME: home, PATH: '/usr/bin:/bin' }, encoding: 'utf-8' });
+      expect(none.status).toBe(78);
+      expect(none.stderr).toContain('suitable Node.js');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
+  });
+
+  describe('launcher picks a Node new enough for the CLI', () => {
+    function fakeNode(file: string, version: string): void {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, `#!/bin/sh\nif [ "$1" = "--version" ]; then echo ${version}; else echo "RAN ${version}"; fi\n`, { mode: 0o755 });
+    }
+    function run(setup: (home: string) => void, pathEnv = '/usr/bin:/bin'): { out: string; status: number | null; err: string } {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-launch-'));
+      try {
+        fs.mkdirSync(path.join(home, '.remote-hands', 'cli'), { recursive: true });
+        fs.writeFileSync(path.join(home, '.remote-hands', 'cli', 'index.js'), '');
+        setup(home);
+        const script = path.join(home, 'launch.sh');
+        fs.writeFileSync(script, generateHudLauncherScript([]), { mode: 0o755 });
+        const res = spawnSync('/bin/sh', [script], { env: { HOME: home, PATH: pathEnv }, encoding: 'utf-8' });
+        return { out: res.stdout.trim(), status: res.status, err: res.stderr };
+      } finally {
+        fs.rmSync(home, { recursive: true, force: true });
+      }
+    }
+
+    it('skips a remembered Node that is too old and uses the next one that is new enough', () => {
+      const r = run((home) => {
+        fakeNode(path.join(home, 'old', 'node'), 'v20.19.0');
+        fs.writeFileSync(path.join(home, '.remote-hands', 'node-path'), path.join(home, 'old', 'node'));
+        fakeNode(path.join(home, '.remote-hands', 'node', 'bin', 'node'), 'v22.13.0');
+      });
+      expect(r.out).toBe('RAN v22.13.0');
+    });
+
+    it('rejects 22.12 and 23.3 (no node:sqlite without a flag) and takes 23.4', () => {
+      for (const [version, ok] of [['v22.12.9', false], ['v23.3.0', false], ['v23.4.0', true], ['v24.0.0', true]] as const) {
+        const r = run((home) => fakeNode(path.join(home, '.remote-hands', 'node', 'bin', 'node'), version));
+        if (ok) expect(r.out).toBe(`RAN ${version}`);
+        else expect(r.status).toBe(78);
+      }
+    });
+
+    it('with several nvm versions, takes the newest one that is new enough', () => {
+      const r = run((home) => {
+        for (const v of ['v20.1.0', 'v22.14.0', 'v24.1.0', 'v18.0.0']) fakeNode(path.join(home, '.nvm', 'versions', 'node', v, 'bin', 'node'), v);
+      });
+      expect(r.out).toBe('RAN v24.1.0');
+    });
+
+    it('works when the home folder has a space in its name', () => {
+      const r = run((home) => {
+        const spaced = path.join(home, 'with space');
+        fakeNode(path.join(spaced, 'node'), 'v22.20.0');
+        fs.writeFileSync(path.join(home, '.remote-hands', 'node-path'), path.join(spaced, 'node'));
+      });
+      expect(r.out).toBe('RAN v22.20.0');
+    });
+
+    it('puts the Remote Hands bin folder on PATH for what the HUD starts (rh approve, agy in ~/.local/bin)', () => {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-launch-'));
+      try {
+        fs.mkdirSync(path.join(home, '.remote-hands', 'cli'), { recursive: true });
+        const node = path.join(home, '.remote-hands', 'node', 'bin', 'node');
+        fs.mkdirSync(path.dirname(node), { recursive: true });
+        // a "node" that prints the PATH it was started with
+        fs.writeFileSync(node, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo v22.20.0; else echo "$PATH"; fi\n', { mode: 0o755 });
+        const script = path.join(home, 'launch.sh');
+        fs.writeFileSync(script, generateHudLauncherScript([]), { mode: 0o755 });
+        const res = spawnSync('/bin/sh', [script], { env: { HOME: home, PATH: '/usr/bin:/bin' }, encoding: 'utf-8' });
+        const parts = res.stdout.trim().split(':');
+        expect(parts).toContain(path.join(home, '.remote-hands', 'bin'));
+        expect(parts).toContain(path.join(home, '.local', 'bin'));
+        expect(parts[0]).toBe(path.dirname(node));
+      } finally {
+        fs.rmSync(home, { recursive: true, force: true });
+      }
+    });
   });
 
   it('uses the stable Homebrew link instead of the versioned Cellar path', () => {

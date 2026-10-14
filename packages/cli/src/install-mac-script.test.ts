@@ -41,7 +41,9 @@ describe('scripts/install-mac.sh', () => {
   });
 
   it('reads the setup answers from the real terminal, since its own input is the download', () => {
-    expect(code).toContain('setup --hud </dev/tty');
+    expect(code).toContain('"$NODE_BIN" "$CLI_ENTRY" setup --hud </dev/tty');
+    // agy's folder and the private Node's npx are on PATH for it, even on a Mac whose PATH does not list them yet
+    expect(code).toContain('PATH="${NODE_DIR}/bin:${BIN_DIR}:${HOME}/.local/bin:${PATH}"');
   });
 
   it('keeps its own Node and package under ~/.remote-hands and never trusts the machine\'s node or npm settings', () => {
@@ -59,6 +61,45 @@ describe('scripts/install-mac.sh', () => {
 
   it('adds itself to the shell startup files once, however often it runs', () => {
     expect(code).toContain("grep -Fq '# remote-hands'");
+  });
+
+  describe('the launchers it writes, run for real', () => {
+    function install(): { home: string; bin: string } {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'install-mac-'));
+      const bin = path.join(home, '.remote-hands', 'bin');
+      fs.mkdirSync(bin, { recursive: true });
+      const fn = script.slice(script.indexOf('write_launchers() {'), script.indexOf('# Puts ~/.remote-hands/bin first on PATH'));
+      const res = spawnSync('/bin/sh', ['-c', `HOME='${home}'\nBIN_DIR='${bin}'\n${fn}\nwrite_launchers`], { encoding: 'utf-8' });
+      expect(res.status).toBe(0);
+      // a stand-in for the private Node that reports how it was started
+      const nodeBin = path.join(home, '.remote-hands', 'node', 'bin');
+      fs.mkdirSync(nodeBin, { recursive: true });
+      fs.writeFileSync(path.join(nodeBin, 'node'), '#!/bin/sh\necho "ARGS:$*"\necho "PATH:$PATH"\n', { mode: 0o755 });
+      return { home, bin };
+    }
+
+    it('rh and remote-hands pass the arguments straight through, with the private Node first on PATH', () => {
+      const { home, bin } = install();
+      try {
+        for (const name of ['rh', 'remote-hands']) {
+          const res = spawnSync(path.join(bin, name), ['doctor', '--x'], { env: { HOME: home, PATH: '/usr/bin:/bin' }, encoding: 'utf-8' });
+          expect(res.stdout).toContain('index.js doctor --x');
+          expect(res.stdout).toContain(`PATH:${path.join(home, '.remote-hands', 'node', 'bin')}:`);
+        }
+      } finally {
+        fs.rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it('rh-browser runs the browser command, since the program can no longer tell from its own name', () => {
+      const { home, bin } = install();
+      try {
+        const res = spawnSync(path.join(bin, 'rh-browser'), ['tabs'], { env: { HOME: home, PATH: '/usr/bin:/bin' }, encoding: 'utf-8' });
+        expect(res.stdout).toContain('index.js browser tabs');
+      } finally {
+        fs.rmSync(home, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('node_ok version rules, run for real', () => {

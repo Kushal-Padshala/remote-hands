@@ -24,6 +24,12 @@ const realRun = (command: string, args: string[]): { status: number | null; stdo
   return { status: res.status, stdout: res.stdout || '' };
 };
 
+/** Where the Swift compiler sits under the active developer directory: Command Line Tools keep it directly, full Xcode in its toolchain. */
+const SWIFTC_LOCATIONS = [
+  ['usr', 'bin', 'swiftc'],
+  ['Toolchains', 'XcodeDefault.xctoolchain', 'usr', 'bin', 'swiftc'],
+];
+
 /** True when a Swift compiler exists in the active developer directory (Command Line Tools or Xcode). */
 export function hasCommandLineTools(deps: XcodeToolsDeps = {}): boolean {
   if ((deps.platform ?? process.platform) !== 'darwin') return true;
@@ -32,7 +38,7 @@ export function hasCommandLineTools(deps: XcodeToolsDeps = {}): boolean {
   try {
     const res = run('xcode-select', ['-p']);
     const dir = res.stdout.trim();
-    return res.status === 0 && dir !== '' && exists(path.join(dir, 'usr', 'bin', 'swiftc'));
+    return res.status === 0 && dir !== '' && SWIFTC_LOCATIONS.some((parts) => exists(path.join(dir, ...parts)));
   } catch {
     return false;
   }

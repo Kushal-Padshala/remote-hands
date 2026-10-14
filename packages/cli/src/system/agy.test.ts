@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { AGY_WINDOWS_INSTALL, agyRunOptions, agyShellCommand, locateAgy } from './agy.js';
+import { AGY_WINDOWS_INSTALL, agyRunOptions, agyShellCommand, findAgyInKnownFolders, locateAgy, putOnPath } from './agy.js';
 
 const runner = (result: { exitCode: number; stdout: string; stderr?: string }) => async () => ({ stderr: '', ...result });
 
 describe('locateAgy', () => {
   it('asks which on Mac and Linux', async () => {
     expect(await locateAgy(runner({ exitCode: 0, stdout: '/usr/local/bin/agy\n' }), 'darwin')).toBe('/usr/local/bin/agy');
-    expect(await locateAgy(runner({ exitCode: 1, stdout: '' }), 'linux')).toBeUndefined();
-    expect(await locateAgy(runner({ exitCode: 0, stdout: '   ' }), 'darwin')).toBeUndefined();
+    expect(await locateAgy(runner({ exitCode: 1, stdout: '' }), 'linux', undefined, () => undefined)).toBeUndefined();
+    expect(await locateAgy(runner({ exitCode: 0, stdout: '   ' }), 'darwin', undefined, () => undefined)).toBeUndefined();
+  });
+
+  it('falls back to the folders agy installs into when which cannot see it (a fresh Mac has no ~/.local/bin on PATH yet)', async () => {
+    expect(await locateAgy(runner({ exitCode: 1, stdout: '' }), 'darwin', undefined, () => '/Users/x/.local/bin/agy')).toBe('/Users/x/.local/bin/agy');
+    // which still wins when it knows
+    expect(await locateAgy(runner({ exitCode: 0, stdout: '/opt/homebrew/bin/agy' }), 'darwin', undefined, () => '/Users/x/.local/bin/agy')).toBe('/opt/homebrew/bin/agy');
   });
 
   it('looks in the places Windows keeps programs, never running which', async () => {
@@ -42,5 +48,27 @@ describe('the Windows install command', () => {
     expect(script.startsWith('"') && script.endsWith('"')).toBe(true);
     expect(script).toContain('irm https://antigravity.google/cli/install.ps1 | iex');
     expect(AGY_WINDOWS_INSTALL.args.slice(0, 4)).toEqual(['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command']);
+  });
+});
+
+describe('findAgyInKnownFolders and putOnPath', () => {
+  it('looks in ~/.local/bin first, then Homebrew, and ignores what is not an executable file', () => {
+    const seen: string[] = [];
+    expect(findAgyInKnownFolders('/Users/x', (f) => { seen.push(f); return f === '/opt/homebrew/bin/agy'; })).toBe('/opt/homebrew/bin/agy');
+    expect(seen).toEqual(['/Users/x/.local/bin/agy', '/opt/homebrew/bin/agy']);
+    expect(findAgyInKnownFolders('/Users/x', () => false)).toBeUndefined();
+  });
+
+  it('adds the folder of a full path to PATH once, and leaves a plain name alone', () => {
+    const env: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin' };
+    putOnPath('/Users/x/.local/bin/agy', env);
+    expect(env.PATH).toBe('/Users/x/.local/bin:/usr/bin:/bin');
+    putOnPath('/Users/x/.local/bin/agy', env);
+    expect(env.PATH).toBe('/Users/x/.local/bin:/usr/bin:/bin');
+    putOnPath('agy', env);
+    expect(env.PATH).toBe('/Users/x/.local/bin:/usr/bin:/bin');
+    const empty: NodeJS.ProcessEnv = {};
+    putOnPath('/a/agy', empty);
+    expect(empty.PATH).toBe('/a');
   });
 });

@@ -7,7 +7,14 @@ describe('Command Line Tools check', () => {
   it('is satisfied when the active developer directory holds swiftc', () => {
     const seen: string[] = [];
     expect(hasCommandLineTools({ ...present, exists: (f) => { seen.push(f); return true; } })).toBe(true);
-    expect(seen).toEqual(['/Library/Developer/CommandLineTools/usr/bin/swiftc']);
+    expect(seen[0]).toBe('/Library/Developer/CommandLineTools/usr/bin/swiftc');
+  });
+
+  it('also accepts a full Xcode, which keeps swiftc inside its toolchain', () => {
+    const xcode = '/Applications/Xcode.app/Contents/Developer';
+    const real = '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc';
+    expect(hasCommandLineTools({ run: () => ({ status: 0, stdout: `${xcode}\n` }), exists: (f) => f === real, platform: 'darwin' })).toBe(true);
+    expect(hasCommandLineTools({ run: () => ({ status: 0, stdout: `${xcode}\n` }), exists: () => false, platform: 'darwin' })).toBe(false);
   });
 
   it('is not satisfied when xcode-select has no directory, or the compiler is missing there', () => {

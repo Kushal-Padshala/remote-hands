@@ -681,6 +681,42 @@ describe('Setup Command Flow', () => {
       }
     });
 
+    describe('which permissions are required', () => {
+      if (process.platform !== 'darwin') return;
+      const calls: Array<{ fullDiskAccessOptional?: boolean | undefined }> = [];
+      const macPermissions = (async (_out: unknown, _w: unknown, options: { fullDiskAccessOptional?: boolean } = {}) => {
+        calls.push(options);
+        return true;
+      }) as never;
+      const base = { runner: hudRunner([]), fs: mockFs, projectRoot: '/project', hudServiceManager: { install: () => ({ success: true, plistPath: '/mock.plist' }) }, browserSetup: readyBrowserSetup([]), isTTY: false, macPermissions, stdout: () => {} };
+
+      it('Full Disk Access is optional for the desktop HUD', async () => {
+        calls.length = 0;
+        await setupCommand(['--hud'], base as never);
+        expect(calls).toEqual([{ fullDiskAccessOptional: true }]);
+      });
+
+      it('Full Disk Access stays required for remote use (unattended work needs it)', async () => {
+        calls.length = 0;
+        const runner = async (cmd: string, args: string[]) => {
+          if (cmd === 'which') return { exitCode: 0, stdout: '/bin/x', stderr: '' };
+          if (args.includes('whoami')) return { exitCode: 0, stdout: 'Logged in as user@example.com', stderr: '' };
+          if (args.includes('d1') && args.includes('create')) return { exitCode: 0, stdout: JSON.stringify({ database_id: 'id', database_name: 'remote-hands-db' }), stderr: '' };
+          if (args[0] === 'deploy' || (args.includes('pages') && args.includes('deploy'))) return { exitCode: 0, stdout: 'Deployed to https://x.workers.dev', stderr: '' };
+          return { exitCode: 0, stdout: '', stderr: '' };
+        };
+        const files: Record<string, string> = { '/project/apps/cloudflare/wrangler.jsonc': '{"d1_databases": [{"database_id": "x"}]}', '/config/config.json': '{}' };
+        await setupCommand(['--remote'], {
+          ...base,
+          runner,
+          fs: { readFile: async (p: string) => files[p] ?? '', writeFile: async (p: string, c: string) => { files[p] = c; }, exists: async (p: string) => p in files },
+          fetchFn: (async () => new Response(JSON.stringify({ ok: true, owner_id: '11111111-1111-4111-8111-111111111111', token_id: '22222222-2222-4222-8222-222222222222', pairing_code: 'RH-AAAA-BBBB-CCCC', expires_at: new Date(Date.now() + 600000).toISOString() }), { status: 200 })) as unknown as typeof fetch,
+          configDir: '/config',
+        } as never);
+        expect(calls).toEqual([{ fullDiskAccessOptional: false }]);
+      });
+    });
+
     describe('Command Line Tools', () => {
       if (process.platform !== 'darwin') return;
       const base = { runner: hudRunner([]), fs: mockFs, projectRoot: '/project', hudServiceManager: { install: () => ({ success: true, plistPath: '/mock.plist' }) }, browserSetup: readyBrowserSetup([]), isTTY: false };
@@ -796,6 +832,21 @@ describe('Setup Command Flow', () => {
         const { out, ctx } = make({ verifyMacHud: async () => null });
         expect(await setupCommand(['--hud'], ctx as never)).toBe(0);
         expect(out.join('\n')).toContain('has not reported its permissions yet');
+        expect(out.join('\n')).not.toContain('Desktop HUD is ready');
+        expect(out.join('\n')).toContain('rh doctor');
+      });
+
+      it('lists every problem and never says the shortcut works when it failed or is unconfirmed', async () => {
+        for (const shortcut of [{ state: 'failed' }, null] as const) {
+          const { out, ctx } = make({ verifyMacHud: async () => report(false) });
+          (ctx.hudServiceManager as { waitForHotkey?: unknown }).waitForHotkey = vi.fn().mockResolvedValue(shortcut);
+          expect(await setupCommand(['--hud'], ctx as never)).toBe(0);
+          const text = out.join('\n');
+          expect(text).toContain('Screen Recording is not switched on');
+          expect(text).toContain(shortcut ? 'Raycast' : 'shortcut is not confirmed');
+          expect(text).not.toMatch(/works\b/);
+          expect(text).not.toContain('Desktop HUD is ready');
+        }
       });
     });
 

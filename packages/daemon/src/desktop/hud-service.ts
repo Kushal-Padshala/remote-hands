@@ -47,21 +47,43 @@ export function getHudPlistPath(): string {
  * the plist breaks the HUD silently as soon as Node moves (nvm, `brew upgrade node`). The Node setup ran under comes first,
  * because that is the program macOS permissions (Screen Recording) were given to.
  */
-export function generateHudLauncherScript(): string {
+export function generateHudLauncherScript(fixedLocations: string[] = ['/opt/homebrew/bin/node', '/usr/local/bin/node']): string {
   return `#!/bin/sh
 # Starts the Remote Hands HUD. Written by "rh hud install"; do not edit.
 RH="$HOME/.remote-hands"
+
+# The CLI needs node:sqlite without a flag: Node 22.13+, 23.4+ or 24+. A Node that is too old is skipped, not used.
+node_ok() {
+  [ -n "$1" ] && [ -x "$1" ] || return 1
+  v="$("$1" --version 2>/dev/null)" || return 1
+  v="\${v#v}"
+  maj="\${v%%.*}"
+  r="\${v#*.}"
+  min="\${r%%.*}"
+  case "$maj" in ''|*[!0-9]*) return 1 ;; esac
+  case "$min" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$maj" -ge 24 ] && return 0
+  [ "$maj" -eq 23 ] && [ "$min" -ge 4 ] && return 0
+  [ "$maj" -eq 22 ] && [ "$min" -ge 13 ] && return 0
+  return 1
+}
+
 NODE=""
-for candidate in "$(cat "$RH/node-path" 2>/dev/null)" "$RH/node/bin/node" /opt/homebrew/bin/node /usr/local/bin/node; do
-  if [ -n "$candidate" ] && [ -x "$candidate" ]; then NODE="$candidate"; break; fi
+for candidate in "$(cat "$RH/node-path" 2>/dev/null)" "$RH/node/bin/node"${fixedLocations.map((l) => ` "${l}"`).join('')} "$(command -v node 2>/dev/null)"; do
+  if node_ok "$candidate"; then NODE="$candidate"; break; fi
 done
-if [ -z "$NODE" ]; then NODE="$(command -v node 2>/dev/null)"; fi
-if [ -z "$NODE" ]; then NODE="$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V | tail -1)"; fi
-if [ -z "$NODE" ] || [ ! -x "$NODE" ]; then
-  echo "Remote Hands: Node.js was not found. Run: rh hud install" >&2
+if [ -z "$NODE" ]; then
+  while IFS= read -r candidate; do
+    if node_ok "$candidate"; then NODE="$candidate"; break; fi
+  done <<NVM_NODES
+$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -rV)
+NVM_NODES
+fi
+if [ -z "$NODE" ]; then
+  echo "Remote Hands: a suitable Node.js (22.13 or newer) was not found. Run: rh hud install" >&2
   exit 78
 fi
-PATH="$(dirname "$NODE"):$HOME/.local/bin:$PATH"
+PATH="$(dirname "$NODE"):$RH/bin:$HOME/.local/bin:$PATH"
 export PATH
 exec "$NODE" "$RH/cli/index.js" hud listen
 `;

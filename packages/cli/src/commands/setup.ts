@@ -67,7 +67,7 @@ import { defaultAsk } from './browser-setup.js';
 import { beginCommandLineTools, type CommandLineToolsHandle } from '../system/xcode-tools.js';
 import { waitForMacHudStatus, type MacHudStatus } from '../system/hud-mac-status.js';
 import { openMacPrivacySettings } from '../system/mac-permissions.js';
-import { AGY_WINDOWS_INSTALL, agyRunOptions, agyShellCommand, locateAgy } from '../system/agy.js';
+import { AGY_WINDOWS_INSTALL, agyRunOptions, agyShellCommand, locateAgy as locateAgyOn, putOnPath } from '../system/agy.js';
 import { mcpCommand } from './mcp.js';
 
 export interface CommandContext {
@@ -106,6 +106,8 @@ export interface CommandContext {
   browserSetupOffer?: (() => Promise<void>) | undefined;
   /** Starts the Apple Command Line Tools install on a Mac that lacks them (tests replace it; a mocked run skips the step). */
   beginCommandLineTools?: ((out: (message: string) => void) => CommandLineToolsHandle) | undefined;
+  /** The macOS permission walk-through (tests replace it to see how setup calls it; a mocked run otherwise skips the step). */
+  macPermissions?: typeof ensureMacPermissions | undefined;
   /** Reads what the background HUD says about its own permissions after it starts (tests replace it; a mocked run skips the check). */
   verifyMacHud?: (() => Promise<MacHudStatus | null>) | undefined;
   /** Prompt used by `rh setup` to ask what to set up (tests). */
@@ -124,7 +126,11 @@ async function setupAgentAndPermissions(
   stderr: (msg: string) => void,
   stepNum: number,
   totalSteps: number,
+  /** The desktop HUD only needs Full Disk Access to avoid a few pop-ups; unattended remote use needs it for real. */
+  fullDiskAccessOptional = false,
 ): Promise<number | null> {
+  // With a mocked runner the real folders are not searched, so a developer's own agy never changes what a test sees
+  const locateAgy = (r: CommandRunner) => (context.runner ? locateAgyOn(r, undefined, undefined, () => undefined) : locateAgyOn(r));
   stdout(renderStepStart(stepNum, totalSteps, 'AI Coding Agent (agy)'));
   // A Mac without Apple's Command Line Tools starts their (long) download now, while the agent is set up below
   let commandLineTools: CommandLineToolsHandle | undefined;
@@ -174,6 +180,8 @@ async function setupAgentAndPermissions(
   } else {
     stdout(renderStepInfo(`agy found at ${agyFound}`));
   }
+  // Found by full path (a fresh install is not on this window's PATH yet): the name `agy` must work for everything that follows
+  if (agyPath && !context.runner && process.platform !== 'win32') putOnPath(agyPath);
   // On Windows the full path (a new terminal is not needed for it); elsewhere the plain name, as always.
   const agy = agyShellCommand(agyPath);
   // Windows: the program is run directly, not through a shell
@@ -235,9 +243,11 @@ async function setupAgentAndPermissions(
     return 1;
   }
 
-  if (process.platform === 'darwin' && !context.runner && !args.includes('--skip-permissions')) {
-    stdout(renderStepAction('Verifying macOS system permissions (Screen Recording, Full Disk Access, Accessibility)...'));
-    await ensureMacPermissions((msg) => stdout(msg), 74, { fullDiskAccessOptional: true });
+  if (process.platform === 'darwin' && (!context.runner || context.macPermissions) && !args.includes('--skip-permissions')) {
+    stdout(renderStepAction(fullDiskAccessOptional
+      ? 'Verifying macOS system permissions (Screen Recording, Accessibility)...'
+      : 'Verifying macOS system permissions (Screen Recording, Full Disk Access, Accessibility)...'));
+    await (context.macPermissions ?? ensureMacPermissions)((msg) => stdout(msg), 74, { fullDiskAccessOptional });
   }
 
   return null;
@@ -280,7 +290,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     const LOCAL_STEPS = 4;
     stdout(renderBanner());
 
-    const agyErr = await setupAgentAndPermissions(args, context, runner, fs, projectRoot, stdout, stderr, 1, LOCAL_STEPS);
+    const agyErr = await setupAgentAndPermissions(args, context, runner, fs, projectRoot, stdout, stderr, 1, LOCAL_STEPS, true);
     if (agyErr !== null) return agyErr;
 
     stdout(renderStepStart(2, LOCAL_STEPS, 'Browser Automation Engine (browser-use)'));
@@ -677,7 +687,7 @@ async function hudSetupFlow(
   const TOTAL = windows ? 5 : 4;
   stdout(renderBanner());
 
-  const agyErr = await setupAgentAndPermissions(args, context, runner, fs, projectRoot, stdout, stderr, 1, TOTAL);
+  const agyErr = await setupAgentAndPermissions(args, context, runner, fs, projectRoot, stdout, stderr, 1, TOTAL, true);
   if (agyErr !== null) return agyErr;
 
   stdout(renderStepStart(2, TOTAL, 'Computer-use tools for the agent'));
@@ -725,6 +735,7 @@ async function hudSetupFlow(
   let helperError: string | null = null;
   let unconfirmed = false;
   let screenMissing = false;
+  let permissionUnknown = false;
   let shortcutNote: string | null = null;
   if (process.platform !== 'darwin' && process.platform !== 'win32') {
     stdout(renderStepInfo('The desktop HUD hotkey service is supported on macOS and Windows.'));
@@ -757,6 +768,7 @@ async function hudSetupFlow(
         );
         if (outcome === 'ok') stdout(renderStepSuccess('The background HUD can use Screen Recording'));
         if (outcome === 'missing') screenMissing = true;
+        if (outcome === 'unknown') permissionUnknown = true;
       }
       // Say whether the HUD really holds its shortcut before telling the person to press it
       const wait = (hudService as { waitForHotkey?: (timeoutMs?: number) => Promise<{ state: string } | null> }).waitForHotkey;
@@ -791,17 +803,20 @@ async function hudSetupFlow(
     stdout(renderStepInfo('Desktop HUD is installed but the hotkey will not work yet (see above).'));
     return 1;
   }
-  if (screenMissing) {
-    stdout(renderStepInfo(`Desktop HUD is installed and ${hudHotkeyLabel()} works, but tasks that need to see the screen will not until Screen Recording is switched on for the program above.`));
-    stdout(renderStepInfo('When it is, run "rh hud install" to restart the HUD, then check with "rh doctor".'));
-    return 0;
-  }
-  if (shortcutNote) {
-    stdout(renderStepInfo(`Desktop HUD is installed, but ${shortcutNote}.`));
-    return 0;
-  }
-  if (unconfirmed) {
+  // "Ready" is claimed only when nothing is unconfirmed: every problem found is listed, none hides another
+  const problems: string[] = [];
+  if (screenMissing) problems.push('Screen Recording is not switched on for the background HUD (see above), so tasks that need to see the screen will not work yet; when it is, run "rh hud install" to restart the HUD');
+  if (permissionUnknown) problems.push('the background HUD has not reported its permissions yet');
+  if (shortcutNote) problems.push(shortcutNote);
+  if (unconfirmed) problems.push('its shortcut is not confirmed yet');
+  if (problems.length === 1 && unconfirmed) {
     stdout(renderStepInfo('Desktop HUD is installed, but its shortcut is not confirmed yet. Give it a minute, then check with "rh doctor".'));
+    return 0;
+  }
+  if (problems.length > 0) {
+    stdout(renderStepInfo('Desktop HUD is installed, but not everything is confirmed:'));
+    for (const p of problems) stdout(renderStepInfo(`  - ${p}`));
+    stdout(renderStepInfo('Check again any time with "rh doctor".'));
     return 0;
   }
   stdout(renderStepSuccess('Desktop HUD is ready'));
