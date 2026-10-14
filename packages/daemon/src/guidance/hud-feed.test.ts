@@ -209,6 +209,13 @@ describe('plainSummary', () => {
       expect(lines(out)).toEqual([NOTICE]);
     });
 
+    it('a batch with a click on text read by sight says so up front too', () => {
+      const batch = (steps: unknown[]) => ({ kind: 'tool_call', payload: { tool: 'call_mcp_tool', call_id: 'b', input: { ServerName: 'rh-computer', ToolName: 'computer_batch', Arguments: { steps } } } });
+      const click = run([batch([{ tool: 'desktop_click', args: { index: 1000001 } }])]);
+      expect(lines(click)).toEqual(['Clicking, then reading the window again by sight. This takes a moment.']);
+      expect(lines(run([batch([{ tool: 'desktop_click', args: { index: 12 } }, { tool: 'desktop_key', args: { combo: 'tab' } }])]))).toEqual([]);
+    });
+
     it('does not repeat the notice twice in a row, but says it again for a later slow read', () => {
       const twice = run([mcp('1', 'desktop_snapshot', { ocr: true }), mcp('2', 'desktop_snapshot', { ocr: true })]);
       expect(lines(twice).filter((l) => l === NOTICE)).toHaveLength(1);

@@ -39,8 +39,9 @@ describe.skipIf(!process.env.RH_LIVE_AX)('rh-ax against a real app (read only)',
 });
 
 // The picture-reading part of the helper on a fixed image (no screen capture, no Screen Recording permission):
-//   RH_LIVE_AX=1 RH_AX_BIN=/path/to/rh-ax RH_AX_FIXTURE=/path/to/screenshot.png npx vitest run packages/daemon/src/desktop/ax-helper.live.test.ts
-describe.skipIf(!process.env.RH_LIVE_AX || !process.env.RH_AX_FIXTURE)('rh-ax reads text from a picture', () => {
+//   RH_LIVE_AX=1 RH_AX_OCR_FIXTURE=1 RH_AX_BIN=/path/to/rh-ax RH_AX_FIXTURE=/path/to/screenshot.png npx vitest run packages/daemon/src/desktop/ax-helper.live.test.ts
+// (RH_AX_OCR_FIXTURE=1 is what makes the helper read the file instead of capturing the screen; it is passed on to the helper.)
+describe.skipIf(!process.env.RH_LIVE_AX || !process.env.RH_AX_FIXTURE || process.env.RH_AX_OCR_FIXTURE !== '1')('rh-ax reads text from a picture', () => {
   it('returns lines with boxes mapped into the window it was told about', async () => {
     const client = new AxHelperClient({ enabled: true, launch: () => ({ command: process.env.RH_AX_BIN ?? '', args: [] }) });
     try {

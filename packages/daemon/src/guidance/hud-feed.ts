@@ -196,6 +196,9 @@ function planBrowserDo(args: Record<string, unknown>): Planned {
 /** Reading a window by sight is the one slow way of looking; say so while it runs, so a pause there does not look like a hang. */
 const BY_SIGHT_BEFORE = "Reading this window by sight, because the app doesn't show its buttons. This takes a moment.";
 
+/** A click on text read by sight reads the window again afterwards, which also takes a moment. */
+const CLICK_BY_SIGHT_BEFORE = 'Clicking, then reading the window again by sight. This takes a moment.';
+
 const bySight = (): Planned => ({
   pill: 'READING THE SCREEN',
   before: BY_SIGHT_BEFORE,
@@ -236,7 +239,7 @@ function planMcp(name: string, args: Record<string, unknown>): Planned {
     case 'desktop_click':
       // text read by sight is whatever was on the screen: never quoted, however the result words it
       if (typeof args.index === 'number' && args.index >= OCR_ID_BASE) {
-        return { pill: 'CLICKING', before: 'Clicking, then reading the window again by sight. This takes a moment.', after: () => 'Clicked some text on the screen' };
+        return { pill: 'CLICKING', before: CLICK_BY_SIGHT_BEFORE, after: () => 'Clicked some text on the screen' };
       }
       return {
         pill: 'CLICKING',
@@ -261,8 +264,11 @@ function planMcp(name: string, args: Record<string, unknown>): Planned {
     }
     case 'computer_batch': {
       const steps = Array.isArray(args.steps) ? (args.steps as Array<Record<string, unknown>>) : [];
-      const sight = steps.some((s) => s?.tool === 'desktop_snapshot' && s.args && typeof s.args === 'object' && (s.args as Record<string, unknown>).ocr === true);
-      return { pill: 'WORKING', ...(sight ? { before: BY_SIGHT_BEFORE } : {}), after: () => 'Ran several steps' };
+      const argsOf = (s: Record<string, unknown>): Record<string, unknown> => (s?.args && typeof s.args === 'object' ? (s.args as Record<string, unknown>) : {});
+      const sight = steps.some((s) => s?.tool === 'desktop_snapshot' && argsOf(s).ocr === true);
+      const click = steps.some((s) => s?.tool === 'desktop_click' && typeof argsOf(s).index === 'number' && (argsOf(s).index as number) >= OCR_ID_BASE);
+      const before = sight ? BY_SIGHT_BEFORE : click ? CLICK_BY_SIGHT_BEFORE : undefined;
+      return { pill: 'WORKING', ...(before ? { before } : {}), after: () => 'Ran several steps' };
     }
     default:
       return { pill: 'WORKING', after: none, quietFailure: true };

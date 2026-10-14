@@ -236,6 +236,15 @@ describe('DesktopEngine reading a window by sight', () => {
     await expect(engine.clickOcr(1000001)).rejects.toThrow('not in last snapshot');
   });
 
+  it('refuses to read by sight once the helper numbers its own elements as high as the ids of text read by sight', async () => {
+    const huge: AxNode = { id: 1_000_005, parent: 1, role: 'AXButton', label: 'Late', actions: ['AXPress'], x: 1, y: 1, width: 20, height: 20 };
+    const helper = fake((op) => (op.op === 'ocr' ? reading : snapshotOf([WIN, huge])));
+    const engine = new DesktopEngine(helper);
+    await engine.snapshot('Notes');
+    await expect(engine.readOcr('Notes')).rejects.toThrow('ids reached');
+    expect(helper.calls.some((c) => c.op === 'ocr')).toBe(false);
+  });
+
   it('answers null when the helper is not ready, and for an app it cannot find', async () => {
     expect(await new DesktopEngine(fake(() => reading, false)).readOcr('Notes')).toBeNull();
     expect(await new DesktopEngine(fake(() => new AxHelperError('no_app', 'x'))).readOcr('Nope')).toBeNull();

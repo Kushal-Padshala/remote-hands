@@ -62,9 +62,6 @@ final class HandleTable {
             buckets = [:]
             signatures = [:]
             epoch = Int.random(in: 1...1_000_000_000)
-            // Restart the numbering: ids stay small, so they can never meet the ids of text read by sight (from 1,000,000). Requests
-            // carry the epoch, so an id from before this point is refused, never read as the new element with the same number.
-            next = 1
         }
         let h = next
         next += 1
@@ -1084,7 +1081,7 @@ func recognizeText(in image: CGImage) -> [SeenLine] {
     }
 }
 
-let maxSeenLines = 600
+let maxSeenLines = 1500
 
 // Requests that answer later (the picture is taken and read off the main queue). The helper must not exit at the end of its
 // input while one is still on its way, or the caller would never get its answer.
@@ -1291,16 +1288,19 @@ func ocr(_ id: Any?, _ request: [String: Any]) {
     fail(id, "unsupported", "Reading a window by sight needs macOS 14 or newer.")
 }
 
-/// A transparent overlay as big as a display (such as the pointer Remote Hands shows when it explains where something is) takes no
-/// clicks. Anything smaller that floats above a window, including Remote Hands' own HUD, is something a click would land on.
-func isDisplayWideOverlay(_ bounds: CGRect, layer: Int) -> Bool {
+/// The pointer overlay Remote Hands shows when it explains where something is: a transparent, click-through panel the size of a
+/// display, made by osascript. It takes no clicks. Nothing else is skipped: any other window above the target, including
+/// Remote Hands' own HUD, is something a click would land on.
+func isPointerOverlay(_ pid: pid_t, bounds: CGRect, layer: Int) -> Bool {
     if layer <= 0 { return false }
+    var buffer = [CChar](repeating: 0, count: 4096)
+    guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0, String(cString: buffer) == "/usr/bin/osascript" else { return false }
     var displays = [CGDirectDisplayID](repeating: 0, count: 16)
     var count: UInt32 = 0
     guard CGGetActiveDisplayList(UInt32(displays.count), &displays, &count) == .success else { return false }
     for display in displays.prefix(Int(count)) {
         let screen = CGDisplayBounds(display)
-        if bounds.width >= screen.width * 0.95 && bounds.height >= screen.height * 0.9 { return true }
+        if abs(bounds.width - screen.width) <= 30 && abs(bounds.height - screen.height) <= 60 { return true }
     }
     return false
 }
@@ -1317,7 +1317,7 @@ func windowStack() -> [(number: Int, pid: pid_t, bounds: CGRect)] {
               let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary) else { continue }
         if let alpha = entry[kCGWindowAlpha as String] as? Double, alpha < 0.05 { continue }
         if pid_t(owner) == getpid() { continue }
-        if isDisplayWideOverlay(bounds, layer: (entry[kCGWindowLayer as String] as? Int) ?? 0) { continue }
+        if isPointerOverlay(pid_t(owner), bounds: bounds, layer: (entry[kCGWindowLayer as String] as? Int) ?? 0) { continue }
         stack.append((number, pid_t(owner), bounds))
     }
     return stack

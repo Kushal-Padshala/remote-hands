@@ -1,6 +1,6 @@
 import { AxHelperError, type AxHelperPort, type AxSnapshot } from '../desktop/ax-helper.js';
 import { buildView, renderDiff, type View, type ViewItem } from '../desktop/ax-model.js';
-import { buildOcrView, type OcrItem, type OcrReading, type OcrView } from '../desktop/ocr-model.js';
+import { OCR_ID_BASE, buildOcrView, type OcrItem, type OcrReading, type OcrView } from '../desktop/ocr-model.js';
 
 /**
  * Native-app control on top of the rh-ax helper: a fast snapshot with stable ids, and (added next to it)
@@ -157,6 +157,10 @@ export class DesktopEngine {
   async readOcr(app: string, opts: { filter?: string; pid?: number } = {}): Promise<string | null> {
     // what was read before is gone the moment a new read starts: a failed read leaves nothing to click
     this.lastOcr = null;
+    if (this.last?.snapshot.nodes.some((n) => n.id >= OCR_ID_BASE)) {
+      // after a million handles the helper's own ids would meet the ones given to text read by sight; no click could tell them apart
+      throw new Error('The accessibility helper has been running so long that its ids reached those of text read by sight. Reading by sight is not available until Remote Hands is restarted; use Accessibility.');
+    }
     if (!(await this.helper.ready())) return null;
     let reading: OcrReading;
     try {
