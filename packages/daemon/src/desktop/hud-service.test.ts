@@ -280,6 +280,17 @@ describe('HudServiceManager', () => {
     expect(new HudServiceManager({ exec: stuck as never, plistPath: testPlist, home: tmpDir }).uninstall()).toBe(false);
   });
 
+  it('uninstall is not a success while the file that starts it at login is still there, or when there was nothing to remove', () => {
+    // the file cannot be removed (it is a folder here, so unlink fails) even though launchctl removed the job
+    fs.mkdirSync(testPlist);
+    fs.writeFileSync(path.join(testPlist, 'keep'), 'x');
+    const ok = (cmd: string, args: string[]) => ({ stdout: '', stderr: '', status: 0 });
+    expect(new HudServiceManager({ exec: ok as never, plistPath: testPlist, home: tmpDir }).uninstall()).toBe(false);
+    fs.rmSync(testPlist, { recursive: true, force: true });
+    // nothing installed, nothing loaded: nothing was removed
+    expect(new HudServiceManager({ exec: ok as never, plistPath: testPlist, home: tmpDir }).uninstall()).toBe(false);
+  });
+
   it('checks running status via launchctl list', () => {
     mockExec.mockReturnValue({
       stdout: '1234 0 com.remote-hands.hud\n5678 0 other.service',

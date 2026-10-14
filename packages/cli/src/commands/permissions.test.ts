@@ -132,17 +132,44 @@ describe('permissions command', () => {
 
     it('exits 1 and says how to remove it by hand when the background HUD cannot be stopped', async () => {
       Object.defineProperty(process, 'platform', { value: 'linux' });
-      const { fs } = memFs({ [SETTINGS]: JSON.stringify(original) });
+      const { files, fs } = memFs({ [SETTINGS]: JSON.stringify(original) });
       await permissionsCommand(['fix'], { stdout: () => {}, fs });
+      const before = JSON.stringify(Object.keys(files));
       const service = { isInstalled: () => true, uninstall: vi.fn().mockReturnValue(false) };
       const out: string[] = [];
       expect(await permissionsCommand(['revert'], { stdout: (l) => out.push(l), fs, hudServiceManager: service } as CommandContext)).toBe(1);
       expect(out.join('\n')).toContain('could not be stopped');
       expect(out.join('\n')).toContain('launchctl unload');
       expect(out.join('\n')).not.toContain('was stopped');
+      // nothing was restored (an older HUD would only put it back), and nothing was recorded as revoked
+      expect(JSON.parse(files[SETTINGS]!).permissions.defaultAction).toBe('allow');
+      expect(JSON.stringify(Object.keys(files))).toBe(before);
+      expect(files[`${os.homedir()}/.remote-hands/agy-consent.json`]).not.toContain('revoked');
+      expect(service.uninstall).toHaveBeenCalledTimes(1);
     });
 
-    it('fails with exit 1, changing and stopping nothing, when the revert cannot be made lasting', async () => {
+    it('stops the background HUD BEFORE restoring, so an older HUD cannot rewrite the settings in between', async () => {
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      const { files, fs } = memFs({ [SETTINGS]: JSON.stringify(original) });
+      await permissionsCommand(['fix'], { stdout: () => {}, fs });
+      const order: string[] = [];
+      const watching = { ...fs, writeFile: async (p: string, c: string) => { if (p === SETTINGS) order.push('restore'); return fs.writeFile(p, c); } };
+      const service = { isInstalled: () => true, uninstall: vi.fn(() => { order.push('stop'); return true; }) };
+      expect(await permissionsCommand(['revert'], { stdout: () => {}, fs: watching, hudServiceManager: service } as CommandContext)).toBe(0);
+      expect(order).toEqual(['stop', 'restore']);
+      expect(JSON.parse(files[SETTINGS]!)).toEqual(original);
+    });
+
+    it('fix reports a failure to set the settings up instead of saying all is well', async () => {
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      const { fs } = memFs({ [SETTINGS]: JSON.stringify(original) });
+      const failing = { ...fs, writeFile: async (p: string, c: string) => { if (p.endsWith('agy-undo.json')) throw new Error('EACCES'); return fs.writeFile(p, c); } };
+      const out: string[] = [];
+      expect(await permissionsCommand(['fix'], { stdout: (l) => out.push(l), fs: failing })).toBe(1);
+      expect(out.join('\n')).toContain('Could not set up the agy settings');
+    });
+
+    it('fails with exit 1, leaving the settings as they were, when the revert cannot be made lasting (the HUD was already stopped first)', async () => {
       Object.defineProperty(process, 'platform', { value: 'linux' });
       const { files, fs } = memFs({ [SETTINGS]: JSON.stringify(original) });
       await permissionsCommand(['fix'], { stdout: () => {}, fs });
@@ -152,8 +179,9 @@ describe('permissions command', () => {
       const out: string[] = [];
       expect(await permissionsCommand(['revert'], { stdout: (l) => out.push(l), fs: failing, hudServiceManager: service } as CommandContext)).toBe(1);
       expect(files[SETTINGS]).toBe(permissive);
-      expect(service.uninstall).not.toHaveBeenCalled();
+      expect(service.uninstall).toHaveBeenCalledTimes(1);
       expect(out.join('\n')).toContain('Could not revert');
+      expect(out.join('\n')).toContain('rh setup --hud');
     });
   });
 });

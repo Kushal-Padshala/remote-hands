@@ -286,7 +286,10 @@ describe('agy settings are backed up, recorded and revertible', () => {
     expect(await ensureAgyPermissions(fs)).toBe(false);
     expect(files[GLOBAL]).toBe(reverted);
     expect(JSON.parse(files[CONSENT]!).state).toBe('revoked');
-    expect(await ensureAgyPermissions(fs, undefined, { explicit: true })).toBe(true);
+    // an explicit request alone (hud install, permissions fix) is not enough: the revert stands until setup, after asking, overrides it
+    expect(await ensureAgyPermissions(fs, undefined, { explicit: true })).toBe(false);
+    expect(files[GLOBAL]).toBe(reverted);
+    expect(await ensureAgyPermissions(fs, undefined, { explicit: true, overrideRevoked: true })).toBe(true);
     expect(JSON.parse(files[GLOBAL]!).permissions.defaultAction).toBe('allow');
     expect(JSON.parse(files[CONSENT]!).state).toBe('granted');
   });
@@ -540,3 +543,39 @@ describe('unreadable records and lock ownership', () => {
     }, 15_000);
   });
 });
+
+describe('only setup may override a revert; the CLI settings file decides success', () => {
+  const GLOBAL = path.join(os.homedir(), '.gemini/antigravity-cli/settings.json');
+  const OTHER = path.join(os.homedir(), '.gemini/settings.json');
+  const UNDO = path.join(os.homedir(), '.remote-hands', 'agy-undo.json');
+  const CONSENT = path.join(os.homedir(), '.remote-hands', 'agy-consent.json');
+  const original = { permissions: { defaultAction: 'ask', allow: ['read_file'] } };
+
+  it('an explicit request that finds "revoked" under the lock stops (hud install / permissions fix cannot race past a revert)', async () => {
+    const { fs, files } = memoryFs({ [GLOBAL]: JSON.stringify(original), [CONSENT]: '{"state":"revoked"}' });
+    expect(await ensureAgyPermissions(fs, undefined, { explicit: true })).toBe(false);
+    expect(JSON.parse(files[GLOBAL]!)).toEqual(original);
+    expect(JSON.parse(files[CONSENT]!).state).toBe('revoked');
+  });
+
+  it('success means the CLI settings file was written: another file written does not hide its failure', async () => {
+    const { fs, files } = memoryFs({ [GLOBAL]: JSON.stringify(original), [OTHER]: JSON.stringify(original) });
+    const noCli: FileSystemAdapter = { ...fs, writeFile: async (p, c) => { if (p === GLOBAL) throw new Error('EACCES'); return fs.writeFile(p, c); } };
+    expect(await ensureAgyPermissions(noCli, undefined, { explicit: true })).toBe(false);
+    expect(JSON.parse(files[GLOBAL]!)).toEqual(original);
+    // the other file did change, and is still recorded so a revert undoes it
+    expect(JSON.parse(files[OTHER]!).permissions.defaultAction).toBe('allow');
+    expect(Object.keys(JSON.parse(files[UNDO]!).files)).toContain(OTHER);
+    await revertAgyPermissions(fs);
+    expect(JSON.parse(files[OTHER]!)).toEqual(original);
+  });
+
+  it('puts the undo record back as it was when the grant cannot be recorded, so a later revert cannot touch what the person changed since', async () => {
+    const { fs, files } = memoryFs({ [GLOBAL]: JSON.stringify(original), [UNDO]: JSON.stringify({ version: 1, files: {} }) });
+    const noConsent: FileSystemAdapter = { ...fs, writeFile: async (p, c) => { if (p === CONSENT) throw new Error('EACCES'); return fs.writeFile(p, c); } };
+    expect(await ensureAgyPermissions(noConsent, undefined, { explicit: true })).toBe(false);
+    expect(JSON.parse(files[UNDO]!)).toEqual({ version: 1, files: {} });
+    expect(JSON.parse(files[GLOBAL]!)).toEqual(original);
+  });
+});
+

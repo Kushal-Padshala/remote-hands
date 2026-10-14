@@ -232,7 +232,7 @@ async function setupAgentAndPermissions(
       }
     }
   }
-  const permissionsOk = await ensureAgyPermissions(fs, projectRoot, { explicit: true });
+  const permissionsOk = await ensureAgyPermissions(fs, projectRoot, { explicit: true, overrideRevoked: true });
   if (!permissionsOk) {
     stderr(renderStepError('Could not set up the agy settings, so nothing was changed.'));
     stderr('Check that ~/.gemini and ~/.remote-hands can be written to (and that no other Remote Hands command is running), then run "rh setup" again.');
@@ -708,7 +708,7 @@ async function hudSetupFlow(
       stdout(renderStepSuccess('Registered the rh-computer tools with agy'));
     } else {
       stdout(renderStepInfo('Could not register the computer-use tools; run "rh mcp install" after fixing the message above.'));
-      if (windows) blockers.push('the browser tools could not be registered with the agent (run "rh mcp install")');
+      blockers.push(`the ${windows ? 'browser' : 'computer-use'} tools could not be registered with the agent (run "rh mcp install")`);
     }
   }
 

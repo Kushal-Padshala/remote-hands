@@ -61,7 +61,24 @@ export async function permissionsCommand(args: string[], context: CommandContext
   }
 
   if (args.includes('revert')) {
+    // The background HUD goes first: an HUD from an older version rewrites these settings without asking anyone, and could
+    // do it between the restore and its removal. If it cannot be stopped, nothing is restored (that would not last).
+    const service = context.hudServiceManager ?? new HudServiceManager();
+    let hudStopped = false;
+    try {
+      if (service.isInstalled()) {
+        if (service.uninstall() === false) {
+          stdout(c.yellow('The background HUD could not be stopped, so the settings were not changed (an HUD from an older version would put them back). Run "rh hud uninstall", or remove it by hand (macOS: launchctl unload ~/Library/LaunchAgents/com.remote-hands.hud.plist; Windows: Settings > Apps > Startup), then run "rh permissions revert" again.'));
+          return 1;
+        }
+        hudStopped = true;
+      }
+    } catch {
+      stdout(c.yellow('The background HUD could not be checked or stopped, so the settings were not changed: run "rh hud uninstall", then "rh permissions revert" again.'));
+      return 1;
+    }
     const res = await revertAgyPermissions(context.fs);
+    if (hudStopped) stdout('The background HUD was stopped, because it cannot run tasks without those settings. "rh setup --hud" brings it back (and asks again).');
     if (res.error) {
       stdout(c.yellow(`Could not revert: ${res.error}`));
       return 1;
@@ -71,22 +88,7 @@ export async function permissionsCommand(args: string[], context: CommandContext
     stdout(res.restored.length > 0
       ? 'The agy settings are back as they were. Remote Hands will not change them again until you run "rh setup".'
       : 'Nothing to restore: no record of changes by Remote Hands was found (settings made by an older version are not recorded; edit ~/.gemini/antigravity-cli/settings.json by hand to tighten them). Remote Hands will not change them again until you run "rh setup".');
-    // The background HUD cannot run tasks without those settings, and an HUD installed by an older version would put them
-    // back at the next login: stop it, so the revert is lasting. "rh setup --hud" brings it back after asking again.
-    const service = context.hudServiceManager ?? new HudServiceManager();
-    let stopped = true;
-    try {
-      if (service.isInstalled()) {
-        stopped = service.uninstall() !== false;
-        stdout(stopped
-          ? 'The background HUD was stopped, because it cannot run tasks without those settings. "rh setup --hud" brings it back (and asks again).'
-          : c.yellow('The background HUD could not be stopped. An HUD from an older version would put the settings back at the next login: run "rh hud uninstall", or remove it by hand (macOS: launchctl unload ~/Library/LaunchAgents/com.remote-hands.hud.plist; Windows: Settings > Apps > Startup).'));
-      }
-    } catch {
-      stopped = false;
-      stdout(c.yellow('The background HUD could not be checked or stopped: run "rh hud uninstall".'));
-    }
-    return res.skipped.length > 0 || !stopped ? 1 : 0;
+    return res.skipped.length > 0 ? 1 : 0;
   }
 
   if (isFix && (await readAgyConsent(context.fs)) === 'revoked') {
@@ -94,7 +96,10 @@ export async function permissionsCommand(args: string[], context: CommandContext
     stdout(c.yellow('You reverted the agy settings. Run "rh setup --hud" to set them up again: it shows what changes and asks first.'));
     return 1;
   }
-  if (isFix) await ensureAgyPermissions(context.fs, undefined, { explicit: true });
+  if (isFix && !(await ensureAgyPermissions(context.fs, undefined, { explicit: true }))) {
+    stdout(c.yellow('Could not set up the agy settings (they were reverted meanwhile, another Remote Hands command is running, or ~/.gemini or ~/.remote-hands cannot be written). Run "rh setup --hud".'));
+    return 1;
+  }
 
   if (isFix && process.platform === 'darwin' && !context.runner && !isJson) {
     await ensureMacPermissions(stdout);

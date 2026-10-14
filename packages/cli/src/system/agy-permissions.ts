@@ -527,6 +527,11 @@ export interface EnsureAgyPermissionsOptions {
    * nothing after the person reverted the settings.
    */
   explicit?: boolean | undefined;
+  /**
+   * Only setup, after it showed the change and the person said yes, may set the permissions again after a revert. Every other
+   * caller (`rh hud install`, `rh permissions fix`, background services) finds "revoked" under the lock and stops.
+   */
+  overrideRevoked?: boolean | undefined;
   /** How long to wait for another process that is changing the settings (default 5 s; tests shorten it). */
   lockWaitMs?: number | undefined;
 }
@@ -539,7 +544,7 @@ export async function ensureAgyPermissions(
   try {
     const locked = await withAgyLock(fs, options.lockWaitMs ?? DEFAULT_LOCK_WAIT_MS, async () => {
       // checked under the lock, so a revert that finished a moment ago is never undone
-      if (!options.explicit && (await readAgyConsent(fs)) === 'revoked') return false;
+      if (!options.overrideRevoked && (await readAgyConsent(fs)) === 'revoked') return false;
 
       const settingsPaths = [
         path.join(os.homedir(), '.gemini/antigravity-cli/settings.json'),
@@ -552,6 +557,7 @@ export async function ensureAgyPermissions(
       // an undo record that exists but cannot be read must not be replaced: nothing is changed until it is dealt with
       if (record.error) return false;
       const undo = record.manifest;
+      const manifestBefore = JSON.stringify(record.manifest, null, 2);
       const plans: { settingsPath: string; settingsObj: any; originalRaw: string | null; isFirstChange: boolean }[] = [];
 
       for (const settingsPath of settingsPaths) {
@@ -624,9 +630,17 @@ export async function ensureAgyPermissions(
         return false;
       }
       // An accepted grant is recorded before the settings change; if it cannot be recorded, nothing changes.
-      if (options.explicit && !(await writeAgyConsent(fs, 'granted'))) return false;
+      if (options.explicit && !(await writeAgyConsent(fs, 'granted'))) {
+        // nothing was changed, so nothing may stay recorded as changed
+        try {
+          await writeStateFile(fs, undoPath(), manifestBefore);
+        } catch {
+          // the entries describe changes that never happened; a later revert would only set the same values back
+        }
+        return false;
+      }
 
-      let anySucceeded = false;
+      let primaryWritten = false;
       let failedAny = false;
       for (const plan of plans) {
         try {
@@ -636,7 +650,7 @@ export async function ensureAgyPermissions(
             if (!(await fs.exists(backup))) await fs.writeFile(backup, plan.originalRaw);
           }
           await fs.writeFile(plan.settingsPath, JSON.stringify(plan.settingsObj, null, 2));
-          anySucceeded = true;
+          if (plan.settingsPath === settingsPaths[0]) primaryWritten = true;
         } catch {
           // a file that could not be written has nothing to undo: forget its record
           if (plan.isFirstChange) {
@@ -653,7 +667,8 @@ export async function ensureAgyPermissions(
           // the earlier, fuller record stays: undoing a file that never changed removes nothing that was not added
         }
       }
-      return anySucceeded;
+      // success means the CLI's own settings file (the one agy reads) was written; the IDE's and others are extra
+      return primaryWritten;
     });
     if (!locked.ok) return false;
 

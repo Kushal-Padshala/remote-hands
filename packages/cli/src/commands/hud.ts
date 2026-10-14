@@ -55,7 +55,10 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
       return 1;
     }
     stdout('Configuring system permissions for desktop overlay assistant...');
-    await ensureAgyPermissions(context.fs, undefined, { explicit: true });
+    if (!(await ensureAgyPermissions(context.fs, undefined, { explicit: true }))) {
+      stderr(c.yellow('Could not set up the agy settings (they were reverted meanwhile, another Remote Hands command is running, or ~/.gemini or ~/.remote-hands cannot be written). Nothing was installed; run "rh setup --hud".'));
+      return 1;
+    }
     stdout('Installing Remote Hands Desktop Overlay background service...');
     const res = serviceManager.install();
     if (res.success) {
