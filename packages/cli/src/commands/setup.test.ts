@@ -690,6 +690,58 @@ describe('Setup Command Flow', () => {
       });
     });
 
+    describe('background HUD permission check', () => {
+      if (process.platform !== 'darwin') return;
+      const node = '/Users/x/.nvm/versions/node/v22/bin/node';
+      const report = (screenRecording: boolean) => ({ at: Date.now(), pid: 1, node, screenRecording });
+      const make = (extra: Record<string, unknown> = {}) => {
+        const restart = vi.fn().mockReturnValue(true);
+        const service = { install: vi.fn().mockReturnValue({ success: true, plistPath: '/mock.plist' }), isInstalled: () => true, isRunning: () => true, restart };
+        const out: string[] = [];
+        const ctx = { runner: hudRunner([]), fs: mockFs, projectRoot: '/project', hudServiceManager: service, browserSetup: readyBrowserSetup([]), stdout: (l: string) => out.push(l), isTTY: false, ...extra };
+        return { restart, out, ctx };
+      };
+
+      it('is satisfied when the service says it can record the screen', async () => {
+        const { out, ctx } = make({ verifyMacHud: async () => report(true) });
+        expect(await setupCommand(['--hud'], ctx as never)).toBe(0);
+        expect(out.join('\n')).toContain('The background HUD can use Screen Recording');
+        expect(out.join('\n')).toContain('Desktop HUD is ready');
+      });
+
+      it('names the exact node when it cannot, does not claim ready, and still exits 0 (the hotkey works)', async () => {
+        const { out, ctx, restart } = make({ verifyMacHud: async () => report(false) });
+        expect(await setupCommand(['--hud'], ctx as never)).toBe(0);
+        const text = out.join('\n');
+        expect(text).toContain(node);
+        expect(text).toContain('Screen & System Audio Recording');
+        expect(text).not.toContain('Desktop HUD is ready');
+        expect(text).toContain('rh hud install');
+        expect(restart).not.toHaveBeenCalled();
+      });
+
+      it('at a terminal: waits for Enter, restarts the service, checks again, and succeeds', async () => {
+        const reports = [report(false), report(true)];
+        const { out, ctx, restart } = make({ isTTY: true, ask: async (q: string) => (q.includes('Press Enter once') ? '' : ''), verifyMacHud: async () => reports.shift() ?? report(true) });
+        expect(await setupCommand(['--hud'], ctx as never)).toBe(0);
+        expect(restart).toHaveBeenCalledTimes(1);
+        expect(out.join('\n')).toContain('Desktop HUD is ready');
+      });
+
+      it('at a terminal: s skips without restarting', async () => {
+        const { out, ctx, restart } = make({ isTTY: true, ask: async (q: string) => (q.includes('Press Enter once') ? 's' : ''), verifyMacHud: async () => report(false) });
+        expect(await setupCommand(['--hud'], ctx as never)).toBe(0);
+        expect(restart).not.toHaveBeenCalled();
+        expect(out.join('\n')).not.toContain('Desktop HUD is ready');
+      });
+
+      it('does not claim ready when the service never reports', async () => {
+        const { out, ctx } = make({ verifyMacHud: async () => null });
+        expect(await setupCommand(['--hud'], ctx as never)).toBe(0);
+        expect(out.join('\n')).toContain('has not reported its permissions yet');
+      });
+    });
+
     describe('agy settings consent', () => {
       function freshFs(): { fs: FileSystemAdapter; files: Record<string, string> } {
         const f: Record<string, string> = {};

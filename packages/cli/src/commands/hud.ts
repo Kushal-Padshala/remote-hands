@@ -18,6 +18,7 @@ import {
   ensureMacPermissions,
   checkMacScreenCapture,
 } from '../system/mac-permissions.js';
+import { markPermissionPrompted, permissionPromptedRecently, writeMacHudStatus } from '../system/hud-mac-status.js';
 
 export interface HudCommandContext extends CommandContext {
 
@@ -106,6 +107,8 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
     }
     if (!installed) {
       stdout(`  To enable: Run "${c.cyan('rh hud install')}" or "${c.cyan('rh setup')}".`);
+    } else if (typeof serviceManager.installedCopyIsStale === 'function' && serviceManager.installedCopyIsStale()) {
+      stdout(`  ${c.yellow('The background HUD runs an older copy of Remote Hands.')} Update it with "${c.cyan('rh hud install')}".`);
     }
     stdout('');
     return 0;
@@ -153,8 +156,26 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
         return 1;
       }
     }
-    if (process.platform === 'darwin' && !context.runner && !args.includes('--skip-permissions') && !checkMacScreenCapture()) {
-      await ensureMacPermissions(stdout, 74, { fullDiskAccessOptional: true });
+    if (process.platform === 'darwin' && !context.runner && !args.includes('--skip-permissions')) {
+      // Say what this very program (the login service's Node) is allowed, for setup to read back; written first as
+      // "still checking" (the check itself takes a few seconds) and again the moment the answer is known.
+      const report = !context.coordinator;
+      const node = process.execPath;
+      if (report) writeMacHudStatus({ at: Date.now(), pid: process.pid, node, screenRecording: false, checking: true });
+      const screenOk = checkMacScreenCapture();
+      if (report) writeMacHudStatus({ at: Date.now(), pid: process.pid, node, screenRecording: screenOk });
+      if (!screenOk) {
+        // At a terminal always; as a login service (nobody to answer) at most once a day, and without holding up the hotkey
+        const interactive = Boolean(process.stdin.isTTY);
+        if (interactive || !permissionPromptedRecently()) {
+          if (!interactive) markPermissionPrompted();
+          const guided = ensureMacPermissions(stdout, 74, { fullDiskAccessOptional: true }).then(() => {
+            if (report) writeMacHudStatus({ at: Date.now(), pid: process.pid, node, screenRecording: checkMacScreenCapture() });
+          });
+          if (interactive) await guided;
+          else guided.catch(() => {});
+        }
+      }
     }
 
     // Local fast lane (off unless `rh fast-lane enable` was run); absent when the model is not installed.

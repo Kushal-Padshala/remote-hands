@@ -54,6 +54,18 @@ describe('CLI hud command', () => {
     expect(mockServiceManager.install).toHaveBeenCalled();
   });
 
+  it('status tells the person when the background HUD runs an older copy', async () => {
+    mockServiceManager.installedCopyIsStale = vi.fn().mockReturnValue(true);
+    await hudCommand(['status'], { serviceManager: mockServiceManager, stdout: (m) => logs.push(m) });
+    expect(logs.join('\n')).toContain('older copy');
+    expect(logs.join('\n')).toContain('rh hud install');
+
+    logs.length = 0;
+    mockServiceManager.installedCopyIsStale.mockReturnValue(false);
+    await hudCommand(['status'], { serviceManager: mockServiceManager, stdout: (m) => logs.push(m) });
+    expect(logs.join('\n')).not.toContain('older copy');
+  });
+
   it('uninstalls launchagent background service on rh hud uninstall', async () => {
     const code = await hudCommand(['uninstall'], {
       serviceManager: mockServiceManager,

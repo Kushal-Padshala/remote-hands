@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import type { ExecFunction } from './macos-driver.js';
 import {
@@ -41,9 +42,33 @@ export function getHudPlistPath(): string {
   return path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.remote-hands.hud.plist');
 }
 
-export function generateHudPlistXml(nodePath: string, cliPath: string, logDir: string): string {
+/**
+ * The login service starts this small script, not Node itself, and the script finds Node each time. A Node path baked into
+ * the plist breaks the HUD silently as soon as Node moves (nvm, `brew upgrade node`). The Node setup ran under comes first,
+ * because that is the program macOS permissions (Screen Recording) were given to.
+ */
+export function generateHudLauncherScript(): string {
+  return `#!/bin/sh
+# Starts the Remote Hands HUD. Written by "rh hud install"; do not edit.
+RH="$HOME/.remote-hands"
+NODE=""
+for candidate in "$(cat "$RH/node-path" 2>/dev/null)" "$RH/node/bin/node" /opt/homebrew/bin/node /usr/local/bin/node; do
+  if [ -n "$candidate" ] && [ -x "$candidate" ]; then NODE="$candidate"; break; fi
+done
+if [ -z "$NODE" ]; then NODE="$(command -v node 2>/dev/null)"; fi
+if [ -z "$NODE" ]; then NODE="$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V | tail -1)"; fi
+if [ -z "$NODE" ] || [ ! -x "$NODE" ]; then
+  echo "Remote Hands: Node.js was not found. Run: rh hud install" >&2
+  exit 78
+fi
+PATH="$(dirname "$NODE"):$HOME/.local/bin:$PATH"
+export PATH
+exec "$NODE" "$RH/cli/index.js" hud listen
+`;
+}
+
+export function generateHudPlistXml(launcherPath: string, logDir: string, homeDir: string = os.homedir()): string {
   const currentPath = process.env.PATH || '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
-  const homeDir = os.homedir();
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -52,10 +77,8 @@ export function generateHudPlistXml(nodePath: string, cliPath: string, logDir: s
     <string>com.remote-hands.hud</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${nodePath}</string>
-        <string>${cliPath}</string>
-        <string>hud</string>
-        <string>listen</string>
+        <string>/bin/sh</string>
+        <string>${launcherPath}</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
@@ -68,6 +91,8 @@ export function generateHudPlistXml(nodePath: string, cliPath: string, logDir: s
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
     <key>StandardOutPath</key>
     <string>${path.join(logDir, 'hud.log')}</string>
     <key>StandardErrorPath</key>
@@ -75,6 +100,20 @@ export function generateHudPlistXml(nodePath: string, cliPath: string, logDir: s
 </dict>
 </plist>
 `;
+}
+
+/**
+ * A Homebrew Node's real path holds its version and disappears on the next upgrade; the link next to it stays.
+ * (Also the one macOS shows in Screen Recording, so the permission survives an upgrade.)
+ */
+export function stableNodePath(execPath: string, exists: (p: string) => boolean = fs.existsSync): string {
+  const marker = '/Cellar/node/';
+  const at = execPath.indexOf(marker);
+  if (at > 0) {
+    const link = path.join(execPath.slice(0, at), 'bin', 'node');
+    if (exists(link)) return link;
+  }
+  return execPath;
 }
 
 export class HudServiceManager {
@@ -214,23 +253,29 @@ export class HudServiceManager {
 
     try {
       const resolvedCli = cliPath || this.resolveCliPath();
-      const nodePath = process.execPath;
-      const logDir = path.join(os.homedir(), '.remote-hands', 'logs');
+      const rhDir = path.join(this.home, '.remote-hands');
+      const logDir = path.join(rhDir, 'logs');
       fs.mkdirSync(logDir, { recursive: true });
       fs.mkdirSync(path.dirname(this.plistPath), { recursive: true });
 
-      const safeCliDir = path.join(os.homedir(), '.remote-hands', 'cli');
+      const safeCliDir = path.join(rhDir, 'cli');
       fs.mkdirSync(safeCliDir, { recursive: true });
       const safeCliPath = path.join(safeCliDir, 'index.js');
-      let targetCliPath = resolvedCli;
-      if (fs.existsSync(resolvedCli)) {
-        try {
-          fs.copyFileSync(resolvedCli, safeCliPath);
-          targetCliPath = safeCliPath;
-        } catch {}
+      if (fs.existsSync(resolvedCli) && path.resolve(resolvedCli) !== path.resolve(safeCliPath)) {
+        fs.copyFileSync(resolvedCli, safeCliPath);
+      } else if (!fs.existsSync(safeCliPath)) {
+        return { success: false, plistPath: this.plistPath, error: `could not find the Remote Hands program to run in the background (looked at ${resolvedCli})` };
       }
 
-      const xml = generateHudPlistXml(nodePath, targetCliPath, logDir);
+      // the Node that runs it, remembered for the launcher (macOS permissions belong to this exact program)
+      fs.writeFileSync(path.join(rhDir, 'node-path'), stableNodePath(this.options.nodePath ?? process.execPath), 'utf-8');
+      const binDir = path.join(rhDir, 'bin');
+      fs.mkdirSync(binDir, { recursive: true });
+      const launcher = path.join(binDir, 'rh-hud-launch.sh');
+      fs.writeFileSync(launcher, generateHudLauncherScript(), { encoding: 'utf-8', mode: 0o755 });
+      fs.chmodSync(launcher, 0o755);
+
+      const xml = generateHudPlistXml(launcher, logDir, this.home);
       fs.writeFileSync(this.plistPath, xml, 'utf-8');
 
       this.exec('launchctl', ['unload', this.plistPath]);
@@ -243,6 +288,36 @@ export class HudServiceManager {
     } catch (err: any) {
       return { success: false, plistPath: this.plistPath, error: err?.message || String(err) };
     }
+  }
+
+  /**
+   * Is the copy the login service runs older than the Remote Hands program that is running now (after an `npm update -g`)?
+   * `rh hud install` brings it up to date.
+   */
+  installedCopyIsStale(currentCli: string | undefined = process.argv[1]): boolean {
+    try {
+      if (!currentCli) return false;
+      const copy = path.join(this.home, '.remote-hands', 'cli', 'index.js');
+      const current = fs.realpathSync(currentCli);
+      if (!fs.existsSync(copy) || path.resolve(current) === path.resolve(copy)) return false;
+      if (!current.endsWith('.js')) return false;
+      const sha = (file: string): string => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+      return sha(copy) !== sha(current);
+    } catch {
+      return false;
+    }
+  }
+
+  /** macOS: starts the service again (after a permission was given). True when launchctl accepted it. */
+  restart(): boolean {
+    if (this.platform !== 'darwin') return false;
+    const uid = typeof process.getuid === 'function' ? process.getuid() : undefined;
+    if (uid !== undefined) {
+      const kicked = this.exec('launchctl', ['kickstart', '-k', `gui/${uid}/com.remote-hands.hud`]);
+      if (kicked.status === 0) return true;
+    }
+    this.exec('launchctl', ['unload', this.plistPath]);
+    return this.exec('launchctl', ['load', '-w', this.plistPath]).status === 0;
   }
 
   uninstall(): boolean {
@@ -262,15 +337,29 @@ export class HudServiceManager {
     return false;
   }
 
+  /** The Remote Hands program that is running right now, else whatever `rh` points at. Never a guessed folder. */
   private resolveCliPath(): string {
-    const whichRh = this.exec('which', ['rh']);
-    if (whichRh.status === 0 && whichRh.stdout.trim()) {
-      return whichRh.stdout.trim();
+    const entry = process.argv[1];
+    if (entry) {
+      try {
+        const real = fs.realpathSync(entry);
+        if (real.endsWith('.js')) return real;
+      } catch {
+        // fall through to the lookups below
+      }
     }
-    const whichRemoteHands = this.exec('which', ['remote-hands']);
-    if (whichRemoteHands.status === 0 && whichRemoteHands.stdout.trim()) {
-      return whichRemoteHands.stdout.trim();
+    for (const name of ['rh', 'remote-hands']) {
+      const found = this.exec('which', [name]);
+      const candidate = found.status === 0 ? found.stdout.trim() : '';
+      if (candidate) {
+        try {
+          const real = fs.realpathSync(candidate);
+          if (real.endsWith('.js')) return real;
+        } catch {
+          // try the next name
+        }
+      }
     }
-    return path.resolve(os.homedir(), 'Desktop/project/remote-hands/packages/cli/dist/index.js');
+    return path.join(this.home, '.remote-hands', 'cli', 'index.js');
   }
 }

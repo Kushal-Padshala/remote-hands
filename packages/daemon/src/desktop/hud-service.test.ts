@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { HudServiceManager, generateHudPlistXml } from './hud-service.js';
+import { spawnSync } from 'node:child_process';
+import { HudServiceManager, generateHudLauncherScript, generateHudPlistXml, stableNodePath } from './hud-service.js';
 
 describe('HudServiceManager', () => {
   const originalPlatform = process.platform;
@@ -30,29 +31,136 @@ describe('HudServiceManager', () => {
     expect(mockExec).not.toHaveBeenCalled();
   });
 
-  it('generates valid plist xml with node, cli path, and log directory', () => {
-    const xml = generateHudPlistXml('/usr/local/bin/node', '/usr/local/bin/rh', '/logs');
+  it('generates a plist that starts the launcher script, with the log directory and a throttled restart', () => {
+    const xml = generateHudPlistXml('/home/u/.remote-hands/bin/rh-hud-launch.sh', '/logs', '/home/u');
     expect(xml).toContain('<string>com.remote-hands.hud</string>');
-    expect(xml).toContain('<string>/usr/local/bin/node</string>');
-    expect(xml).toContain('<string>/usr/local/bin/rh</string>');
-    expect(xml).toContain('<string>hud</string>');
-    expect(xml).toContain('<string>listen</string>');
+    expect(xml).toContain('<string>/bin/sh</string>');
+    expect(xml).toContain('<string>/home/u/.remote-hands/bin/rh-hud-launch.sh</string>');
+    expect(xml).toContain('<string>/logs/hud.log</string>');
+    expect(xml).toContain('<string>/home/u</string>');
     expect(xml).toContain('<key>KeepAlive</key>');
+    expect(xml).toContain('<key>ThrottleInterval</key>');
+    // no Node path baked in
+    expect(xml).not.toContain('/bin/node');
   });
 
-  it('installs plist file and triggers launchctl load', () => {
-    const manager = new HudServiceManager({
-      exec: mockExec,
-      plistPath: testPlist,
-    });
+  it('launcher tries the remembered Node first, then the private one, Homebrew, PATH and nvm, and execs the installed copy', () => {
+    const script = generateHudLauncherScript();
+    const order = ['$RH/node-path', '$RH/node/bin/node', '/opt/homebrew/bin/node', '/usr/local/bin/node', 'command -v node', '.nvm/versions/node'];
+    let at = -1;
+    for (const needle of order) {
+      const i = script.indexOf(needle);
+      expect(i, needle).toBeGreaterThan(at);
+      at = i;
+    }
+    expect(script).toContain('exec "$NODE" "$RH/cli/index.js" hud listen');
+    expect(script.startsWith('#!/bin/sh')).toBe(true);
+  });
 
-    const res = manager.install('/custom/path/to/rh');
+  it('launcher script is valid shell and runs the program it finds', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-launch-'));
+    try {
+      fs.mkdirSync(path.join(home, '.remote-hands', 'cli'), { recursive: true });
+      fs.writeFileSync(path.join(home, '.remote-hands', 'cli', 'index.js'), 'console.log("ARGS:" + process.argv.slice(2).join(" "))');
+      fs.writeFileSync(path.join(home, '.remote-hands', 'node-path'), process.execPath);
+      const script = path.join(home, 'launch.sh');
+      fs.writeFileSync(script, generateHudLauncherScript(), { mode: 0o755 });
+      const res = spawnSync('/bin/sh', [script], { env: { HOME: home, PATH: '/usr/bin:/bin' }, encoding: 'utf-8' });
+      expect(res.stdout.trim()).toBe('ARGS:hud listen');
+      expect(res.status).toBe(0);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('launcher survives a remembered Node that no longer exists, and says so when none is found', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-launch-'));
+    try {
+      fs.mkdirSync(path.join(home, '.remote-hands', 'cli'), { recursive: true });
+      fs.writeFileSync(path.join(home, '.remote-hands', 'cli', 'index.js'), 'console.log("ok")');
+      fs.writeFileSync(path.join(home, '.remote-hands', 'node-path'), '/gone/v1/bin/node');
+      const script = path.join(home, 'launch.sh');
+      fs.writeFileSync(script, generateHudLauncherScript(), { mode: 0o755 });
+      // Node on the PATH is found instead of the vanished one
+      const nodeDir = path.dirname(process.execPath);
+      const found = spawnSync('/bin/sh', [script], { env: { HOME: home, PATH: `${nodeDir}:/usr/bin:/bin` }, encoding: 'utf-8' });
+      expect(found.stdout.trim()).toBe('ok');
+      // with no Node anywhere (and none at the fixed Homebrew places) it fails loudly with exit 78
+      if (!fs.existsSync('/opt/homebrew/bin/node') && !fs.existsSync('/usr/local/bin/node')) {
+        const none = spawnSync('/bin/sh', [script], { env: { HOME: home, PATH: '/usr/bin:/bin' }, encoding: 'utf-8' });
+        expect(none.status).toBe(78);
+        expect(none.stderr).toContain('Node.js was not found');
+      }
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the stable Homebrew link instead of the versioned Cellar path', () => {
+    const exists = (p: string) => p === '/opt/homebrew/bin/node';
+    expect(stableNodePath('/opt/homebrew/Cellar/node/23.4.0/bin/node', exists)).toBe('/opt/homebrew/bin/node');
+    expect(stableNodePath('/opt/homebrew/Cellar/node/23.4.0/bin/node', () => false)).toBe('/opt/homebrew/Cellar/node/23.4.0/bin/node');
+    expect(stableNodePath('/Users/x/.nvm/versions/node/v22/bin/node', exists)).toBe('/Users/x/.nvm/versions/node/v22/bin/node');
+  });
+
+  it('installs the launcher, remembers Node, copies the CLI, writes the plist and loads it, all under the given home', () => {
+    const cli = path.join(tmpDir, 'src', 'index.js');
+    fs.mkdirSync(path.dirname(cli), { recursive: true });
+    fs.writeFileSync(cli, 'console.log(1)');
+    const manager = new HudServiceManager({ exec: mockExec, plistPath: testPlist, home: tmpDir, nodePath: '/n/bin/node' });
+
+    const res = manager.install(cli);
     expect(res.success).toBe(true);
-    expect(fs.existsSync(testPlist)).toBe(true);
+    const rh = path.join(tmpDir, '.remote-hands');
+    expect(fs.readFileSync(path.join(rh, 'cli', 'index.js'), 'utf-8')).toBe('console.log(1)');
+    expect(fs.readFileSync(path.join(rh, 'node-path'), 'utf-8')).toBe('/n/bin/node');
+    const launcher = path.join(rh, 'bin', 'rh-hud-launch.sh');
+    expect(fs.statSync(launcher).mode & 0o111).not.toBe(0);
     const content = fs.readFileSync(testPlist, 'utf-8');
-    expect(content).toContain('/custom/path/to/rh');
+    expect(content).toContain(launcher);
+    expect(content).toContain(`<string>${path.join(rh, 'logs', 'hud.log')}</string>`);
     expect(mockExec).toHaveBeenCalledWith('launchctl', ['unload', testPlist]);
     expect(mockExec).toHaveBeenCalledWith('launchctl', ['load', '-w', testPlist]);
+  });
+
+  it('refuses, with a reason, when there is no program to run (it never falls back to a guessed folder)', () => {
+    const manager = new HudServiceManager({ exec: mockExec, plistPath: testPlist, home: tmpDir });
+    const res = manager.install('/does/not/exist/index.js');
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('/does/not/exist/index.js');
+    expect(fs.existsSync(testPlist)).toBe(false);
+    expect(mockExec).not.toHaveBeenCalledWith('launchctl', ['load', '-w', testPlist]);
+  });
+
+  it('restarts through launchctl kickstart, falling back to unload and load', () => {
+    const manager = new HudServiceManager({ exec: mockExec, plistPath: testPlist, home: tmpDir });
+    expect(manager.restart()).toBe(true);
+    expect(mockExec).toHaveBeenCalledWith('launchctl', ['kickstart', '-k', `gui/${process.getuid?.()}/com.remote-hands.hud`]);
+
+    const calls: string[] = [];
+    const flaky = new HudServiceManager({
+      exec: (cmd: string, args: string[]) => {
+        calls.push(`${cmd} ${args[0]}`);
+        return { stdout: '', stderr: '', status: args[0] === 'kickstart' ? 113 : 0 };
+      },
+      plistPath: testPlist,
+      home: tmpDir,
+    });
+    expect(flaky.restart()).toBe(true);
+    expect(calls).toEqual(['launchctl kickstart', 'launchctl unload', 'launchctl load']);
+  });
+
+  it('reports a stale installed copy only when it differs from the running program', () => {
+    const cli = path.join(tmpDir, 'index.js');
+    fs.writeFileSync(cli, 'v1');
+    const manager = new HudServiceManager({ exec: mockExec, plistPath: testPlist, home: tmpDir });
+    manager.install(cli);
+    expect(manager.installedCopyIsStale(cli)).toBe(false);
+    fs.writeFileSync(cli, 'v2');
+    expect(manager.installedCopyIsStale(cli)).toBe(true);
+    manager.install(cli);
+    expect(manager.installedCopyIsStale(cli)).toBe(false);
+    expect(manager.installedCopyIsStale('')).toBe(false);
   });
 
   it('uninstalls plist file and triggers launchctl unload', () => {

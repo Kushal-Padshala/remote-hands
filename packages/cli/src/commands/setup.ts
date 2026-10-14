@@ -65,6 +65,8 @@ import {
 import { ChromeManager as ChromeLookup, HudServiceManager, SpotlightHudRunner, hudHotkeyLabel, type BrowserExecutable, type ChromeManager, type DynamicPowerManager } from '@remote-hands/daemon';
 import { defaultAsk } from './browser-setup.js';
 import { beginCommandLineTools, type CommandLineToolsHandle } from '../system/xcode-tools.js';
+import { waitForMacHudStatus, type MacHudStatus } from '../system/hud-mac-status.js';
+import { openMacPrivacySettings } from '../system/mac-permissions.js';
 import { AGY_WINDOWS_INSTALL, agyRunOptions, agyShellCommand, locateAgy } from '../system/agy.js';
 import { mcpCommand } from './mcp.js';
 
@@ -104,6 +106,8 @@ export interface CommandContext {
   browserSetupOffer?: (() => Promise<void>) | undefined;
   /** Starts the Apple Command Line Tools install on a Mac that lacks them (tests replace it; a mocked run skips the step). */
   beginCommandLineTools?: ((out: (message: string) => void) => CommandLineToolsHandle) | undefined;
+  /** Reads what the background HUD says about its own permissions after it starts (tests replace it; a mocked run skips the check). */
+  verifyMacHud?: (() => Promise<MacHudStatus | null>) | undefined;
   /** Prompt used by `rh setup` to ask what to set up (tests). */
   ask?: ((question: string) => Promise<string>) | undefined;
   /** Whether stdin is a terminal (tests); defaults to process.stdin.isTTY. */
@@ -609,6 +613,43 @@ async function askSetupMode(
 }
 
 /**
+ * macOS gives Screen Recording to one specific program. The HUD runs as a login service with its own Node, not as the
+ * terminal this setup runs in, so the permission just granted may not reach it. The service reports what it found; when it
+ * is missing the person is told exactly which program to switch on, and the service is restarted to check again.
+ */
+async function verifyMacServicePermission(
+  firstStatus: MacHudStatus | null,
+  readAgain: () => Promise<MacHudStatus | null>,
+  restart: () => boolean,
+  interactive: boolean,
+  ask: (question: string) => Promise<string>,
+  stdout: (msg: string) => void,
+): Promise<'ok' | 'missing' | 'unknown'> {
+  let status = firstStatus;
+  if (!status) {
+    stdout(renderStepInfo('The background HUD has not reported its permissions yet: check later with "rh doctor".'));
+    return 'unknown';
+  }
+  for (let round = 0; ; round += 1) {
+    if (status.screenRecording) return 'ok';
+    stdout(renderStepInfo('The background HUD does not have Screen & System Audio Recording yet. macOS gives it to one program at a time, and the HUD runs as its own:'));
+    stdout(renderStepInfo(`  switch ON "node"   (${status.node})`));
+    stdout(renderStepInfo('  in System Settings -> Privacy & Security -> Screen & System Audio Recording (click [+] and press Cmd+Shift+G to paste the path if it is not listed).'));
+    openMacPrivacySettings('ScreenCapture');
+    if (!interactive || round >= 3) return 'missing';
+    const answer = (await ask('Press Enter once it is switched on (or type s to skip): ')).trim().toLowerCase();
+    if (answer === 's' || answer === 'skip') return 'missing';
+    const since = Date.now();
+    restart();
+    status = await readAgain();
+    if (!status || status.at < since) {
+      stdout(renderStepInfo('The background HUD did not answer after the restart.'));
+      return 'unknown';
+    }
+  }
+}
+
+/**
  * Everything the desktop HUD needs, in one pass and in this order: the agent and its
  * permissions, macOS permissions, the computer-use
  * tools registered with the agent, then the background HUD service. Each step explains
@@ -675,6 +716,7 @@ async function hudSetupFlow(
       : new HudServiceManager());
   let helperError: string | null = null;
   let unconfirmed = false;
+  let screenMissing = false;
   if (process.platform !== 'darwin' && process.platform !== 'win32') {
     stdout(renderStepInfo('The desktop HUD hotkey service is supported on macOS and Windows.'));
   } else {
@@ -689,9 +731,24 @@ async function hudSetupFlow(
       helperError = helper.error;
       stdout(renderStepInfo(`${hudHotkeyLabel()} helper: ${helper.error}`));
     }
+    const installedAt = Date.now();
     const res = hudService.install();
     if (res.success) {
       stdout(renderStepSuccess('Desktop HUD installed and running in the background'));
+      if (process.platform === 'darwin' && (context.verifyMacHud || !context.runner)) {
+        stdout(renderStepInfo('Checking the background HUD can use Screen Recording...'));
+        const read = context.verifyMacHud ?? (() => waitForMacHudStatus({ since: installedAt }));
+        const outcome = await verifyMacServicePermission(
+          await read(),
+          context.verifyMacHud ?? (() => waitForMacHudStatus({ since: Date.now() - 1 })),
+          () => (typeof (hudService as { restart?: () => boolean }).restart === 'function' ? (hudService as { restart: () => boolean }).restart() : false),
+          context.isTTY ?? Boolean(process.stdin.isTTY),
+          context.ask ?? defaultAsk,
+          stdout,
+        );
+        if (outcome === 'ok') stdout(renderStepSuccess('The background HUD can use Screen Recording'));
+        if (outcome === 'missing') screenMissing = true;
+      }
       // Windows: say whether the shortcut was really free before telling the person to press it
       const wait = (hudService as { waitForHotkey?: () => Promise<{ state: string } | null> }).waitForHotkey;
       if (process.platform === 'win32' && typeof wait === 'function') {
@@ -719,6 +776,11 @@ async function hudSetupFlow(
   if (helperError) {
     stdout(renderStepInfo('Desktop HUD is installed but the hotkey will not work yet (see above).'));
     return 1;
+  }
+  if (screenMissing) {
+    stdout(renderStepInfo(`Desktop HUD is installed and ${hudHotkeyLabel()} works, but tasks that need to see the screen will not until Screen Recording is switched on for the program above.`));
+    stdout(renderStepInfo('When it is, run "rh hud install" to restart the HUD, then check with "rh doctor".'));
+    return 0;
   }
   if (unconfirmed) {
     stdout(renderStepInfo('Desktop HUD is installed, but its shortcut is not confirmed yet. Give it a minute, then check with "rh doctor".'));
