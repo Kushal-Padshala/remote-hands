@@ -152,11 +152,23 @@ remote-hands/
 
 ### Prerequisites
 
-- **Node.js**: `>=22.13.0 (not 23.0-23.3)`
+- **Node.js**: `>=22.13.0 (not 23.0-23.3)` (the Mac one-line installer brings its own)
 - **Cloudflare Account**: Free plan (zero credit card required)
 - **Google Chrome**: Desktop browser installed
 
 ### 1. Installation
+
+#### Mac (desktop HUD)
+
+Open Terminal (Cmd + Space, type `Terminal`, Enter) and paste this one line. It needs no administrator rights and no Node.js: it puts a checksum-verified private copy of Node.js and Remote Hands in `~/.remote-hands`, then starts the guided setup, which signs in to the agent (agy), shows and asks before it changes your agy settings, walks you through the macOS permissions one page at a time, and installs the HUD.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Kushal-Padshala/remote-hands/main/scripts/install-mac.sh | sh
+```
+
+Then press **Shift + Cmd + Space** anywhere. The full walk-through (what each question and permission is for, and what to do when something fails) is in [docs/mac-setup.md](docs/mac-setup.md). `rh doctor` shows what is ready; `rh permissions revert` puts your agy settings back.
+
+#### Any system with Node.js
 
 Install globally via npm or run directly with `npx`:
 

@@ -142,3 +142,16 @@ remote-hands daemon --verbose
 ## 9. Alternative Backends
 
 Neither a Supabase project, a Vercel deploy, nor local Docker containers are required for the standard free architecture. However, if you self-host via Docker or utilize the optional Supabase adapter located in `supabase/`, refer to [docs/architecture/control-plane.md](architecture/control-plane.md).
+
+---
+
+## 8. Desktop HUD on a Mac
+
+The step-by-step guide is [mac-setup.md](mac-setup.md). Quick fixes:
+
+- **Nothing happens on Shift + Cmd + Space.** Run `rh doctor`. It reports whether the HUD service is running, whether it holds its shortcut, and whether the background HUD itself has Screen Recording. Logs: `~/.remote-hands/logs/hud.error.log`.
+- **"does not have Screen Recording".** macOS gives that permission to one program, and the HUD runs as its own `node` (not your terminal). Switch on the `node` path `rh doctor` prints, then run `rh hud install`.
+- **The HUD stopped after a Node upgrade.** The service starts a launcher (`~/.remote-hands/bin/rh-hud-launch.sh`) that finds Node each time. `rh hud install` rewrites it and remembers the current Node.
+- **`rh setup` waits at "Command Line Tools".** Finish the macOS install window (or run `xcode-select --install`) and run `rh setup` again.
+- **Undo the agy settings change.** `rh permissions revert` removes only what Remote Hands added (backups: `settings.json.bak-rh`).
+
