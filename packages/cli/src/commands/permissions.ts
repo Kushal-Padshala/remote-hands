@@ -7,6 +7,7 @@ import {
 import {
   checkAgyPermissions,
   ensureAgyPermissions,
+  readAgyConsent,
   revertAgyPermissions,
 } from '../system/agy-permissions.js';
 import { HudServiceManager } from '@remote-hands/daemon';
@@ -42,7 +43,9 @@ export async function checkAllPermissions(context: CommandContext = {}): Promise
 export async function permissionsCommand(args: string[], context: CommandContext = {}): Promise<number> {
   const stdout = context.stdout ?? console.log;
   const isJson = args.includes('--json');
-  const isFix = args.includes('--fix') || args.includes('fix') || (!isJson && !args.includes('check'));
+  // "status", "check" and --json only look: they never change a setting or a recorded choice. Bare "rh permissions" and "fix" do.
+  const readOnly = !args.includes('--fix') && !args.includes('fix') && (isJson || args.includes('check') || args.includes('status'));
+  const isFix = !readOnly;
 
   if (args.includes('--help') || args.includes('-h') || args.includes('help')) {
     stdout('Usage: rh permissions [check|fix|status] [--json]');
@@ -71,18 +74,27 @@ export async function permissionsCommand(args: string[], context: CommandContext
     // The background HUD cannot run tasks without those settings, and an HUD installed by an older version would put them
     // back at the next login: stop it, so the revert is lasting. "rh setup --hud" brings it back after asking again.
     const service = context.hudServiceManager ?? new HudServiceManager();
+    let stopped = true;
     try {
       if (service.isInstalled()) {
-        service.uninstall();
-        stdout('The background HUD was stopped, because it cannot run tasks without those settings. "rh setup --hud" brings it back (and asks again).');
+        stopped = service.uninstall() !== false;
+        stdout(stopped
+          ? 'The background HUD was stopped, because it cannot run tasks without those settings. "rh setup --hud" brings it back (and asks again).'
+          : c.yellow('The background HUD could not be stopped. An HUD from an older version would put the settings back at the next login: run "rh hud uninstall", or remove it by hand (macOS: launchctl unload ~/Library/LaunchAgents/com.remote-hands.hud.plist; Windows: Settings > Apps > Startup).'));
       }
     } catch {
-      // nothing to stop
+      stopped = false;
+      stdout(c.yellow('The background HUD could not be checked or stopped: run "rh hud uninstall".'));
     }
-    return res.skipped.length > 0 ? 1 : 0;
+    return res.skipped.length > 0 || !stopped ? 1 : 0;
   }
 
-  await ensureAgyPermissions(context.fs, undefined, { explicit: isFix });
+  if (isFix && (await readAgyConsent(context.fs)) === 'revoked') {
+    // reverting was a decision: only setup, which shows what changes and asks, takes it back
+    stdout(c.yellow('You reverted the agy settings. Run "rh setup --hud" to set them up again: it shows what changes and asks first.'));
+    return 1;
+  }
+  if (isFix) await ensureAgyPermissions(context.fs, undefined, { explicit: true });
 
   if (isFix && process.platform === 'darwin' && !context.runner && !isJson) {
     await ensureMacPermissions(stdout);

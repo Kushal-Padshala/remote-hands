@@ -169,9 +169,17 @@ add_to_path() {
       added="$added $(basename "$rc")"
     fi
   done
-  if [ -f "$HOME/.bash_profile" ] && ! grep -Fq '# remote-hands' "$HOME/.bash_profile" 2>/dev/null; then
-    printf '\n%s\n' "$line" >> "$HOME/.bash_profile"
-    added="$added .bash_profile"
+  # bash reads the first of these that exists; a person on bash with none of them gets a new .bash_profile
+  bash_rc=""
+  for candidate in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+    if [ -f "$candidate" ]; then bash_rc="$candidate"; break; fi
+  done
+  if [ -z "$bash_rc" ]; then
+    case "${SHELL:-}" in */bash) bash_rc="$HOME/.bash_profile" ;; esac
+  fi
+  if [ -n "$bash_rc" ] && ! grep -Fq '# remote-hands' "$bash_rc" 2>/dev/null; then
+    printf '\n%s\n' "$line" >> "$bash_rc"
+    added="$added $(basename "$bash_rc")"
   fi
   existing="$(command -v rh 2>/dev/null || true)"
   if [ -n "$existing" ] && [ "$existing" != "$BIN_DIR/rh" ]; then

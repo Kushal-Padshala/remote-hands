@@ -102,6 +102,60 @@ describe('scripts/install-mac.sh', () => {
     });
   });
 
+  describe('the shell startup files it edits, run for real', () => {
+    function run(setup: (home: string) => void, shell: string): { home: string; files: Record<string, string> } {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'install-mac-rc-'));
+      setup(home);
+      const fn = script.slice(script.indexOf('add_to_path() {'), script.indexOf('main "$@"'));
+      const res = spawnSync('/bin/sh', ['-c', `HOME='${home}'\nSHELL='${shell}'\nBIN_DIR='${home}/.remote-hands/bin'\nnote() { :; }\n${fn}\nadd_to_path`], { encoding: 'utf-8' });
+      expect(res.status).toBe(0);
+      const files: Record<string, string> = {};
+      for (const name of fs.readdirSync(home)) if (name.startsWith('.') && fs.statSync(path.join(home, name)).isFile()) files[name] = fs.readFileSync(path.join(home, name), 'utf-8');
+      return { home, files };
+    }
+    const mark = '# remote-hands';
+    const cleanup = (home: string) => fs.rmSync(home, { recursive: true, force: true });
+
+    it('zsh: adds to .zprofile and .zshrc once, however often it runs', () => {
+      const { home, files } = run(() => {}, '/bin/zsh');
+      try {
+        expect(Object.keys(files).sort()).toEqual(['.zprofile', '.zshrc']);
+        for (const f of Object.values(files)) expect(f.split(mark).length - 1).toBe(1);
+      } finally {
+        cleanup(home);
+      }
+    });
+
+    it('bash with no profile file: creates .bash_profile so new Terminal windows find rh', () => {
+      const { home, files } = run(() => {}, '/bin/bash');
+      try {
+        expect(files['.bash_profile']).toContain(mark);
+      } finally {
+        cleanup(home);
+      }
+    });
+
+    it('bash that already uses .profile: adds to that one and does not create a .bash_profile that would hide it', () => {
+      const { home, files } = run((h) => fs.writeFileSync(path.join(h, '.profile'), 'export A=1\n'), '/bin/bash');
+      try {
+        expect(files['.profile']).toContain(mark);
+        expect(files['.profile']).toContain('export A=1');
+        expect(files['.bash_profile']).toBeUndefined();
+      } finally {
+        cleanup(home);
+      }
+    });
+
+    it('an existing .bash_profile is used and never duplicated', () => {
+      const { home, files } = run((h) => fs.writeFileSync(path.join(h, '.bash_profile'), `echo hi\n${'export PATH="$HOME/.remote-hands/bin:$PATH"  ' + mark}\n`), '/bin/zsh');
+      try {
+        expect(files['.bash_profile'].split(mark).length - 1).toBe(1);
+      } finally {
+        cleanup(home);
+      }
+    });
+  });
+
   describe('node_ok version rules, run for real', () => {
     function accepts(version: string): boolean {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'install-mac-'));

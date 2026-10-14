@@ -104,6 +104,44 @@ describe('permissions command', () => {
       expect(out.join('\n')).toContain('no record of changes');
     });
 
+    it('status, check and --json only look: they never re-grant what was reverted or write any choice', async () => {
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      const { files, fs } = memFs({ [SETTINGS]: JSON.stringify(original) });
+      await permissionsCommand(['fix'], { stdout: () => {}, fs });
+      await permissionsCommand(['revert'], { stdout: () => {}, fs, hudServiceManager: { isInstalled: () => false } } as CommandContext);
+      const reverted = JSON.stringify(files);
+      for (const sub of [['status'], ['check'], ['--json'], ['status', '--json']]) {
+        await permissionsCommand(sub, { stdout: () => {}, fs });
+        expect(JSON.stringify(files)).toBe(reverted);
+      }
+      expect(JSON.parse(files[SETTINGS]!)).toEqual(original);
+    });
+
+    it('fix (and bare "rh permissions") refuse after a revert and point to setup, which asks', async () => {
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      const { files, fs } = memFs({ [SETTINGS]: JSON.stringify(original) });
+      await permissionsCommand(['fix'], { stdout: () => {}, fs });
+      await permissionsCommand(['revert'], { stdout: () => {}, fs, hudServiceManager: { isInstalled: () => false } } as CommandContext);
+      for (const sub of [['fix'], []]) {
+        const out: string[] = [];
+        expect(await permissionsCommand(sub, { stdout: (l) => out.push(l), fs })).toBe(1);
+        expect(out.join('\n')).toContain('rh setup --hud');
+        expect(JSON.parse(files[SETTINGS]!)).toEqual(original);
+      }
+    });
+
+    it('exits 1 and says how to remove it by hand when the background HUD cannot be stopped', async () => {
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      const { fs } = memFs({ [SETTINGS]: JSON.stringify(original) });
+      await permissionsCommand(['fix'], { stdout: () => {}, fs });
+      const service = { isInstalled: () => true, uninstall: vi.fn().mockReturnValue(false) };
+      const out: string[] = [];
+      expect(await permissionsCommand(['revert'], { stdout: (l) => out.push(l), fs, hudServiceManager: service } as CommandContext)).toBe(1);
+      expect(out.join('\n')).toContain('could not be stopped');
+      expect(out.join('\n')).toContain('launchctl unload');
+      expect(out.join('\n')).not.toContain('was stopped');
+    });
+
     it('fails with exit 1, changing and stopping nothing, when the revert cannot be made lasting', async () => {
       Object.defineProperty(process, 'platform', { value: 'linux' });
       const { files, fs } = memFs({ [SETTINGS]: JSON.stringify(original) });

@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import * as nodeFs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -7,6 +8,7 @@ import {
   checkAgyPermissions,
   ensureAgyMcpPermission,
   ensureAgyPermissions,
+  readAgyConsent,
   removeAgyMcpPermission,
   revertAgyPermissions,
 } from './agy-permissions.js';
@@ -408,5 +410,133 @@ describe('agy settings changes are durable and race-free', () => {
       expect(settings().permissions.defaultAction).toBe('allow');
       expect(nodeFs.existsSync(lock)).toBe(false);
     });
+  });
+});
+
+describe('unreadable records and lock ownership', () => {
+  const GLOBAL = path.join(os.homedir(), '.gemini/antigravity-cli/settings.json');
+  const UNDO = path.join(os.homedir(), '.remote-hands', 'agy-undo.json');
+  const CONSENT = path.join(os.homedir(), '.remote-hands', 'agy-consent.json');
+  const original = { permissions: { defaultAction: 'ask', allow: ['read_file'] } };
+
+  it('reads a missing consent record as no choice, an empty one as no choice, and a damaged or unreadable one as revoked', async () => {
+    expect(await readAgyConsent(memoryFs().fs)).toBe('none');
+    expect(await readAgyConsent(memoryFs({ [CONSENT]: '  ' }).fs)).toBe('none');
+    expect(await readAgyConsent(memoryFs({ [CONSENT]: '{ half a rec' }).fs)).toBe('revoked');
+    expect(await readAgyConsent(memoryFs({ [CONSENT]: '{"state":"maybe"}' }).fs)).toBe('revoked');
+    const unreadable: FileSystemAdapter = { exists: async () => true, readFile: async () => { throw new Error('EACCES'); }, writeFile: async () => {} };
+    expect(await readAgyConsent(unreadable)).toBe('revoked');
+    expect(await readAgyConsent(memoryFs({ [CONSENT]: '{"state":"granted"}' }).fs)).toBe('granted');
+  });
+
+  it('a background caller stays out when the consent record is damaged (it cannot tell if the person revoked)', async () => {
+    const { fs, files } = memoryFs({ [GLOBAL]: JSON.stringify(original), [CONSENT]: '{ half a rec' });
+    expect(await ensureAgyPermissions(fs)).toBe(false);
+    expect(JSON.parse(files[GLOBAL]!)).toEqual(original);
+  });
+
+  it('never replaces an undo record it cannot read: setup stops, revert reports it and leaves it as it is', async () => {
+    const damaged = '{ "files": ';
+    const { fs, files } = memoryFs({ [GLOBAL]: JSON.stringify(original), [UNDO]: damaged });
+    expect(await ensureAgyPermissions(fs, undefined, { explicit: true })).toBe(false);
+    expect(JSON.parse(files[GLOBAL]!)).toEqual(original);
+    expect(files[UNDO]).toBe(damaged);
+    const res = await revertAgyPermissions(fs);
+    expect(res.error).toContain('cannot be read');
+    expect(files[UNDO]).toBe(damaged);
+    expect(files[CONSENT]).toBeUndefined();
+  });
+
+  it('an accepted grant that cannot be recorded changes nothing', async () => {
+    const { fs, files } = memoryFs({ [GLOBAL]: JSON.stringify(original) });
+    const noConsent: FileSystemAdapter = { ...fs, writeFile: async (p, c) => { if (p === CONSENT) throw new Error('EACCES'); return fs.writeFile(p, c); } };
+    expect(await ensureAgyPermissions(noConsent, undefined, { explicit: true })).toBe(false);
+    expect(JSON.parse(files[GLOBAL]!)).toEqual(original);
+  });
+
+  describe('the lock, on the real file system (a private HOME)', () => {
+    let home: string;
+    let savedHome: string | undefined;
+    beforeEach(() => {
+      savedHome = process.env.HOME;
+      home = nodeFs.mkdtempSync(path.join(os.tmpdir(), 'agy-lock2-'));
+      process.env.HOME = home;
+      nodeFs.mkdirSync(path.join(home, '.gemini', 'antigravity-cli'), { recursive: true });
+      nodeFs.writeFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), JSON.stringify(original));
+    });
+    afterEach(() => {
+      process.env.HOME = savedHome;
+      try {
+        nodeFs.chmodSync(path.join(home, '.remote-hands'), 0o755);
+      } catch {
+        // none
+      }
+      nodeFs.rmSync(home, { recursive: true, force: true });
+    });
+    const lock = () => path.join(home, '.remote-hands', 'agy-settings.lock');
+    const makeLock = (owner?: { pid: number; token: string }, ageMs = 0) => {
+      nodeFs.mkdirSync(lock(), { recursive: true });
+      if (owner) nodeFs.writeFileSync(path.join(lock(), 'owner.json'), JSON.stringify(owner));
+      const t = new Date(Date.now() - ageMs);
+      nodeFs.utimesSync(lock(), t, t);
+    };
+    const deadPid = (): number => {
+      const child = spawnSync(process.execPath, ['-e', '0']);
+      return child.pid ?? 999_999;
+    };
+    const ensure = () => ensureAgyPermissions(defaultFileSystem, undefined, { explicit: true, lockWaitMs: 150 });
+
+    it('takes over a lock whose owner process is gone, however recent it is', async () => {
+      makeLock({ pid: deadPid(), token: 'old' }, 0);
+      expect(await ensure()).toBe(true);
+      expect(nodeFs.existsSync(lock())).toBe(false);
+    });
+
+    it('never takes a lock whose owner is alive, however old it looks (up to ten minutes), and says it is busy', async () => {
+      makeLock({ pid: process.pid, token: 'live' }, 5 * 60_000);
+      expect(await ensure()).toBe(false);
+      expect(nodeFs.existsSync(lock())).toBe(true);
+      const res = await revertAgyPermissions(defaultFileSystem, { lockWaitMs: 100 });
+      expect(res.error).toContain('another Remote Hands process');
+    });
+
+    it('treats a lock with no owner file as abandoned only after a few seconds', async () => {
+      makeLock(undefined, 0);
+      expect(await ensure()).toBe(false);
+      makeLock(undefined, 60_000);
+      expect(await ensure()).toBe(true);
+    });
+
+    it('gives up quickly, instead of spinning, when an abandoned lock cannot be removed', async () => {
+      makeLock({ pid: deadPid(), token: 'old' }, 0);
+      nodeFs.chmodSync(path.join(home, '.remote-hands'), 0o555);
+      const started = Date.now();
+      expect(await ensure()).toBe(false);
+      expect(Date.now() - started).toBeLessThan(1_000);
+    });
+
+    it('releases only its own lock: one taken over meanwhile stays with its new owner', async () => {
+      const original2 = defaultFileSystem.writeFile;
+      const spy = vi.spyOn(defaultFileSystem, 'writeFile').mockImplementation(async (file, content) => {
+        // while this process holds the lock, "another process" replaces it
+        if (file.endsWith('antigravity-cli/settings.json')) nodeFs.writeFileSync(path.join(lock(), 'owner.json'), JSON.stringify({ pid: process.pid, token: 'someone-else' }));
+        return original2(file, content);
+      });
+      try {
+        await ensure();
+      } finally {
+        spy.mockRestore();
+      }
+      expect(JSON.parse(nodeFs.readFileSync(path.join(lock(), 'owner.json'), 'utf-8')).token).toBe('someone-else');
+    });
+
+    it('rule edits made by "rh mcp add/remove" wait for the same lock', async () => {
+      makeLock({ pid: process.pid, token: 'live' }, 0);
+      const started = Date.now();
+      const added = await ensureAgyMcpPermission(defaultFileSystem);
+      expect(added.updated).toEqual([]);
+      expect(added.skipped[0]?.reason).toContain('another Remote Hands process');
+      expect(Date.now() - started).toBeGreaterThanOrEqual(4_000);
+    }, 15_000);
   });
 });

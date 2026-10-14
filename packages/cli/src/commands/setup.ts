@@ -233,9 +233,12 @@ async function setupAgentAndPermissions(
     }
   }
   const permissionsOk = await ensureAgyPermissions(fs, projectRoot, { explicit: true });
-  if (permissionsOk) {
-    stdout(renderStepSuccess('Configured headless tool permissions and trusted workspaces for agy'));
+  if (!permissionsOk) {
+    stderr(renderStepError('Could not set up the agy settings, so nothing was changed.'));
+    stderr('Check that ~/.gemini and ~/.remote-hands can be written to (and that no other Remote Hands command is running), then run "rh setup" again.');
+    return 1;
   }
+  stdout(renderStepSuccess('Configured headless tool permissions and trusted workspaces for agy'));
 
   if (commandLineTools && !(await commandLineTools.wait())) {
     stderr(renderStepError('The Command Line Tools install did not finish.'));
@@ -290,7 +293,7 @@ export async function setupCommand(args: string[], context: CommandContext = {})
     const LOCAL_STEPS = 4;
     stdout(renderBanner());
 
-    const agyErr = await setupAgentAndPermissions(args, context, runner, fs, projectRoot, stdout, stderr, 1, LOCAL_STEPS, true);
+    const agyErr = await setupAgentAndPermissions(args, context, runner, fs, projectRoot, stdout, stderr, 1, LOCAL_STEPS);
     if (agyErr !== null) return agyErr;
 
     stdout(renderStepStart(2, LOCAL_STEPS, 'Browser Automation Engine (browser-use)'));
@@ -789,7 +792,7 @@ async function hudSetupFlow(
       }
     } else {
       stdout(renderStepInfo(`Desktop HUD note: ${res.error || 'could not auto-load the LaunchAgent'}`));
-      if (windows) blockers.push(`the HUD could not be installed (${res.error || 'unknown reason'})`);
+      blockers.push(`the HUD could not be installed (${res.error || 'unknown reason'})`);
     }
   }
 

@@ -2,6 +2,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as os from 'node:os';
 import { hudCommand } from './hud.js';
 
+/** A private in-memory file system: tests never share the (locked) settings files of the real one. */
+const memoryFs = (): any => {
+  const files: Record<string, string> = {};
+  return {
+    readFile: async (p: string) => { if (!(p in files)) throw new Error('ENOENT'); return files[p]; },
+    writeFile: async (p: string, c: string) => { files[p] = c; },
+    exists: async (p: string) => p in files,
+  };
+};
+
 describe('CLI hud command', () => {
   let mockServiceManager: any;
   let mockCoordinator: any;
@@ -32,7 +42,7 @@ describe('CLI hud command', () => {
   });
 
   it('installs launchagent background service on rh hud install', async () => {
-    const code = await hudCommand(['install'], {
+    const code = await hudCommand(['install'], { fs: memoryFs(),
       serviceManager: mockServiceManager,
       stdout: (msg) => logs.push(msg),
       stderr: (msg) => errors.push(msg),
@@ -44,7 +54,7 @@ describe('CLI hud command', () => {
 
   it('installs the service without offering browser setup', async () => {
     const offer = vi.fn(async () => {});
-    const code = await hudCommand(['install'], {
+    const code = await hudCommand(['install'], { fs: memoryFs(),
       serviceManager: mockServiceManager,
       browserSetupOffer: offer,
       stdout: (msg) => logs.push(msg),
@@ -62,7 +72,7 @@ describe('CLI hud command', () => {
     it('names the shortcut once the HUD confirmed it', async () => {
       Object.defineProperty(process, 'platform', { value: 'darwin' });
       mockServiceManager.waitForHotkey = vi.fn().mockResolvedValue({ state: 'ready', keys: 'Shift+Cmd+Space', at: 1 });
-      const code = await hudCommand(['install'], { serviceManager: mockServiceManager, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
+      const code = await hudCommand(['install'], { fs: memoryFs(), serviceManager: mockServiceManager, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
       expect(code).toBe(0);
       expect(mockServiceManager.waitForHotkey).toHaveBeenCalledWith(20_000);
       expect(logs.join('\n')).toContain('HotKey:');
@@ -71,7 +81,7 @@ describe('CLI hud command', () => {
     it('warns in Mac words, without naming the shortcut as working, when another app holds it', async () => {
       Object.defineProperty(process, 'platform', { value: 'darwin' });
       mockServiceManager.waitForHotkey = vi.fn().mockResolvedValue({ state: 'failed', at: 1 });
-      const code = await hudCommand(['install'], { serviceManager: mockServiceManager, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
+      const code = await hudCommand(['install'], { fs: memoryFs(), serviceManager: mockServiceManager, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
       expect(code).toBe(0);
       expect(errors.join('\n')).toContain('Raycast');
       expect(errors.join('\n')).not.toContain('Ctrl');
@@ -81,7 +91,7 @@ describe('CLI hud command', () => {
     it('does not claim the shortcut when the HUD has not answered', async () => {
       Object.defineProperty(process, 'platform', { value: 'darwin' });
       mockServiceManager.waitForHotkey = vi.fn().mockResolvedValue(null);
-      const code = await hudCommand(['install'], { serviceManager: mockServiceManager, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
+      const code = await hudCommand(['install'], { fs: memoryFs(), serviceManager: mockServiceManager, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
       expect(code).toBe(0);
       expect(logs.join('\n')).toContain('has not confirmed its shortcut');
       expect(logs.join('\n')).not.toContain('HotKey:');
@@ -181,7 +191,7 @@ describe('CLI hud command', () => {
     });
     let listenerObj: any;
     // --skip-permissions: on macOS the real Screen Recording check would wait for the user.
-    const code = await hudCommand(['listen', '--skip-permissions'], {
+    const code = await hudCommand(['listen', '--skip-permissions'], { fs: memoryFs(),
       coordinator: mockCoordinator,
       stdout: (msg) => logs.push(msg),
       browserSetupOffer: async () => {},
@@ -215,7 +225,7 @@ describe('CLI hud install on Windows', () => {
       isRunning: () => true,
       waitForHotkey: vi.fn().mockResolvedValue(hotkey),
     };
-    const code = await hudCommand(['install'], { serviceManager, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
+    const code = await hudCommand(['install'], { fs: memoryFs(), serviceManager, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
     return { code, out: logs.join('\n'), err: errors.join('\n') };
   };
 
@@ -262,11 +272,12 @@ describe('CLI hud listen started by the Windows supervisor', () => {
     const stop = vi.fn();
     const coordinator = { startListening: vi.fn().mockReturnValue({ stop }) };
     let finished = false;
-    const done = hudCommand(['listen', '--skip-permissions'], {
+    const done = hudCommand(['listen', '--skip-permissions'], { fs: memoryFs(),
       coordinator,
       blockUntilSignal: true,
       onListenerReady: () => {},
       stdout: () => {},
+      fs: memoryFs(),
     } as never).then((code) => {
       finished = true;
       return code;
@@ -284,7 +295,7 @@ describe('CLI hud listen started by the Windows supervisor', () => {
     Object.defineProperty(process, 'platform', { value: 'win32' });
     const onSpy = vi.spyOn(process.stdin, 'on');
     const coordinator = { startListening: vi.fn().mockReturnValue({ stop: vi.fn() }) };
-    await hudCommand(['listen', '--skip-permissions'], { coordinator, once: true, stdout: () => {} } as never);
+    await hudCommand(['listen', '--skip-permissions'], { coordinator, once: true, stdout: () => {}, fs: memoryFs() } as never);
     expect(onSpy).not.toHaveBeenCalledWith('end', expect.any(Function));
   });
 });

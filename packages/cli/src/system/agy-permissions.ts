@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import * as nodeFs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -206,7 +207,9 @@ export async function ensureAgyMcpPermission(
   fs: FileSystemAdapter = defaultFileSystem,
   serverName = 'rh-computer',
 ): Promise<AgyMcpPermissionResult> {
-  const { notPresent: _notPresent, ...res } = await editAgyMcpRule(fs, agyMcpRule(serverName), true);
+  const locked = await withAgyLock(fs, DEFAULT_LOCK_WAIT_MS, () => editAgyMcpRule(fs, agyMcpRule(serverName), true));
+  if (!locked.ok) return { updated: [], alreadyPresent: [], skipped: [{ path: 'agy settings', reason: LOCK_BUSY }] };
+  const { notPresent: _notPresent, ...res } = locked.value;
   return res;
 }
 
@@ -215,7 +218,9 @@ export async function removeAgyMcpPermission(
   fs: FileSystemAdapter = defaultFileSystem,
   serverName = 'rh-computer',
 ): Promise<{ updated: string[]; notPresent: string[]; skipped: { path: string; reason: string }[] }> {
-  const { updated, notPresent, skipped } = await editAgyMcpRule(fs, agyMcpRule(serverName), false);
+  const locked = await withAgyLock(fs, DEFAULT_LOCK_WAIT_MS, () => editAgyMcpRule(fs, agyMcpRule(serverName), false));
+  if (!locked.ok) return { updated: [], notPresent: [], skipped: [{ path: 'agy settings', reason: LOCK_BUSY }] };
+  const { updated, notPresent, skipped } = locked.value;
   return { updated, notPresent, skipped };
 }
 
@@ -247,6 +252,7 @@ export async function checkAgyPermissions(
 }
 
 const SETTINGS_BACKUP_SUFFIX = '.bak-rh';
+const LOCK_BUSY = 'another Remote Hands process is changing the agy settings right now; try again in a moment';
 
 function remoteHandsHome(): string {
   return path.join(os.homedir(), '.remote-hands');
@@ -274,18 +280,35 @@ export type AgyConsentState = 'granted' | 'revoked' | 'none';
 export async function readAgyConsent(fs: FileSystemAdapter = defaultFileSystem): Promise<AgyConsentState> {
   try {
     if (!(await fs.exists(consentPath()))) return 'none';
-    const parsed = JSON.parse(await fs.readFile(consentPath()));
-    return parsed?.state === 'granted' || parsed?.state === 'revoked' ? parsed.state : 'none';
   } catch {
-    return 'none';
+    return 'revoked';
   }
+  try {
+    const raw = await fs.readFile(consentPath());
+    // an empty file records no choice at all
+    if (raw.trim() === '') return 'none';
+    const parsed = JSON.parse(raw);
+    return parsed?.state === 'granted' || parsed?.state === 'revoked' ? parsed.state : 'revoked';
+  } catch {
+    // a record that exists but cannot be read must never read as "no objection": background callers stay out until setup asks again
+    return 'revoked';
+  }
+}
+
+/** Consent and undo records: written to a temporary file and renamed, so a crash never leaves half a record. */
+async function writeStateFile(fs: FileSystemAdapter, file: string, content: string): Promise<void> {
+  if (fs !== defaultFileSystem) return fs.writeFile(file, content);
+  nodeFs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  nodeFs.writeFileSync(tmp, content, 'utf-8');
+  nodeFs.renameSync(tmp, file);
 }
 
 /** True when the note was written. A "revoked" that is not durable would let a background caller undo a revert, so callers check. */
 async function writeAgyConsent(fs: FileSystemAdapter, state: 'granted' | 'revoked'): Promise<boolean> {
   try {
-    await fs.writeFile(consentPath(), JSON.stringify({ state, at: new Date().toISOString() }, null, 2));
-    return (await readAgyConsent(fs)) === state;
+    await writeStateFile(fs, consentPath(), JSON.stringify({ state, at: new Date().toISOString() }, null, 2));
+    return true;
   } catch {
     return false;
   }
@@ -302,57 +325,129 @@ interface UndoEntry {
 
 type UndoManifest = { version: 1; files: Record<string, UndoEntry> };
 
-async function readUndo(fs: FileSystemAdapter): Promise<UndoManifest> {
+async function readUndo(fs: FileSystemAdapter): Promise<{ manifest: UndoManifest; error?: string }> {
+  const empty: UndoManifest = { version: 1, files: {} };
   try {
-    if (await fs.exists(undoPath())) {
-      const parsed = JSON.parse(await fs.readFile(undoPath()));
-      if (parsed && typeof parsed === 'object' && parsed.files && typeof parsed.files === 'object') return parsed as UndoManifest;
-    }
-  } catch {
-    // an unreadable record is replaced by a fresh one
+    if (!(await fs.exists(undoPath()))) return { manifest: empty };
+  } catch (err) {
+    return { manifest: empty, error: err instanceof Error ? err.message : String(err) };
   }
-  return { version: 1, files: {} };
+  try {
+    const raw = await fs.readFile(undoPath());
+    // an empty file holds nothing to lose (a crash before anything was written)
+    if (raw.trim() === '') return { manifest: empty };
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && parsed.files && typeof parsed.files === 'object') return { manifest: parsed as UndoManifest };
+    return { manifest: empty, error: 'it is not a Remote Hands record' };
+  } catch (err) {
+    return { manifest: empty, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
-const LOCK_STALE_MS = 30_000;
+/** A lock whose owner file is missing or unreadable is only abandoned once it is this old (a live owner writes it at once). */
+const LOCK_ORPHAN_MS = 10_000;
+/** The critical sections take milliseconds: a lock this old whose owner still "lives" belongs to a reused process id. */
+const LOCK_MAX_AGE_MS = 10 * 60_000;
 const DEFAULT_LOCK_WAIT_MS = 5_000;
+
+function processLives(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === 'EPERM';
+  }
+}
+
+function readLockOwner(lock: string): { pid: number; token: string } | undefined {
+  try {
+    const parsed = JSON.parse(nodeFs.readFileSync(path.join(lock, 'owner.json'), 'utf-8'));
+    return typeof parsed?.pid === 'number' && typeof parsed?.token === 'string' ? { pid: parsed.pid, token: parsed.token } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Abandoned means: its owner process is gone, or it is far older than any real use. Age alone, for a live owner, is not enough. */
+function lockIsAbandoned(lock: string): { abandoned: boolean; token?: string } {
+  let age = 0;
+  try {
+    age = Date.now() - nodeFs.statSync(lock).mtimeMs;
+  } catch {
+    return { abandoned: false };
+  }
+  const owner = readLockOwner(lock);
+  if (!owner) return { abandoned: age > LOCK_ORPHAN_MS };
+  if (!processLives(owner.pid)) return { abandoned: true, token: owner.token };
+  return { abandoned: age > LOCK_MAX_AGE_MS, token: owner.token };
+}
+
+/** Moves an abandoned lock aside, but only if it is still the very one that was judged (not a newer owner's). */
+function takeOverLock(lock: string, judgedToken: string | undefined): boolean {
+  if (readLockOwner(lock)?.token !== judgedToken) return true;
+  const aside = `${lock}.abandoned-${randomUUID()}`;
+  try {
+    nodeFs.renameSync(lock, aside);
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === 'ENOENT';
+  }
+  try {
+    nodeFs.rmSync(aside, { recursive: true, force: true });
+  } catch {
+    // left behind under another name: harmless
+  }
+  return true;
+}
 
 /**
  * Changing the settings, recording the change, and reverting it must not interleave between processes (the HUD service, a
- * terminal, doctor): one could re-apply what the other just removed. The lock is a folder, which the OS creates atomically;
- * one left by a crashed process is taken over after 30 seconds. Only the real file system is locked (tests use their own).
+ * terminal, doctor): one could re-apply what the other just removed. The lock is a folder, which the OS creates atomically,
+ * holding the owner's process id and a token. Only a lock whose owner is gone is taken over, and only its owner removes it.
+ * Only the real file system is locked (tests use their own).
  */
 async function withAgyLock<T>(fs: FileSystemAdapter, waitMs: number, fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
   if (fs !== defaultFileSystem) return { ok: true, value: await fn() };
   const lock = lockPath();
+  const token = randomUUID();
   const deadline = Date.now() + waitMs;
-  for (;;) {
+  for (let takeovers = 0; ; ) {
     try {
       nodeFs.mkdirSync(path.dirname(lock), { recursive: true });
       nodeFs.mkdirSync(lock);
-      break;
     } catch (err) {
       if ((err as NodeJS.ErrnoException)?.code !== 'EEXIST') return { ok: false };
-      try {
-        if (Date.now() - nodeFs.statSync(lock).mtimeMs > LOCK_STALE_MS) {
-          nodeFs.rmSync(lock, { recursive: true, force: true });
-          continue;
-        }
-      } catch {
-        // gone already: try again at once
+      const judged = lockIsAbandoned(lock);
+      if (judged.abandoned) {
+        // a failure to remove it (permissions) or too many rounds of it ends the attempt: no endless retrying
+        if (!takeOverLock(lock, judged.token) || (takeovers += 1) > 5) return { ok: false };
         continue;
       }
       if (Date.now() >= deadline) return { ok: false };
       await new Promise((resolve) => setTimeout(resolve, 50));
+      continue;
     }
+    try {
+      nodeFs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, token }), 'utf-8');
+    } catch {
+      try {
+        nodeFs.rmSync(lock, { recursive: true, force: true });
+      } catch {
+        // see below: an ownerless lock is taken over after a few seconds
+      }
+      return { ok: false };
+    }
+    break;
   }
   try {
     return { ok: true, value: await fn() };
   } finally {
-    try {
-      nodeFs.rmSync(lock, { recursive: true, force: true });
-    } catch {
-      // a stale lock is taken over later
+    // only the owner removes it: a lock that was taken over and is now someone else's stays
+    if (readLockOwner(lock)?.token === token) {
+      try {
+        nodeFs.rmSync(lock, { recursive: true, force: true });
+      } catch {
+        // taken over later
+      }
     }
   }
 }
@@ -374,10 +469,14 @@ export async function revertAgyPermissions(
   options: { lockWaitMs?: number } = {},
 ): Promise<RevertAgyResult> {
   const locked = await withAgyLock<RevertAgyResult>(fs, options.lockWaitMs ?? DEFAULT_LOCK_WAIT_MS, async () => {
+    const record = await readUndo(fs);
+    if (record.error) {
+      return { restored: [], skipped: [], error: `the record of what Remote Hands changed (${undoPath()}) cannot be read (${record.error}), so nothing was changed` };
+    }
     if (!(await writeAgyConsent(fs, 'revoked'))) {
       return { restored: [], skipped: [], error: 'could not record that the settings were reverted (is ~/.remote-hands writable?), so nothing was changed' };
     }
-    const undo = await readUndo(fs);
+    const undo = record.manifest;
     const restored: string[] = [];
     const skipped: { path: string; reason: string }[] = [];
     const remaining: Record<string, UndoEntry> = {};
@@ -410,14 +509,14 @@ export async function revertAgyPermissions(
       }
     }
     try {
-      await fs.writeFile(undoPath(), JSON.stringify({ version: 1, files: remaining }, null, 2));
+      await writeStateFile(fs, undoPath(), JSON.stringify({ version: 1, files: remaining }, null, 2));
     } catch (err) {
       return { restored, skipped, error: `the settings were restored but the record of them could not be updated (${err instanceof Error ? err.message : String(err)})` };
     }
     return { restored, skipped };
   });
   if (!locked.ok) {
-    return { restored: [], skipped: [], error: 'another Remote Hands process is changing the agy settings right now; try again in a moment' };
+    return { restored: [], skipped: [], error: LOCK_BUSY };
   }
   return locked.value;
 }
@@ -449,7 +548,10 @@ export async function ensureAgyPermissions(
         path.join(os.homedir(), '.gemini/antigravity-ide/settings.json'),
       ];
 
-      const undo = await readUndo(fs);
+      const record = await readUndo(fs);
+      // an undo record that exists but cannot be read must not be replaced: nothing is changed until it is dealt with
+      if (record.error) return false;
+      const undo = record.manifest;
       const plans: { settingsPath: string; settingsObj: any; originalRaw: string | null; isFirstChange: boolean }[] = [];
 
       for (const settingsPath of settingsPaths) {
@@ -517,10 +619,12 @@ export async function ensureAgyPermissions(
 
       // The record of what will change is written BEFORE anything changes: with no way to undo it, nothing is touched.
       try {
-        await fs.writeFile(undoPath(), JSON.stringify(undo, null, 2));
+        await writeStateFile(fs, undoPath(), JSON.stringify(undo, null, 2));
       } catch {
         return false;
       }
+      // An accepted grant is recorded before the settings change; if it cannot be recorded, nothing changes.
+      if (options.explicit && !(await writeAgyConsent(fs, 'granted'))) return false;
 
       let anySucceeded = false;
       let failedAny = false;
@@ -544,12 +648,11 @@ export async function ensureAgyPermissions(
 
       if (failedAny) {
         try {
-          await fs.writeFile(undoPath(), JSON.stringify(undo, null, 2));
+          await writeStateFile(fs, undoPath(), JSON.stringify(undo, null, 2));
         } catch {
           // the earlier, fuller record stays: undoing a file that never changed removes nothing that was not added
         }
       }
-      if (anySucceeded && options.explicit) await writeAgyConsent(fs, 'granted');
       return anySucceeded;
     });
     if (!locked.ok) return false;

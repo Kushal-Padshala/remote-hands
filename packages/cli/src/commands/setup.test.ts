@@ -162,7 +162,8 @@ describe('Setup Command Flow', () => {
     const mockFs: FileSystemAdapter = {
       readFile: async () => '{"d1_databases": [{"database_id": "placeholder"}]}',
       writeFile: async () => {},
-      exists: async () => true,
+      // every file "exists" except Remote Hands' own records, which these fakes would otherwise answer with unrelated content
+      exists: async (p: string) => !/agy-(undo|consent)\.json$/.test(p),
     };
 
     const mockFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, owner_id: 'owner-1', pairing_code: 'RH-9999-AAAA-BBBB' }), { status: 200 }));
@@ -240,7 +241,8 @@ describe('Setup Command Flow', () => {
     const mockFs: FileSystemAdapter = {
       readFile: async () => '{"d1_databases": [{"database_id": "placeholder"}]}',
       writeFile: async () => {},
-      exists: async () => true,
+      // every file "exists" except Remote Hands' own records, which these fakes would otherwise answer with unrelated content
+      exists: async (p: string) => !/agy-(undo|consent)\.json$/.test(p),
     };
 
     const mockFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, owner_id: 'owner-1', pairing_code: 'RH-9999-AAAA-BBBB' }), { status: 200 }));
@@ -317,7 +319,8 @@ describe('Setup Command Flow', () => {
     const mockFs: FileSystemAdapter = {
       readFile: async () => '{"d1_databases": [{"database_id": "placeholder"}]}',
       writeFile: async () => {},
-      exists: async () => true,
+      // every file "exists" except Remote Hands' own records, which these fakes would otherwise answer with unrelated content
+      exists: async (p: string) => !/agy-(undo|consent)\.json$/.test(p),
     };
 
     const mockFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, owner_id: 'owner-1', pairing_code: 'RH-9999-AAAA-BBBB' }), { status: 200 }));
@@ -451,7 +454,8 @@ describe('Setup Command Flow', () => {
     const mockFs: FileSystemAdapter = {
       readFile: async () => '',
       writeFile: async () => {},
-      exists: async () => true,
+      // every file "exists" except Remote Hands' own records, which these fakes would otherwise answer with unrelated content
+      exists: async (p: string) => !/agy-(undo|consent)\.json$/.test(p),
     };
 
     const exitCode = await setupCommand(['--local'], {
@@ -482,7 +486,8 @@ describe('Setup Command Flow', () => {
     const mockFs: FileSystemAdapter = {
       readFile: async () => '',
       writeFile: async () => {},
-      exists: async () => true,
+      // every file "exists" except Remote Hands' own records, which these fakes would otherwise answer with unrelated content
+      exists: async (p: string) => !/agy-(undo|consent)\.json$/.test(p),
     };
 
     const exitCode = await setupCommand(['--local', '--no-hud'], {
@@ -697,6 +702,12 @@ describe('Setup Command Flow', () => {
         expect(calls).toEqual([{ fullDiskAccessOptional: true }]);
       });
 
+      it('Full Disk Access stays required for the local phone-and-tunnel setup too, even without the HUD', async () => {
+        calls.length = 0;
+        await setupCommand(['--local', '--no-hud'], { ...base, runner: hudRunner([]), configDir: '/config' } as never);
+        expect(calls).toEqual([{ fullDiskAccessOptional: false }]);
+      });
+
       it('Full Disk Access stays required for remote use (unattended work needs it)', async () => {
         calls.length = 0;
         const runner = async (cmd: string, args: string[]) => {
@@ -715,6 +726,54 @@ describe('Setup Command Flow', () => {
           configDir: '/config',
         } as never);
         expect(calls).toEqual([{ fullDiskAccessOptional: false }]);
+      });
+    });
+
+    describe('setup does not claim success when a required step failed', () => {
+      const failingFs = (): FileSystemAdapter => {
+        const f: Record<string, string> = {};
+        return {
+          readFile: async (p) => f[p] ?? '',
+          writeFile: async (p, content) => {
+            if (p.endsWith('agy-undo.json')) throw new Error('EACCES');
+            f[p] = content;
+          },
+          exists: async (p) => p in f,
+        };
+      };
+
+      it('stops, exit 1, when the agy settings cannot be set up (and changes nothing)', async () => {
+        const out: string[] = [];
+        const err: string[] = [];
+        const code = await setupCommand(['--hud'], {
+          runner: hudRunner([]),
+          fs: failingFs(),
+          projectRoot: '/project',
+          hudServiceManager: { install: () => ({ success: true, plistPath: '/mock.plist' }) },
+          browserSetup: readyBrowserSetup([]),
+          isTTY: false,
+          stdout: (l) => out.push(l),
+          stderr: (l) => err.push(l),
+        });
+        expect(code).toBe(1);
+        expect(err.join('\n')).toContain('Could not set up the agy settings');
+        expect(out.join('\n')).not.toContain('Desktop HUD is ready');
+      });
+
+      it('is not ready, exit 1, when the HUD service could not be installed (on a Mac too)', async () => {
+        const out: string[] = [];
+        const code = await setupCommand(['--hud'], {
+          runner: hudRunner([]),
+          fs: mockFs,
+          projectRoot: '/project',
+          hudServiceManager: { install: () => ({ success: false, plistPath: '/mock.plist', error: 'EACCES: cannot copy' }) },
+          browserSetup: readyBrowserSetup([]),
+          isTTY: false,
+          stdout: (l) => out.push(l),
+        });
+        expect(code).toBe(1);
+        expect(out.join('\n')).toContain('Not ready: the HUD could not be installed (EACCES: cannot copy)');
+        expect(out.join('\n')).not.toContain('Desktop HUD is ready');
       });
     });
 

@@ -263,6 +263,23 @@ describe('HudServiceManager', () => {
     expect(mockExec).toHaveBeenCalledWith('launchctl', ['unload', '-w', testPlist]);
   });
 
+  it('uninstall also removes a job that is still loaded after its file is gone, and says false when it cannot', () => {
+    fs.writeFileSync(testPlist, 'dummy', 'utf-8');
+    const calls: string[] = [];
+    let loaded = true;
+    const exec = (cmd: string, args: string[]) => {
+      calls.push(`${cmd} ${args.join(' ')}`);
+      if (args[0] === 'remove') loaded = false;
+      return { stdout: loaded && args[0] === 'list' ? '1234 0 com.remote-hands.hud\n' : '', stderr: '', status: 0 };
+    };
+    expect(new HudServiceManager({ exec: exec as never, plistPath: testPlist, home: tmpDir }).uninstall()).toBe(true);
+    expect(calls).toContain('launchctl remove com.remote-hands.hud');
+
+    fs.writeFileSync(testPlist, 'dummy', 'utf-8');
+    const stuck = (cmd: string, args: string[]) => ({ stdout: args[0] === 'list' ? '1234 0 com.remote-hands.hud\n' : '', stderr: '', status: 0 });
+    expect(new HudServiceManager({ exec: stuck as never, plistPath: testPlist, home: tmpDir }).uninstall()).toBe(false);
+  });
+
   it('checks running status via launchctl list', () => {
     mockExec.mockReturnValue({
       stdout: '1234 0 com.remote-hands.hud\n5678 0 other.service',

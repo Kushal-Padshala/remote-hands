@@ -352,14 +352,21 @@ export class HudServiceManager {
       clearHudStatus(this.home);
       return removed;
     }
+    let removed = false;
     try {
       if (fs.existsSync(this.plistPath)) {
         this.exec('launchctl', ['unload', '-w', this.plistPath]);
         fs.unlinkSync(this.plistPath);
-        return true;
+        removed = true;
       }
     } catch {}
-    return false;
+    // Removing the file does not stop a job that is already loaded: make sure it is really gone.
+    if (this.isRunning()) {
+      this.exec('launchctl', ['remove', 'com.remote-hands.hud']);
+      if (this.isRunning()) return false;
+      return true;
+    }
+    return removed;
   }
 
   /** The Remote Hands program that is running right now, else whatever `rh` points at. Never a guessed folder. */
