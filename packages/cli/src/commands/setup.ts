@@ -46,7 +46,7 @@ import {
 import { writeWranglerConfig, defaultFileSystem, type FileSystemAdapter } from '../cloudflare/project.js';
 import { ensureBrowserHarness } from '../system/browser-harness.js';
 import { ensureRemoteHandsOperatorSkill } from '../system/operator-skill.js';
-import { agyPermissionDisclosure, checkAgyPermissions, ensureAgyPermissions, readAgyConsent } from '../system/agy-permissions.js';
+import { agyPermissionDisclosure, ensureAgyPermissions, readAgyConsent } from '../system/agy-permissions.js';
 import { ensureMacPermissions } from '../system/mac-permissions.js';
 import { ensureCloudflaredBinary } from '../system/tunnel.js';
 import { generatePairingCode } from '@remote-hands/control-plane';
@@ -219,8 +219,8 @@ async function setupAgentAndPermissions(
   }
 
   // The agy settings change is shown and agreed to first (a terminal is asked; --yes or no terminal goes ahead, as before)
-  const alreadyApplied = (await readAgyConsent(fs)) === 'granted' || (await checkAgyPermissions(fs));
-  if (!alreadyApplied) {
+  // Only a recorded "yes" skips the question: settings that merely look similar (an older version, a hand edit, a revert) do not.
+  if ((await readAgyConsent(fs)) !== 'granted') {
     for (const line of agyPermissionDisclosure()) stdout(renderStepInfo(line));
     const interactive = context.isTTY ?? Boolean(process.stdin.isTTY);
     if (interactive && !args.includes('--yes')) {

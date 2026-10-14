@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
+import * as os from 'node:os';
 import { setupCommand } from './setup.js';
 import type { CommandRunner } from '../cloudflare/wrangler.js';
 import type { FileSystemAdapter } from '../cloudflare/project.js';
@@ -814,8 +815,9 @@ describe('Setup Command Flow', () => {
       });
 
       it('at a terminal: waits for Enter, restarts the service, checks again, and succeeds', async () => {
-        const reports = [report(false), report(true)];
-        const { out, ctx, restart } = make({ isTTY: true, ask: async (q: string) => (q.includes('Press Enter once') ? '' : ''), verifyMacHud: async () => reports.shift() ?? report(true) });
+        // each answer is stamped when it is given, as the real HUD does (after the restart, not before)
+        const answers = [false, true];
+        const { out, ctx, restart } = make({ isTTY: true, ask: async () => '', verifyMacHud: async () => report(answers.shift() ?? true) });
         expect(await setupCommand(['--hud'], ctx as never)).toBe(0);
         expect(restart).toHaveBeenCalledTimes(1);
         expect(out.join('\n')).toContain('Desktop HUD is ready');
@@ -898,6 +900,26 @@ describe('Setup Command Flow', () => {
           expect(code).toBe(0);
           expect(asked.filter((q) => q.includes('Allow this?'))).toEqual([]);
         }
+      });
+
+      it('settings that merely look similar (read_file allowed, an older version, a hand edit) are not consent: it still asks', async () => {
+        const { fs, files } = freshFs();
+        files[`${os.homedir()}/.gemini/antigravity-cli/settings.json`] = JSON.stringify({ permissions: { defaultAction: 'ask', allow: ['read_file'] } });
+        const asked: string[] = [];
+        const code = await setupCommand(['--hud'], { ...base, fs, stdout: () => {}, isTTY: true, ask: async (q) => { asked.push(q); return 'n'; } });
+        expect(code).toBe(1);
+        expect(asked.filter((q) => q.includes('Allow this?'))).toHaveLength(1);
+        expect(JSON.parse(files[`${os.homedir()}/.gemini/antigravity-cli/settings.json`]!).permissions.defaultAction).toBe('ask');
+      });
+
+      it('asks again after a revert, and a yes records consent again', async () => {
+        const { fs, files } = freshFs();
+        files[`${os.homedir()}/.remote-hands/agy-consent.json`] = JSON.stringify({ state: 'revoked' });
+        const asked: string[] = [];
+        const code = await setupCommand(['--hud'], { ...base, fs, stdout: () => {}, isTTY: true, ask: async (q) => { asked.push(q); return 'y'; } });
+        expect(code).toBe(0);
+        expect(asked.filter((q) => q.includes('Allow this?'))).toHaveLength(1);
+        expect(JSON.parse(files[`${os.homedir()}/.remote-hands/agy-consent.json`]!).state).toBe('granted');
       });
 
       it('does not ask again once the settings are in place', async () => {

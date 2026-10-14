@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as os from 'node:os';
 import { hudCommand } from './hud.js';
 
 describe('CLI hud command', () => {
@@ -85,6 +86,21 @@ describe('CLI hud command', () => {
       expect(logs.join('\n')).toContain('has not confirmed its shortcut');
       expect(logs.join('\n')).not.toContain('HotKey:');
     });
+  });
+
+  it('rh hud install does not quietly undo a revert: it points to setup, which asks', async () => {
+    const files: Record<string, string> = {};
+    const fs: any = {
+      readFile: async (p: string) => files[p] ?? '',
+      writeFile: async (p: string, c: string) => { files[p] = c; },
+      exists: async (p: string) => p in files,
+    };
+    files[`${os.homedir()}/.remote-hands/agy-consent.json`] = JSON.stringify({ state: 'revoked' });
+    const code = await hudCommand(['install'], { serviceManager: mockServiceManager, fs, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
+    expect(code).toBe(1);
+    expect(errors.join('\n')).toContain('rh setup --hud');
+    expect(mockServiceManager.install).not.toHaveBeenCalled();
+    expect(Object.keys(files).filter((f) => f.endsWith('settings.json'))).toEqual([]);
   });
 
   it('status tells the person when the background HUD runs an older copy', async () => {

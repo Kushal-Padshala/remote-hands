@@ -9,6 +9,7 @@ import {
   ensureAgyPermissions,
   revertAgyPermissions,
 } from '../system/agy-permissions.js';
+import { HudServiceManager } from '@remote-hands/daemon';
 import type { CommandContext } from './setup.js';
 import { c } from '../output/ui.js';
 
@@ -58,11 +59,26 @@ export async function permissionsCommand(args: string[], context: CommandContext
 
   if (args.includes('revert')) {
     const res = await revertAgyPermissions(context.fs);
+    if (res.error) {
+      stdout(c.yellow(`Could not revert: ${res.error}`));
+      return 1;
+    }
     for (const f of res.restored) stdout(`Restored ${f}`);
     for (const s of res.skipped) stdout(`Could not restore ${s.path}: ${s.reason}`);
     stdout(res.restored.length > 0
-      ? 'The agy settings are back as they were. Remote Hands will not change them again until you run "rh permissions fix" or "rh setup".'
-      : 'Nothing to restore: Remote Hands has not changed your agy settings.');
+      ? 'The agy settings are back as they were. Remote Hands will not change them again until you run "rh setup".'
+      : 'Nothing to restore: no record of changes by Remote Hands was found (settings made by an older version are not recorded; edit ~/.gemini/antigravity-cli/settings.json by hand to tighten them). Remote Hands will not change them again until you run "rh setup".');
+    // The background HUD cannot run tasks without those settings, and an HUD installed by an older version would put them
+    // back at the next login: stop it, so the revert is lasting. "rh setup --hud" brings it back after asking again.
+    const service = context.hudServiceManager ?? new HudServiceManager();
+    try {
+      if (service.isInstalled()) {
+        service.uninstall();
+        stdout('The background HUD was stopped, because it cannot run tasks without those settings. "rh setup --hud" brings it back (and asks again).');
+      }
+    } catch {
+      // nothing to stop
+    }
     return res.skipped.length > 0 ? 1 : 0;
   }
 

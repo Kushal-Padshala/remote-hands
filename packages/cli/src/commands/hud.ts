@@ -12,7 +12,7 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import type { CommandContext } from './setup.js';
 import { c } from '../output/ui.js';
-import { ensureAgyPermissions } from '../system/agy-permissions.js';
+import { ensureAgyPermissions, readAgyConsent } from '../system/agy-permissions.js';
 import { resolveFastLane } from '../system/fast-lane.js';
 import {
   ensureMacPermissions,
@@ -49,6 +49,11 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
   const serviceManager = context.serviceManager ?? new HudServiceManager();
 
   if (subcommand === 'install') {
+    if ((await readAgyConsent(context.fs)) === 'revoked') {
+      // the person took the settings back on purpose: only setup, which shows what changes and asks, may set them again
+      stderr(c.yellow('You reverted the agy settings, and the HUD cannot run tasks without them. Run "rh setup --hud": it shows what changes and asks first.'));
+      return 1;
+    }
     stdout('Configuring system permissions for desktop overlay assistant...');
     await ensureAgyPermissions(context.fs, undefined, { explicit: true });
     stdout('Installing Remote Hands Desktop Overlay background service...');

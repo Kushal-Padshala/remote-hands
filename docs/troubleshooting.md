@@ -153,5 +153,5 @@ The step-by-step guide is [mac-setup.md](mac-setup.md). Quick fixes:
 - **"does not have Screen Recording".** macOS gives that permission to one program, and the HUD runs as its own `node` (not your terminal). Switch on the `node` path `rh doctor` prints, then run `rh hud install`.
 - **The HUD stopped after a Node upgrade.** The service starts a launcher (`~/.remote-hands/bin/rh-hud-launch.sh`) that finds Node each time. `rh hud install` rewrites it and remembers the current Node.
 - **`rh setup` waits at "Command Line Tools".** Finish the macOS install window (or run `xcode-select --install`) and run `rh setup` again.
-- **Undo the agy settings change.** `rh permissions revert` removes only what Remote Hands added (backups: `settings.json.bak-rh`).
+- **Undo the agy settings change.** `rh permissions revert` removes only what Remote Hands added (backups: `settings.json.bak-rh`) and stops the background HUD, which cannot run tasks without them. `rh setup --hud` shows the change, asks again and starts the HUD.
 

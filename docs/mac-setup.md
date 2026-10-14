@@ -39,7 +39,7 @@ you can type, press **Ctrl + C** to come back to setup. It carries on by itself.
 **Changing your agy settings.** Setup lists exactly what it will change and asks `Allow this? [Y/n]`. In short: agy may read
 and write files and run commands without asking each time, and your home folder is trusted. This applies to agy everywhere,
 including the Antigravity IDE, so read it. Your settings files are copied first (`settings.json.bak-rh`) and
-`rh permissions revert` puts everything back.
+`rh permissions revert` puts everything back (it removes only what Remote Hands added).
 
 **macOS permissions.** macOS makes you switch these on yourself. Setup opens the right page of System Settings, one at a time:
 
@@ -76,7 +76,7 @@ rh doctor
 | The HUD stopped after updating Node | `rh hud install` rewrites the background service (it finds Node again by itself). |
 | After updating Remote Hands, the HUD feels old | `rh hud status` says if the HUD runs an older copy: `rh hud install` updates it. |
 | Setup said "Command Line Tools install did not finish" | Finish the macOS install window (or run `xcode-select --install`), then `rh setup` again. |
-| You want your agy settings back | `rh permissions revert` |
+| You want your agy settings back | `rh permissions revert`. It also stops the background HUD (the HUD cannot run tasks without those settings); `rh setup --hud` brings it back and asks again. |
 | You want it all gone | `rh hud uninstall`, then `rh permissions revert`, then delete the `.remote-hands` folder and the `# remote-hands` lines in `~/.zprofile` and `~/.zshrc`. |
 
 Logs are in `~/.remote-hands/logs/` (`hud.log` and `hud.error.log`).

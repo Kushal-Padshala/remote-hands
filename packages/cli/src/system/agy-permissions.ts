@@ -1,3 +1,4 @@
+import * as nodeFs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { FileSystemAdapter } from '../cloudflare/project.js';
@@ -253,6 +254,7 @@ function remoteHandsHome(): string {
 
 const consentPath = (): string => path.join(remoteHandsHome(), 'agy-consent.json');
 const undoPath = (): string => path.join(remoteHandsHome(), 'agy-undo.json');
+const lockPath = (): string => path.join(remoteHandsHome(), 'agy-settings.lock');
 
 /** What setup is about to change in the person's agy settings, in plain words (shown before anything is written). */
 export function agyPermissionDisclosure(): string[] {
@@ -279,11 +281,13 @@ export async function readAgyConsent(fs: FileSystemAdapter = defaultFileSystem):
   }
 }
 
-async function writeAgyConsent(fs: FileSystemAdapter, state: 'granted' | 'revoked'): Promise<void> {
+/** True when the note was written. A "revoked" that is not durable would let a background caller undo a revert, so callers check. */
+async function writeAgyConsent(fs: FileSystemAdapter, state: 'granted' | 'revoked'): Promise<boolean> {
   try {
     await fs.writeFile(consentPath(), JSON.stringify({ state, at: new Date().toISOString() }, null, 2));
+    return (await readAgyConsent(fs)) === state;
   } catch {
-    // the settings themselves are what matters; the note is best effort
+    return false;
   }
 }
 
@@ -292,6 +296,8 @@ interface UndoEntry {
   disableAllPrompts: { had: boolean; value?: unknown };
   addedAllow: string[];
   addedWorkspaces: string[];
+  /** Which containers did not exist before, so a revert removes them instead of leaving them empty. */
+  created?: { permissions: boolean; allow: boolean; trustedWorkspaces: boolean } | undefined;
 }
 
 type UndoManifest = { version: 1; files: Record<string, UndoEntry> };
@@ -308,45 +314,112 @@ async function readUndo(fs: FileSystemAdapter): Promise<UndoManifest> {
   return { version: 1, files: {} };
 }
 
+const LOCK_STALE_MS = 30_000;
+const DEFAULT_LOCK_WAIT_MS = 5_000;
+
+/**
+ * Changing the settings, recording the change, and reverting it must not interleave between processes (the HUD service, a
+ * terminal, doctor): one could re-apply what the other just removed. The lock is a folder, which the OS creates atomically;
+ * one left by a crashed process is taken over after 30 seconds. Only the real file system is locked (tests use their own).
+ */
+async function withAgyLock<T>(fs: FileSystemAdapter, waitMs: number, fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
+  if (fs !== defaultFileSystem) return { ok: true, value: await fn() };
+  const lock = lockPath();
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try {
+      nodeFs.mkdirSync(path.dirname(lock), { recursive: true });
+      nodeFs.mkdirSync(lock);
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'EEXIST') return { ok: false };
+      try {
+        if (Date.now() - nodeFs.statSync(lock).mtimeMs > LOCK_STALE_MS) {
+          nodeFs.rmSync(lock, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+        // gone already: try again at once
+        continue;
+      }
+      if (Date.now() >= deadline) return { ok: false };
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+  try {
+    return { ok: true, value: await fn() };
+  } finally {
+    try {
+      nodeFs.rmSync(lock, { recursive: true, force: true });
+    } catch {
+      // a stale lock is taken over later
+    }
+  }
+}
+
+export interface RevertAgyResult {
+  restored: string[];
+  skipped: { path: string; reason: string }[];
+  /** Set when the revert could not be made lasting (nothing is claimed as done in that case). */
+  error?: string | undefined;
+}
+
 /**
  * Puts the agy settings back the way they were before Remote Hands changed them: only what was added is taken out, and
- * the two permission switches return to their earlier values. Later calls by background services (the HUD, doctor)
- * leave the settings alone until someone sets them up again on purpose.
+ * the two permission switches return to their earlier values. "Revoked" is written first and must stick: later calls by
+ * background services (the HUD, doctor) then leave the settings alone until someone sets them up again on purpose.
  */
 export async function revertAgyPermissions(
   fs: FileSystemAdapter = defaultFileSystem,
-): Promise<{ restored: string[]; skipped: { path: string; reason: string }[] }> {
-  const undo = await readUndo(fs);
-  const restored: string[] = [];
-  const skipped: { path: string; reason: string }[] = [];
-  const remaining: Record<string, UndoEntry> = {};
-  for (const [file, entry] of Object.entries(undo.files)) {
-    try {
-      if (!(await fs.exists(file))) continue;
-      const settings = JSON.parse(await fs.readFile(file));
-      if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('not a JSON object');
-      const permissions = settings.permissions && typeof settings.permissions === 'object' ? settings.permissions : {};
-      if (entry.defaultAction.had) permissions.defaultAction = entry.defaultAction.value;
-      else delete permissions.defaultAction;
-      if (entry.disableAllPrompts.had) permissions.disableAllPrompts = entry.disableAllPrompts.value;
-      else delete permissions.disableAllPrompts;
-      if (Array.isArray(permissions.allow)) {
-        permissions.allow = permissions.allow.filter((r: unknown) => !entry.addedAllow.includes(r as string));
-      }
-      settings.permissions = permissions;
-      if (Array.isArray(settings.trustedWorkspaces)) {
-        settings.trustedWorkspaces = settings.trustedWorkspaces.filter((w: unknown) => !entry.addedWorkspaces.includes(w as string));
-      }
-      await fs.writeFile(file, JSON.stringify(settings, null, 2));
-      restored.push(file);
-    } catch (err) {
-      skipped.push({ path: file, reason: err instanceof Error ? err.message : String(err) });
-      remaining[file] = entry;
+  options: { lockWaitMs?: number } = {},
+): Promise<RevertAgyResult> {
+  const locked = await withAgyLock<RevertAgyResult>(fs, options.lockWaitMs ?? DEFAULT_LOCK_WAIT_MS, async () => {
+    if (!(await writeAgyConsent(fs, 'revoked'))) {
+      return { restored: [], skipped: [], error: 'could not record that the settings were reverted (is ~/.remote-hands writable?), so nothing was changed' };
     }
+    const undo = await readUndo(fs);
+    const restored: string[] = [];
+    const skipped: { path: string; reason: string }[] = [];
+    const remaining: Record<string, UndoEntry> = {};
+    for (const [file, entry] of Object.entries(undo.files)) {
+      try {
+        if (!(await fs.exists(file))) continue;
+        const settings = JSON.parse(await fs.readFile(file));
+        if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('not a JSON object');
+        const permissions = settings.permissions && typeof settings.permissions === 'object' ? settings.permissions : {};
+        if (entry.defaultAction.had) permissions.defaultAction = entry.defaultAction.value;
+        else delete permissions.defaultAction;
+        if (entry.disableAllPrompts.had) permissions.disableAllPrompts = entry.disableAllPrompts.value;
+        else delete permissions.disableAllPrompts;
+        if (Array.isArray(permissions.allow)) {
+          permissions.allow = permissions.allow.filter((r: unknown) => !entry.addedAllow.includes(r as string));
+        }
+        settings.permissions = permissions;
+        if (Array.isArray(settings.trustedWorkspaces)) {
+          settings.trustedWorkspaces = settings.trustedWorkspaces.filter((w: unknown) => !entry.addedWorkspaces.includes(w as string));
+        }
+        // what Remote Hands created from nothing goes away entirely instead of staying behind empty
+        if (entry.created?.allow && Array.isArray(permissions.allow) && permissions.allow.length === 0) delete permissions.allow;
+        if (entry.created?.trustedWorkspaces && Array.isArray(settings.trustedWorkspaces) && settings.trustedWorkspaces.length === 0) delete settings.trustedWorkspaces;
+        if (entry.created?.permissions && Object.keys(permissions).length === 0) delete settings.permissions;
+        await fs.writeFile(file, JSON.stringify(settings, null, 2));
+        restored.push(file);
+      } catch (err) {
+        skipped.push({ path: file, reason: err instanceof Error ? err.message : String(err) });
+        remaining[file] = entry;
+      }
+    }
+    try {
+      await fs.writeFile(undoPath(), JSON.stringify({ version: 1, files: remaining }, null, 2));
+    } catch (err) {
+      return { restored, skipped, error: `the settings were restored but the record of them could not be updated (${err instanceof Error ? err.message : String(err)})` };
+    }
+    return { restored, skipped };
+  });
+  if (!locked.ok) {
+    return { restored: [], skipped: [], error: 'another Remote Hands process is changing the agy settings right now; try again in a moment' };
   }
-  await fs.writeFile(undoPath(), JSON.stringify({ version: 1, files: remaining }, null, 2));
-  await writeAgyConsent(fs, 'revoked');
-  return { restored, skipped };
+  return locked.value;
 }
 
 export interface EnsureAgyPermissionsOptions {
@@ -355,6 +428,8 @@ export interface EnsureAgyPermissionsOptions {
    * nothing after the person reverted the settings.
    */
   explicit?: boolean | undefined;
+  /** How long to wait for another process that is changing the settings (default 5 s; tests shorten it). */
+  lockWaitMs?: number | undefined;
 }
 
 export async function ensureAgyPermissions(
@@ -363,96 +438,127 @@ export async function ensureAgyPermissions(
   options: EnsureAgyPermissionsOptions = {},
 ): Promise<boolean> {
   try {
-    if (!options.explicit && (await readAgyConsent(fs)) === 'revoked') return false;
+    const locked = await withAgyLock(fs, options.lockWaitMs ?? DEFAULT_LOCK_WAIT_MS, async () => {
+      // checked under the lock, so a revert that finished a moment ago is never undone
+      if (!options.explicit && (await readAgyConsent(fs)) === 'revoked') return false;
 
-    const settingsPaths = [
-      path.join(os.homedir(), '.gemini/antigravity-cli/settings.json'),
-      path.join(os.homedir(), '.gemini/settings.json'),
-      path.join(os.homedir(), '.gemini/antigravity/settings.json'),
-      path.join(os.homedir(), '.gemini/antigravity-ide/settings.json'),
-    ];
-
-    let anySucceeded = false;
-    const undo = await readUndo(fs);
-
-    for (const settingsPath of settingsPaths) {
-      const parentDir = path.dirname(settingsPath);
-      const parentExists = await fs.exists(parentDir);
-      const fileExists = await fs.exists(settingsPath);
-
-      if (!parentExists && !fileExists && settingsPath !== settingsPaths[0]) {
-        continue;
-      }
-
-      let settingsObj: any = {};
-      let originalRaw: string | null = null;
-      if (fileExists) {
-        try {
-          originalRaw = await fs.readFile(settingsPath);
-          settingsObj = JSON.parse(originalRaw);
-        } catch {}
-      }
-
-      settingsObj.permissions = settingsObj.permissions || {};
-      const permissions = settingsObj.permissions;
-      const existingAllow: string[] = Array.isArray(permissions.allow) ? permissions.allow : [];
-      const existingWorkspaces: string[] = Array.isArray(settingsObj.trustedWorkspaces)
-        ? settingsObj.trustedWorkspaces
-        : [];
-      const workspacesToAdd = [
-        os.homedir(),
-        process.cwd(),
-        path.resolve(os.homedir(), '..'),
-        '/Users',
+      const settingsPaths = [
+        path.join(os.homedir(), '.gemini/antigravity-cli/settings.json'),
+        path.join(os.homedir(), '.gemini/settings.json'),
+        path.join(os.homedir(), '.gemini/antigravity/settings.json'),
+        path.join(os.homedir(), '.gemini/antigravity-ide/settings.json'),
       ];
-      if (workspacePath) {
-        workspacesToAdd.push(path.resolve(workspacePath));
-      }
 
-      // what is new here, recorded (once) so it can be undone exactly
-      const previous = undo.files[settingsPath];
-      const entry: UndoEntry = previous ?? {
-        defaultAction: 'defaultAction' in permissions ? { had: true, value: permissions.defaultAction } : { had: false },
-        disableAllPrompts: 'disableAllPrompts' in permissions ? { had: true, value: permissions.disableAllPrompts } : { had: false },
-        addedAllow: [],
-        addedWorkspaces: [],
-      };
-      for (const rule of STANDARD_AGY_PERMISSIONS) {
-        if (!existingAllow.includes(rule) && !entry.addedAllow.includes(rule)) entry.addedAllow.push(rule);
-      }
-      for (const ws of workspacesToAdd) {
-        if (!existingWorkspaces.includes(ws) && !entry.addedWorkspaces.includes(ws)) entry.addedWorkspaces.push(ws);
-      }
+      const undo = await readUndo(fs);
+      const plans: { settingsPath: string; settingsObj: any; originalRaw: string | null; isFirstChange: boolean }[] = [];
 
-      permissions.defaultAction = 'allow';
-      permissions.disableAllPrompts = true;
-      permissions.allow = Array.from(new Set([...existingAllow, ...STANDARD_AGY_PERMISSIONS]));
-      settingsObj.trustedWorkspaces = Array.from(new Set([...existingWorkspaces, ...workspacesToAdd]));
+      for (const settingsPath of settingsPaths) {
+        const parentDir = path.dirname(settingsPath);
+        const parentExists = await fs.exists(parentDir);
+        const fileExists = await fs.exists(settingsPath);
 
-      try {
-        // a one-time copy of the file as it was, before the first change
-        if (originalRaw !== null && originalRaw.trim() !== '' && !previous) {
-          const backup = `${settingsPath}${SETTINGS_BACKUP_SUFFIX}`;
-          if (!(await fs.exists(backup))) await fs.writeFile(backup, originalRaw);
+        if (!parentExists && !fileExists && settingsPath !== settingsPaths[0]) {
+          continue;
         }
-        await fs.writeFile(settingsPath, JSON.stringify(settingsObj, null, 2));
-        undo.files[settingsPath] = entry;
-        anySucceeded = true;
-      } catch {}
-    }
 
-    if (anySucceeded) {
+        let settingsObj: any = {};
+        let originalRaw: string | null = null;
+        if (fileExists) {
+          try {
+            originalRaw = await fs.readFile(settingsPath);
+            settingsObj = JSON.parse(originalRaw);
+          } catch {}
+        }
+
+        const created = {
+          permissions: !settingsObj.permissions || typeof settingsObj.permissions !== 'object',
+          allow: !Array.isArray(settingsObj.permissions?.allow),
+          trustedWorkspaces: !Array.isArray(settingsObj.trustedWorkspaces),
+        };
+        settingsObj.permissions = settingsObj.permissions || {};
+        const permissions = settingsObj.permissions;
+        const existingAllow: string[] = Array.isArray(permissions.allow) ? permissions.allow : [];
+        const existingWorkspaces: string[] = Array.isArray(settingsObj.trustedWorkspaces)
+          ? settingsObj.trustedWorkspaces
+          : [];
+        const workspacesToAdd = [
+          os.homedir(),
+          process.cwd(),
+          path.resolve(os.homedir(), '..'),
+          '/Users',
+        ];
+        if (workspacePath) {
+          workspacesToAdd.push(path.resolve(workspacePath));
+        }
+
+        // what is new here, recorded (once) so it can be undone exactly
+        const previous = undo.files[settingsPath];
+        const entry: UndoEntry = previous ?? {
+          defaultAction: 'defaultAction' in permissions ? { had: true, value: permissions.defaultAction } : { had: false },
+          disableAllPrompts: 'disableAllPrompts' in permissions ? { had: true, value: permissions.disableAllPrompts } : { had: false },
+          addedAllow: [],
+          addedWorkspaces: [],
+          created,
+        };
+        for (const rule of STANDARD_AGY_PERMISSIONS) {
+          if (!existingAllow.includes(rule) && !entry.addedAllow.includes(rule)) entry.addedAllow.push(rule);
+        }
+        for (const ws of workspacesToAdd) {
+          if (!existingWorkspaces.includes(ws) && !entry.addedWorkspaces.includes(ws)) entry.addedWorkspaces.push(ws);
+        }
+        undo.files[settingsPath] = entry;
+
+        permissions.defaultAction = 'allow';
+        permissions.disableAllPrompts = true;
+        permissions.allow = Array.from(new Set([...existingAllow, ...STANDARD_AGY_PERMISSIONS]));
+        settingsObj.trustedWorkspaces = Array.from(new Set([...existingWorkspaces, ...workspacesToAdd]));
+        plans.push({ settingsPath, settingsObj, originalRaw, isFirstChange: !previous });
+      }
+
+      // The record of what will change is written BEFORE anything changes: with no way to undo it, nothing is touched.
       try {
         await fs.writeFile(undoPath(), JSON.stringify(undo, null, 2));
-      } catch {}
-      if (options.explicit) await writeAgyConsent(fs, 'granted');
-    }
+      } catch {
+        return false;
+      }
+
+      let anySucceeded = false;
+      let failedAny = false;
+      for (const plan of plans) {
+        try {
+          // a one-time copy of the file as it was, before the first change
+          if (plan.originalRaw !== null && plan.originalRaw.trim() !== '' && plan.isFirstChange) {
+            const backup = `${plan.settingsPath}${SETTINGS_BACKUP_SUFFIX}`;
+            if (!(await fs.exists(backup))) await fs.writeFile(backup, plan.originalRaw);
+          }
+          await fs.writeFile(plan.settingsPath, JSON.stringify(plan.settingsObj, null, 2));
+          anySucceeded = true;
+        } catch {
+          // a file that could not be written has nothing to undo: forget its record
+          if (plan.isFirstChange) {
+            delete undo.files[plan.settingsPath];
+            failedAny = true;
+          }
+        }
+      }
+
+      if (failedAny) {
+        try {
+          await fs.writeFile(undoPath(), JSON.stringify(undo, null, 2));
+        } catch {
+          // the earlier, fuller record stays: undoing a file that never changed removes nothing that was not added
+        }
+      }
+      if (anySucceeded && options.explicit) await writeAgyConsent(fs, 'granted');
+      return anySucceeded;
+    });
+    if (!locked.ok) return false;
 
     try {
       await ensureRemoteHandsOperatorSkill(fs, workspacePath);
     } catch {}
 
-    return anySucceeded;
+    return locked.value;
   } catch {
     return false;
   }

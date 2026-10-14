@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as nodeFs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
@@ -9,7 +10,7 @@ import {
   removeAgyMcpPermission,
   revertAgyPermissions,
 } from './agy-permissions.js';
-import type { FileSystemAdapter } from '../cloudflare/project.js';
+import { defaultFileSystem, type FileSystemAdapter } from '../cloudflare/project.js';
 
 /** In-memory fs: never touches the real ~/.gemini. */
 function memoryFs(initial: Record<string, string> = {}): { fs: FileSystemAdapter; files: Record<string, string> } {
@@ -299,5 +300,113 @@ describe('agy settings are backed up, recorded and revertible', () => {
     const { fs, files } = memoryFs({});
     expect(await ensureAgyPermissions(fs)).toBe(true);
     expect(JSON.parse(files[GLOBAL]!).permissions.defaultAction).toBe('allow');
+  });
+});
+
+describe('agy settings changes are durable and race-free', () => {
+  const GLOBAL = path.join(os.homedir(), '.gemini/antigravity-cli/settings.json');
+  const UNDO = path.join(os.homedir(), '.remote-hands', 'agy-undo.json');
+  const CONSENT = path.join(os.homedir(), '.remote-hands', 'agy-consent.json');
+  const original = { permissions: { defaultAction: 'ask', allow: ['read_file'] }, trustedWorkspaces: ['/mine'] };
+
+  function failingFor(fs: FileSystemAdapter, failPaths: string[]): FileSystemAdapter {
+    return {
+      ...fs,
+      writeFile: async (p, content) => {
+        if (failPaths.includes(p)) throw new Error('EACCES');
+        return fs.writeFile(p, content);
+      },
+    };
+  }
+
+  it('changes nothing when the record needed to undo it cannot be written', async () => {
+    const { fs, files } = memoryFs({ [GLOBAL]: JSON.stringify(original) });
+    expect(await ensureAgyPermissions(failingFor(fs, [UNDO]), undefined, { explicit: true })).toBe(false);
+    expect(JSON.parse(files[GLOBAL]!)).toEqual(original);
+    expect(files[`${GLOBAL}.bak-rh`]).toBeUndefined();
+  });
+
+  it('records the change before making it (so a crash in between still leaves a way back)', async () => {
+    const { fs, files } = memoryFs({ [GLOBAL]: JSON.stringify(original) });
+    const order: string[] = [];
+    const watching: FileSystemAdapter = {
+      ...fs,
+      writeFile: async (p, content) => {
+        order.push(p);
+        return fs.writeFile(p, content);
+      },
+    };
+    await ensureAgyPermissions(watching, undefined, { explicit: true });
+    expect(order.indexOf(UNDO)).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf(UNDO)).toBeLessThan(order.indexOf(GLOBAL));
+    expect(JSON.parse(files[UNDO]!).files[GLOBAL].defaultAction).toEqual({ had: true, value: 'ask' });
+  });
+
+  it('a revert that cannot record "revoked" changes nothing and says so', async () => {
+    const { fs, files } = memoryFs({ [GLOBAL]: JSON.stringify(original) });
+    await ensureAgyPermissions(fs, undefined, { explicit: true });
+    const permissive = files[GLOBAL];
+    const res = await revertAgyPermissions(failingFor(fs, [CONSENT]));
+    expect(res.error).toContain('nothing was changed');
+    expect(res.restored).toEqual([]);
+    expect(files[GLOBAL]).toBe(permissive);
+    expect(JSON.parse(files[CONSENT]!).state).toBe('granted');
+  });
+
+  it('keeps the record of a file that could not be restored, and reports it', async () => {
+    const { fs, files } = memoryFs({ [GLOBAL]: JSON.stringify(original) });
+    await ensureAgyPermissions(fs, undefined, { explicit: true });
+    const res = await revertAgyPermissions(failingFor(fs, [GLOBAL]));
+    expect(res.skipped.map((s) => s.path)).toEqual([GLOBAL]);
+    expect(Object.keys(JSON.parse(files[UNDO]!).files)).toEqual([GLOBAL]);
+    expect(JSON.parse(files[CONSENT]!).state).toBe('revoked');
+  });
+
+  describe('with the real file system (a private HOME)', () => {
+    const realFs = defaultFileSystem;
+    let home: string;
+    let savedHome: string | undefined;
+    beforeEach(() => {
+      savedHome = process.env.HOME;
+      home = nodeFs.mkdtempSync(path.join(os.tmpdir(), 'agy-lock-'));
+      process.env.HOME = home;
+      nodeFs.mkdirSync(path.join(home, '.gemini', 'antigravity-cli'), { recursive: true });
+      nodeFs.writeFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), JSON.stringify(original));
+    });
+    afterEach(() => {
+      process.env.HOME = savedHome;
+      nodeFs.rmSync(home, { recursive: true, force: true });
+    });
+    const settings = () => JSON.parse(nodeFs.readFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), 'utf-8'));
+    const consent = () => JSON.parse(nodeFs.readFileSync(path.join(home, '.remote-hands', 'agy-consent.json'), 'utf-8')).state;
+
+    it('a background caller that overlaps a revert can never leave "revoked" with permissive settings', async () => {
+      for (let round = 0; round < 15; round += 1) {
+        nodeFs.writeFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), JSON.stringify(original));
+        nodeFs.rmSync(path.join(home, '.remote-hands'), { recursive: true, force: true });
+        await ensureAgyPermissions(realFs, undefined, { explicit: true });
+        const jobs = [() => ensureAgyPermissions(realFs), () => revertAgyPermissions(realFs)];
+        if (round % 2 === 1) jobs.reverse();
+        await Promise.all(jobs.map((job) => job()));
+        expect(consent()).toBe('revoked');
+        expect(settings().permissions.defaultAction).toBe('ask');
+        expect(settings().permissions.allow).toEqual(['read_file']);
+      }
+    });
+
+    it('gives up (changing nothing) when another process holds the lock, and takes over a lock left by a crash', async () => {
+      const lock = path.join(home, '.remote-hands', 'agy-settings.lock');
+      nodeFs.mkdirSync(lock, { recursive: true });
+      expect(await ensureAgyPermissions(realFs, undefined, { explicit: true, lockWaitMs: 150 })).toBe(false);
+      expect(settings()).toEqual(original);
+      const res = await revertAgyPermissions(realFs, { lockWaitMs: 150 });
+      expect(res.error).toContain('another Remote Hands process');
+
+      const old = new Date(Date.now() - 60_000);
+      nodeFs.utimesSync(lock, old, old);
+      expect(await ensureAgyPermissions(realFs, undefined, { explicit: true, lockWaitMs: 150 })).toBe(true);
+      expect(settings().permissions.defaultAction).toBe('allow');
+      expect(nodeFs.existsSync(lock)).toBe(false);
+    });
   });
 });
