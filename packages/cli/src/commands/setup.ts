@@ -185,11 +185,19 @@ async function setupAgentAndPermissions(
   if (agyNeedsLogin) {
     stdout(renderStepAction('agy requires sign-in — launching interactive session...'));
     if (process.platform === 'darwin' || process.platform === 'linux') {
-      stdout(renderStepInfo('Your browser will open for Google OAuth sign-in.'));
+      stdout(renderStepInfo('Your browser will open: sign in with your Google account there.'));
     } else {
       stdout(renderStepInfo('Follow the on-screen instructions to sign in with your Google account.'));
     }
-    await runner(agy, [], { interactive: true, ...agyOpts });
+    stdout(renderStepInfo('When agy shows that you are signed in (a box where you can type), press Ctrl+C to come back here. Setup then carries on by itself.'));
+    // Ctrl+C reaches this program too (same terminal): it is meant for agy, so setup must not end with it.
+    const ignoreInterrupt = (): void => {};
+    process.on('SIGINT', ignoreInterrupt);
+    try {
+      await runner(agy, [], { interactive: true, ...agyOpts });
+    } finally {
+      process.off('SIGINT', ignoreInterrupt);
+    }
 
     const agyRecheck = await (agyOpts ? runner(agy, ['-p', 'reply with ok', '--print-timeout', '60s'], agyOpts) : runner(agy, ['-p', 'reply with ok', '--print-timeout', '60s']));
     if (agyRecheck.exitCode !== 0) {
@@ -717,6 +725,7 @@ async function hudSetupFlow(
   let helperError: string | null = null;
   let unconfirmed = false;
   let screenMissing = false;
+  let shortcutNote: string | null = null;
   if (process.platform !== 'darwin' && process.platform !== 'win32') {
     stdout(renderStepInfo('The desktop HUD hotkey service is supported on macOS and Windows.'));
   } else {
@@ -749,13 +758,18 @@ async function hudSetupFlow(
         if (outcome === 'ok') stdout(renderStepSuccess('The background HUD can use Screen Recording'));
         if (outcome === 'missing') screenMissing = true;
       }
-      // Windows: say whether the shortcut was really free before telling the person to press it
-      const wait = (hudService as { waitForHotkey?: () => Promise<{ state: string } | null> }).waitForHotkey;
-      if (process.platform === 'win32' && typeof wait === 'function') {
-        const status = await wait.call(hudService);
+      // Say whether the HUD really holds its shortcut before telling the person to press it
+      const wait = (hudService as { waitForHotkey?: (timeoutMs?: number) => Promise<{ state: string } | null> }).waitForHotkey;
+      if ((process.platform === 'win32' || process.platform === 'darwin') && typeof wait === 'function') {
+        const status = await wait.call(hudService, process.platform === 'darwin' ? 20_000 : undefined);
         if (status?.state === 'failed') {
-          helperError = 'the shortcut (Ctrl + Shift + Space, or Ctrl + Alt + Space) is already used by another program: close that program or change its shortcut, then run "rh hud install"';
-          stdout(renderStepInfo(`Shortcut: ${helperError}`));
+          if (process.platform === 'win32') {
+            helperError = 'the shortcut (Ctrl + Shift + Space, or Ctrl + Alt + Space) is already used by another program: close that program or change its shortcut, then run "rh hud install"';
+            stdout(renderStepInfo(`Shortcut: ${helperError}`));
+          } else {
+            shortcutNote = `${hudHotkeyLabel()} is already used by another app (for example Raycast or Alfred), so the HUD may not open with it: change that app's shortcut, then run "rh hud install"`;
+            stdout(renderStepInfo(`Shortcut: ${shortcutNote}`));
+          }
         } else if (!status) {
           unconfirmed = true;
           stdout(renderStepInfo('The HUD has not confirmed its shortcut yet: check it in a minute with "rh doctor".'));
@@ -780,6 +794,10 @@ async function hudSetupFlow(
   if (screenMissing) {
     stdout(renderStepInfo(`Desktop HUD is installed and ${hudHotkeyLabel()} works, but tasks that need to see the screen will not until Screen Recording is switched on for the program above.`));
     stdout(renderStepInfo('When it is, run "rh hud install" to restart the HUD, then check with "rh doctor".'));
+    return 0;
+  }
+  if (shortcutNote) {
+    stdout(renderStepInfo(`Desktop HUD is installed, but ${shortcutNote}.`));
     return 0;
   }
   if (unconfirmed) {

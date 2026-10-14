@@ -1596,7 +1596,7 @@ if mode == "listen" {
         nil
     )
 
-    RegisterEventHotKey(
+    let registered = RegisterEventHotKey(
         UInt32(kVK_Space),
         UInt32(cmdKey | shiftKey),
         hotKeyID,
@@ -1604,6 +1604,9 @@ if mode == "listen" {
         0,
         &hotKeyRef
     )
+    // Say whether the shortcut was really ours (another app, such as Raycast or Alfred, may already hold it)
+    print(registered == noErr ? "{\"event\":\"hotkey-ready\",\"keys\":\"Shift+Cmd+Space\"}" : "{\"event\":\"hotkey-failed\"}")
+    fflush(stdout)
 
     NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)

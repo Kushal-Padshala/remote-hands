@@ -279,6 +279,8 @@ export class HudServiceManager {
       fs.writeFileSync(this.plistPath, xml, 'utf-8');
 
       this.exec('launchctl', ['unload', this.plistPath]);
+      // what an earlier listener said about its shortcut is not this start's answer
+      clearHudStatus(this.home);
       const loadRes = this.exec('launchctl', ['load', '-w', this.plistPath]);
 
       return {
@@ -311,6 +313,7 @@ export class HudServiceManager {
   /** macOS: starts the service again (after a permission was given). True when launchctl accepted it. */
   restart(): boolean {
     if (this.platform !== 'darwin') return false;
+    clearHudStatus(this.home);
     const uid = typeof process.getuid === 'function' ? process.getuid() : undefined;
     if (uid !== undefined) {
       const kicked = this.exec('launchctl', ['kickstart', '-k', `gui/${uid}/com.remote-hands.hud`]);

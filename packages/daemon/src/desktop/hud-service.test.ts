@@ -123,6 +123,19 @@ describe('HudServiceManager', () => {
     expect(mockExec).toHaveBeenCalledWith('launchctl', ['load', '-w', testPlist]);
   });
 
+  it('forgets an earlier "ready"/"failed" shortcut report when it installs or restarts, so it is never mistaken for this start', () => {
+    const cli = path.join(tmpDir, 'index.js');
+    fs.writeFileSync(cli, 'x');
+    const status = path.join(tmpDir, '.remote-hands', 'hud-status.json');
+    const manager = new HudServiceManager({ exec: mockExec, plistPath: testPlist, home: tmpDir });
+    for (const act of [() => manager.install(cli), () => manager.restart()]) {
+      fs.mkdirSync(path.dirname(status), { recursive: true });
+      fs.writeFileSync(status, JSON.stringify({ state: 'ready', keys: 'Shift+Cmd+Space', at: 1 }));
+      act();
+      expect(fs.existsSync(status)).toBe(false);
+    }
+  });
+
   it('refuses, with a reason, when there is no program to run (it never falls back to a guessed folder)', () => {
     const manager = new HudServiceManager({ exec: mockExec, plistPath: testPlist, home: tmpDir });
     const res = manager.install('/does/not/exist/index.js');

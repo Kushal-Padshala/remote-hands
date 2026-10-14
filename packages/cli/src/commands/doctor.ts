@@ -5,6 +5,7 @@ import { ChromeManager, HudServiceManager, hudHotkeyLabel, readHudStatus } from 
 import { locateAgy } from '../system/agy.js';
 import { ensureWranglerLogin, defaultRunner } from '../cloudflare/wrangler.js';
 import { checkBrowserHarness } from '../system/browser-harness.js';
+import { readMacHudStatus } from '../system/hud-mac-status.js';
 import { defaultFileSystem } from '../cloudflare/project.js';
 import { checkAgyPermissions, ensureAgyPermissions } from '../system/agy-permissions.js';
 import {
@@ -137,6 +138,28 @@ export async function doctorCommand(args: string[], context: CommandContext = {}
     } else {
       stdout('[!] macOS Accessibility: not granted (System Settings -> Privacy & Security -> Accessibility)');
       stdout(`    Grant Accessibility to ${hostApp} (and Terminal) for window and keyboard automation`);
+    }
+
+    // The login service is its own program: what it was allowed and whether it holds its shortcut is its own answer
+    const hud = (context.hudServiceManager as HudServiceManager | undefined) ?? new HudServiceManager();
+    if (!hud.isInstalled()) {
+      stdout('[!] Desktop HUD: not installed (run: rh setup)');
+    } else if (!hud.isRunning()) {
+      stdout('[!] Desktop HUD: installed but not running (run: rh hud install; logs: ~/.remote-hands/logs/hud.error.log)');
+    } else {
+      const shortcut = readHudStatus()?.state;
+      if (shortcut === 'ready') stdout(`[✓] Desktop HUD: running; press ${hudHotkeyLabel()} to open it`);
+      else if (shortcut === 'failed') stdout(`[!] Desktop HUD: running, but ${hudHotkeyLabel()} is used by another app (for example Raycast or Alfred)`);
+      else stdout('[!] Desktop HUD: running but has not confirmed its shortcut (starting; logs: ~/.remote-hands/logs/hud.error.log)');
+      const own = readMacHudStatus();
+      if (own && !own.screenRecording && !own.checking) {
+        stdout(`[!] Desktop HUD Screen Recording: the background HUD does not have it. Switch on "node" (${own.node}) in System Settings -> Privacy & Security -> Screen & System Audio Recording, then run: rh hud install`);
+      } else if (own?.screenRecording) {
+        stdout('[✓] Desktop HUD Screen Recording: granted to the background HUD');
+      }
+      if (typeof hud.installedCopyIsStale === 'function' && hud.installedCopyIsStale()) {
+        stdout('[!] Desktop HUD: runs an older copy of Remote Hands (run: rh hud install)');
+      }
     }
 
     if (args.includes('--fix') && !context.runner && (!fdaGranted || !screenGranted || !accessGranted)) {

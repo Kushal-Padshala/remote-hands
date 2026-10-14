@@ -54,6 +54,39 @@ describe('CLI hud command', () => {
     expect(mockServiceManager.install).toHaveBeenCalled();
   });
 
+  describe('on a Mac, install reports whether the HUD holds its shortcut', () => {
+    const original = process.platform;
+    afterEach(() => Object.defineProperty(process, 'platform', { value: original }));
+
+    it('names the shortcut once the HUD confirmed it', async () => {
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      mockServiceManager.waitForHotkey = vi.fn().mockResolvedValue({ state: 'ready', keys: 'Shift+Cmd+Space', at: 1 });
+      const code = await hudCommand(['install'], { serviceManager: mockServiceManager, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
+      expect(code).toBe(0);
+      expect(mockServiceManager.waitForHotkey).toHaveBeenCalledWith(20_000);
+      expect(logs.join('\n')).toContain('HotKey:');
+    });
+
+    it('warns in Mac words, without naming the shortcut as working, when another app holds it', async () => {
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      mockServiceManager.waitForHotkey = vi.fn().mockResolvedValue({ state: 'failed', at: 1 });
+      const code = await hudCommand(['install'], { serviceManager: mockServiceManager, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
+      expect(code).toBe(0);
+      expect(errors.join('\n')).toContain('Raycast');
+      expect(errors.join('\n')).not.toContain('Ctrl');
+      expect(logs.join('\n')).not.toContain('HotKey:');
+    });
+
+    it('does not claim the shortcut when the HUD has not answered', async () => {
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      mockServiceManager.waitForHotkey = vi.fn().mockResolvedValue(null);
+      const code = await hudCommand(['install'], { serviceManager: mockServiceManager, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
+      expect(code).toBe(0);
+      expect(logs.join('\n')).toContain('has not confirmed its shortcut');
+      expect(logs.join('\n')).not.toContain('HotKey:');
+    });
+  });
+
   it('status tells the person when the background HUD runs an older copy', async () => {
     mockServiceManager.installedCopyIsStale = vi.fn().mockReturnValue(true);
     await hudCommand(['status'], { serviceManager: mockServiceManager, stdout: (m) => logs.push(m) });

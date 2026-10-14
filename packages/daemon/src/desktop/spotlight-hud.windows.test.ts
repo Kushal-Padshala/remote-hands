@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SpotlightHudRunner } from './spotlight-hud.js';
-import { readHudStatus } from './windows-hud.js';
+import { clearHudStatus, readHudStatus } from './windows-hud.js';
 
 vi.mock('node:child_process', async (original) => ({ ...(await original<typeof import('node:child_process')>()), spawn: vi.fn(), spawnSync: vi.fn(() => ({ status: 1, stdout: '', stderr: '' })) }));
 vi.mock('./windows-hud.js', async (original) => {
@@ -90,6 +90,47 @@ describe('the Windows hotkey listener', () => {
     expect(readHudStatus()).toMatchObject({ state: 'ready', keys: 'Ctrl+Alt+Space' });
     children[1]!.emit('exit', 1);
     expect(readHudStatus()).toBeUndefined();
+    listener.stop();
+  });
+});
+
+describe('the Mac hotkey listener', () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  beforeEach(() => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    vi.useFakeTimers();
+    vi.mocked(spawn).mockReset();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    Object.defineProperty(process, 'platform', platform);
+    clearHudStatus();
+  });
+
+  it('records that the helper holds Shift+Cmd+Space, and forgets it when the helper ends', () => {
+    const child = fakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const listener = new SpotlightHudRunner().startListener(() => {});
+    child.stdout.emit('data', Buffer.from('{"event":"hotkey-ready","keys":"Shift+Cmd+Space"}\n'));
+    expect(readHudStatus()).toMatchObject({ state: 'ready', keys: 'Shift+Cmd+Space' });
+    child.emit('exit', 0);
+    expect(readHudStatus()).toBeUndefined();
+    listener.stop();
+  });
+
+  it('says in Mac words, once, when another app holds the shortcut, and still delivers key presses', () => {
+    const child = fakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const errors: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((m: string) => void errors.push(String(m)));
+    const seen: string[] = [];
+    const listener = new SpotlightHudRunner().startListener((e) => seen.push((e as { app: string }).app));
+    child.stdout.emit('data', Buffer.from('{"event":"hotkey-failed"}\n'));
+    child.stdout.emit('data', Buffer.from('{"event":"hotkey-failed"}\n'));
+    expect(errors.filter((e) => e.includes('Raycast'))).toHaveLength(1);
+    expect(errors.join('\n')).not.toContain('Ctrl');
+    child.stdout.emit('data', Buffer.from('{"event":"hotkey","app":"Notes","windowTitle":"x"}\n'));
+    expect(seen).toEqual(['Notes']);
     listener.stop();
   });
 });

@@ -56,14 +56,17 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
     if (res.success) {
       // Windows: the shortcut is only reported once the listener has said it holds it
       let confirmed = true;
-      if (process.platform === 'win32' && typeof serviceManager.waitForHotkey === 'function') {
+      if ((process.platform === 'win32' || process.platform === 'darwin') && typeof serviceManager.waitForHotkey === 'function') {
         stdout('Starting the HUD...');
-        const status = await serviceManager.waitForHotkey();
+        const status = await serviceManager.waitForHotkey(process.platform === 'darwin' ? 20_000 : undefined);
         if (status?.state === 'failed') {
-          stderr(c.yellow('The HUD started, but its shortcut (Ctrl + Shift + Space, or Ctrl + Alt + Space) is already used by another program. Close that program or change its shortcut, then run "rh hud install" again.'));
-          return 1;
-        }
-        if (!status) {
+          if (process.platform === 'win32') {
+            stderr(c.yellow('The HUD started, but its shortcut (Ctrl + Shift + Space, or Ctrl + Alt + Space) is already used by another program. Close that program or change its shortcut, then run "rh hud install" again.'));
+            return 1;
+          }
+          stderr(c.yellow(`The HUD started, but ${hudHotkeyLabel()} is already used by another app (for example Raycast or Alfred), so it may not open with it. Change that app's shortcut, then run "rh hud install" again.`));
+          confirmed = false;
+        } else if (!status) {
           confirmed = false;
           stdout(c.yellow('The HUD has not confirmed its shortcut yet. Give it a minute, then check with "rh doctor" (log: ~/.remote-hands/logs/hud.log).'));
         }

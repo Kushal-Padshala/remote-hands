@@ -372,8 +372,8 @@ export class SpotlightHudRunner {
     const spawnChild = () => {
       if (stopped) return;
       startedAt = Date.now();
-      // Windows: what the helper said about its shortcut belongs to that helper only
-      if (process.platform === 'win32') clearHudReadyStatus();
+      // what the helper said about its shortcut belongs to that helper only
+      clearHudReadyStatus();
       try {
         child = spawn(cmd, execArgs, {
           // Windows: the helper ends when this input ends (this program is gone), so it is never left holding the hotkey
@@ -391,7 +391,11 @@ export class SpotlightHudRunner {
                 saveHudStatus({ state: 'failed' });
                 if (!warnedShortcut) {
                   warnedShortcut = true;
-                  console.error('Remote Hands: the HUD hotkey is already used by another program (tried Ctrl+Shift+Space and Ctrl+Alt+Space). Close that program and run "rh hud install" again.');
+                  console.error(
+                    process.platform === 'darwin'
+                      ? 'Remote Hands: Shift+Cmd+Space is already used by another app (for example Raycast or Alfred), so the HUD may not open with it. Change that app\'s shortcut and run "rh hud install" again.'
+                      : 'Remote Hands: the HUD hotkey is already used by another program (tried Ctrl+Shift+Space and Ctrl+Alt+Space). Close that program and run "rh hud install" again.',
+                  );
                 }
               } else if (parsed && typeof parsed.app === 'string') {
                 onTrigger(parsed as SpotlightPromptResult);
@@ -400,7 +404,7 @@ export class SpotlightHudRunner {
           }
         });
         child.on('exit', () => {
-          if (process.platform === 'win32') clearHudReadyStatus();
+          clearHudReadyStatus();
           if (!stopped) {
             if (process.platform === 'win32') retryMs = Date.now() - startedAt > 60_000 ? 1000 : Math.min(retryMs * 2, 30_000);
             restartTimer = setTimeout(spawnChild, process.platform === 'win32' ? retryMs : 1000);

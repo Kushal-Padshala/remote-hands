@@ -567,6 +567,36 @@ describe('Setup Command Flow', () => {
       expect(interactiveLaunches).toEqual([]);
     });
 
+    it('tells the person how to leave agy after signing in, and keeps setup alive for the Ctrl+C meant for agy', async () => {
+      const before = process.listenerCount('SIGINT');
+      let during = -1;
+      let signedIn = false;
+      const out: string[] = [];
+      const { runner } = run((args, interactive) => {
+        if (interactive) {
+          during = process.listenerCount('SIGINT');
+          signedIn = true;
+          return { exitCode: 0, stdout: '', stderr: '' };
+        }
+        return signedIn
+          ? { exitCode: 0, stdout: 'gemini-3.8-flash-high\tGemini\n', stderr: '' }
+          : { exitCode: 1, stdout: '', stderr: 'Not authenticated: please sign in' };
+      });
+      const code = await setupCommand(['--hud'], {
+        stdout: (l) => out.push(l),
+        runner,
+        fs: mockFs,
+        projectRoot: '/project',
+        hudServiceManager: { install: () => ({ success: true, plistPath: '/m.plist' }) },
+        browserSetup: { transport: { environment: async () => ({ frontmost: null, running: [] }) } as any },
+        isTTY: false,
+      });
+      expect(code).toBe(0);
+      expect(out.join('\n')).toContain('press Ctrl+C to come back here');
+      expect(during).toBe(before + 1);
+      expect(process.listenerCount('SIGINT')).toBe(before);
+    });
+
     it('still launches the interactive sign-in when agy asks for it', async () => {
       let signedIn = false;
       const { runner, interactiveLaunches } = run((args, interactive) => {
@@ -686,6 +716,33 @@ describe('Setup Command Flow', () => {
         });
         expect(code).toBe(1);
         expect(err.join('\n')).toContain('Command Line Tools install did not finish');
+        expect(out.join('\n')).not.toContain('Desktop HUD is ready');
+      });
+    });
+
+    describe('shortcut check on a Mac', () => {
+      if (process.platform !== 'darwin') return;
+      const make = (status: { state: string } | null) => {
+        const service = { install: vi.fn().mockReturnValue({ success: true, plistPath: '/mock.plist' }), isInstalled: () => true, isRunning: () => true, waitForHotkey: vi.fn().mockResolvedValue(status) };
+        const out: string[] = [];
+        return { service, out, ctx: { runner: hudRunner([]), fs: mockFs, projectRoot: '/project', hudServiceManager: service, browserSetup: readyBrowserSetup([]), stdout: (l: string) => out.push(l), isTTY: false } };
+      };
+      it('says ready when the HUD confirmed its shortcut', async () => {
+        const { out, ctx, service } = make({ state: 'ready' });
+        expect(await setupCommand(['--hud'], ctx as never)).toBe(0);
+        expect(service.waitForHotkey).toHaveBeenCalledWith(20_000);
+        expect(out.join('\n')).toContain('Desktop HUD is ready');
+      });
+      it('does not say ready when another app holds the shortcut, and tells the person what to do', async () => {
+        const { out, ctx } = make({ state: 'failed' });
+        expect(await setupCommand(['--hud'], ctx as never)).toBe(0);
+        expect(out.join('\n')).toContain('Raycast');
+        expect(out.join('\n')).not.toContain('Desktop HUD is ready');
+      });
+      it('does not say ready when the HUD has not answered', async () => {
+        const { out, ctx } = make(null);
+        expect(await setupCommand(['--hud'], ctx as never)).toBe(0);
+        expect(out.join('\n')).toContain('has not confirmed its shortcut');
         expect(out.join('\n')).not.toContain('Desktop HUD is ready');
       });
     });
