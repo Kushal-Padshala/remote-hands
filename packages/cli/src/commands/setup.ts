@@ -64,6 +64,7 @@ import {
 
 import { ChromeManager as ChromeLookup, HudServiceManager, SpotlightHudRunner, hudHotkeyLabel, type BrowserExecutable, type ChromeManager, type DynamicPowerManager } from '@remote-hands/daemon';
 import { defaultAsk } from './browser-setup.js';
+import { beginCommandLineTools, type CommandLineToolsHandle } from '../system/xcode-tools.js';
 import { AGY_WINDOWS_INSTALL, agyRunOptions, agyShellCommand, locateAgy } from '../system/agy.js';
 import { mcpCommand } from './mcp.js';
 
@@ -101,6 +102,8 @@ export interface CommandContext {
   browserSetup?: Partial<import('./browser-setup.js').BrowserSetupOptions> | undefined;
   /** Replaces the once-only browser setup offer made by `rh hud` and `rh setup` (tests). */
   browserSetupOffer?: (() => Promise<void>) | undefined;
+  /** Starts the Apple Command Line Tools install on a Mac that lacks them (tests replace it; a mocked run skips the step). */
+  beginCommandLineTools?: ((out: (message: string) => void) => CommandLineToolsHandle) | undefined;
   /** Prompt used by `rh setup` to ask what to set up (tests). */
   ask?: ((question: string) => Promise<string>) | undefined;
   /** Whether stdin is a terminal (tests); defaults to process.stdin.isTTY. */
@@ -119,6 +122,13 @@ async function setupAgentAndPermissions(
   totalSteps: number,
 ): Promise<number | null> {
   stdout(renderStepStart(stepNum, totalSteps, 'AI Coding Agent (agy)'));
+  // A Mac without Apple's Command Line Tools starts their (long) download now, while the agent is set up below
+  let commandLineTools: CommandLineToolsHandle | undefined;
+  if (process.platform === 'darwin') {
+    const info = (message: string): void => stdout(renderStepInfo(message));
+    if (context.beginCommandLineTools) commandLineTools = context.beginCommandLineTools(info);
+    else if (!context.runner) commandLineTools = beginCommandLineTools({ stdout: info });
+  }
   const agyFound = await locateAgy(runner);
   const agyInstalled = agyFound !== undefined;
   let agyPath = agyFound;
@@ -205,6 +215,12 @@ async function setupAgentAndPermissions(
   const permissionsOk = await ensureAgyPermissions(fs, projectRoot, { explicit: true });
   if (permissionsOk) {
     stdout(renderStepSuccess('Configured headless tool permissions and trusted workspaces for agy'));
+  }
+
+  if (commandLineTools && !(await commandLineTools.wait())) {
+    stderr(renderStepError('The Command Line Tools install did not finish.'));
+    stderr('Finish the macOS install window (or run "xcode-select --install"), then run "rh setup" again.');
+    return 1;
   }
 
   if (process.platform === 'darwin' && !context.runner && !args.includes('--skip-permissions')) {

@@ -651,6 +651,45 @@ describe('Setup Command Flow', () => {
       }
     });
 
+    describe('Command Line Tools', () => {
+      if (process.platform !== 'darwin') return;
+      const base = { runner: hudRunner([]), fs: mockFs, projectRoot: '/project', hudServiceManager: { install: () => ({ success: true, plistPath: '/mock.plist' }) }, browserSetup: readyBrowserSetup([]), isTTY: false };
+
+      it('starts the install first and waits for it before the permissions step', async () => {
+        const order: string[] = [];
+        const code = await setupCommand(['--hud'], {
+          ...base,
+          stdout: (l) => order.push(l),
+          beginCommandLineTools: (out) => {
+            order.push('BEGIN');
+            out('tools needed');
+            return { wait: async () => { order.push('WAIT'); return true; } };
+          },
+        });
+        expect(code).toBe(0);
+        const begin = order.indexOf('BEGIN');
+        const agy = order.findIndex((l) => l.includes('AI Coding Agent'));
+        const wait = order.indexOf('WAIT');
+        expect(agy).toBeGreaterThanOrEqual(0);
+        expect(begin).toBeGreaterThan(agy);
+        expect(wait).toBeGreaterThan(begin);
+      });
+
+      it('stops with a clear message when the install is not finished in time', async () => {
+        const err: string[] = [];
+        const out: string[] = [];
+        const code = await setupCommand(['--hud'], {
+          ...base,
+          stdout: (l) => out.push(l),
+          stderr: (l) => err.push(l),
+          beginCommandLineTools: () => ({ wait: async () => false }),
+        });
+        expect(code).toBe(1);
+        expect(err.join('\n')).toContain('Command Line Tools install did not finish');
+        expect(out.join('\n')).not.toContain('Desktop HUD is ready');
+      });
+    });
+
     describe('agy settings consent', () => {
       function freshFs(): { fs: FileSystemAdapter; files: Record<string, string> } {
         const f: Record<string, string> = {};
