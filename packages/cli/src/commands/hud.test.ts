@@ -125,6 +125,21 @@ describe('CLI hud command', () => {
     expect(logs.join('\n')).not.toContain('older copy');
   });
 
+  it('uninstall says so, and exits 1, when a service exists but could not be fully removed; "nothing found" only when there was none', async () => {
+    mockServiceManager.uninstall.mockReturnValue(false);
+    const failed = await hudCommand(['uninstall'], { serviceManager: mockServiceManager, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
+    expect(failed).toBe(1);
+    expect(errors.join('\n')).toContain('could not be fully removed');
+    expect(logs.join('\n')).not.toContain('No active Desktop Overlay service');
+
+    logs.length = 0;
+    mockServiceManager.isInstalled.mockReturnValue(false);
+    mockServiceManager.isRunning.mockReturnValue(false);
+    const nothing = await hudCommand(['uninstall'], { serviceManager: mockServiceManager, stdout: (m) => logs.push(m), stderr: (m) => errors.push(m) });
+    expect(nothing).toBe(0);
+    expect(logs.join('\n')).toContain('No active Desktop Overlay service found');
+  });
+
   it('uninstalls launchagent background service on rh hud uninstall', async () => {
     const code = await hudCommand(['uninstall'], {
       serviceManager: mockServiceManager,

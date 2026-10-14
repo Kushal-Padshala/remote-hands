@@ -92,13 +92,19 @@ export async function hudCommand(args: string[], context: HudCommandContext = {}
 
 
   if (subcommand === 'uninstall') {
+    // asked before removing: a removal that failed on something that exists is not "nothing to remove"
+    const existed = Boolean(serviceManager.isInstalled?.()) || Boolean(serviceManager.isRunning?.());
     const uninstalled = serviceManager.uninstall();
     if (uninstalled) {
       stdout('✓ Remote Hands Desktop Overlay background service removed.');
       stdout('  Your agy settings were not touched. To put them back as they were: rh permissions revert');
-    } else {
-      stdout('No active Desktop Overlay service found to remove.');
+      return 0;
     }
+    if (existed) {
+      stderr(c.yellow('The Desktop Overlay background service could not be fully removed, so it may start again at login. Remove it by hand (macOS: launchctl unload ~/Library/LaunchAgents/com.remote-hands.hud.plist and delete that file; Windows: Settings > Apps > Startup).'));
+      return 1;
+    }
+    stdout('No active Desktop Overlay service found to remove.');
     return 0;
   }
 
