@@ -62,6 +62,9 @@ final class HandleTable {
             buckets = [:]
             signatures = [:]
             epoch = Int.random(in: 1...1_000_000_000)
+            // Restart the numbering: ids stay small, so they can never meet the ids of text read by sight (from 1,000,000). Requests
+            // carry the epoch, so an id from before this point is refused, never read as the new element with the same number.
+            next = 1
         }
         let h = next
         next += 1
@@ -1119,7 +1122,7 @@ func replyOcr(_ id: Any?, image: CGImage, frame: CGRect, app: [String: Any], tit
     var lines: [[String: Any]] = []
     for line in seen.prefix(maxSeenLines) {
         lines.append([
-            "text": clip(line.text, 200),
+            "text": clip(line.text, 400),
             "x": Int((frame.minX + line.box.minX * frame.width).rounded()),
             "y": Int((frame.minY + line.box.minY * frame.height).rounded()),
             "width": max(1, Int((line.box.width * frame.width).rounded())),
@@ -1288,32 +1291,34 @@ func ocr(_ id: Any?, _ request: [String: Any]) {
     fail(id, "unsupported", "Reading a window by sight needs macOS 14 or newer.")
 }
 
-/// Whether a process runs from Remote Hands' own folder (its HUD, its cursor overlay): those windows ignore the mouse.
-func isRemoteHandsProcess(_ pid: pid_t) -> Bool {
-    var buffer = [CChar](repeating: 0, count: 4096)
-    let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
-    if length <= 0 { return false }
-    return String(cString: buffer).contains("/.remote-hands/bin/")
+/// A transparent overlay as big as a display (such as the pointer Remote Hands shows when it explains where something is) takes no
+/// clicks. Anything smaller that floats above a window, including Remote Hands' own HUD, is something a click would land on.
+func isDisplayWideOverlay(_ bounds: CGRect, layer: Int) -> Bool {
+    if layer <= 0 { return false }
+    var displays = [CGDirectDisplayID](repeating: 0, count: 16)
+    var count: UInt32 = 0
+    guard CGGetActiveDisplayList(UInt32(displays.count), &displays, &count) == .success else { return false }
+    for display in displays.prefix(Int(count)) {
+        let screen = CGDisplayBounds(display)
+        if bounds.width >= screen.width * 0.95 && bounds.height >= screen.height * 0.9 { return true }
+    }
+    return false
 }
 
 /// The windows on screen, front to back, by number, owner and bounds. Floating panels and other layers are included, because
-/// a click lands on whatever is on top; only Remote Hands' own windows (which do not take clicks) are left out.
-/// Needs no Screen Recording permission.
+/// a click lands on whatever is on top. Needs no Screen Recording permission.
 func windowStack() -> [(number: Int, pid: pid_t, bounds: CGRect)] {
     guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
     var stack: [(number: Int, pid: pid_t, bounds: CGRect)] = []
-    var ours: [pid_t: Bool] = [:]
     for entry in list {
         guard let number = entry[kCGWindowNumber as String] as? Int,
               let owner = entry[kCGWindowOwnerPID as String] as? Int,
               let boundsDictionary = entry[kCGWindowBounds as String] as? NSDictionary,
               let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary) else { continue }
         if let alpha = entry[kCGWindowAlpha as String] as? Double, alpha < 0.05 { continue }
-        let pid = pid_t(owner)
-        if pid == getpid() { continue }
-        if ours[pid] == nil { ours[pid] = isRemoteHandsProcess(pid) }
-        if ours[pid] == true { continue }
-        stack.append((number, pid, bounds))
+        if pid_t(owner) == getpid() { continue }
+        if isDisplayWideOverlay(bounds, layer: (entry[kCGWindowLayer as String] as? Int) ?? 0) { continue }
+        stack.append((number, pid_t(owner), bounds))
     }
     return stack
 }

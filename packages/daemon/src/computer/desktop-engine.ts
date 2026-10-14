@@ -212,6 +212,9 @@ export class DesktopEngine {
   async clickOcr(id: number, action: ClickAction = 'press'): Promise<void> {
     const item = this.ocrItem(id);
     const win = this.ocrWindow();
+    // Used up before anything is sent: if the answer is lost (timeout, helper gone) the click may still have landed, and a retry on
+    // the same picture would click twice. A new read is needed either way.
+    this.lastOcr = null;
     const double = action === 'double' || action === 'open';
     const right = action === 'right' || action === 'menu';
     try {
@@ -223,7 +226,6 @@ export class DesktopEngine {
       if (err instanceof AxHelperError) {
         // the window moved or was replaced since the picture: what was read is out of date
         if (err.code === 'stale') {
-          this.lastOcr = null;
           throw new StaleElementError(`${err.message} Call desktop_snapshot with ocr=true again.`);
         }
         throw describeHelperError(err, '') ?? new Error('The accessibility helper stopped responding. Call desktop_snapshot again.');

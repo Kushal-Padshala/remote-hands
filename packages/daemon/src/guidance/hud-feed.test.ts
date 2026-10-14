@@ -218,8 +218,14 @@ describe('plainSummary', () => {
 
     it('a click on text read by sight is announced with a fixed sentence, never with what the text said', () => {
       const out = run([mcp('1', 'desktop_click', { index: 1000003 }), done('1', 'clicked [1000003] text "Secret account number 1234" (read by sight)\nread by sight (OCR) of Game window')]);
-      expect(lines(out)).toEqual(['Clicked some text on the screen']);
+      // it also reads the window again afterwards, which takes a moment: said up front
+      expect(lines(out)).toEqual(['Clicking, then reading the window again by sight. This takes a moment.', 'Clicked some text on the screen']);
       expect(JSON.stringify(out)).not.toMatch(/Secret|1234/);
+    });
+
+    it('an ordinary desktop click has no notice and still names what it clicked', () => {
+      const out = run([mcp('1', 'desktop_click', { index: 3 }), done('1', 'clicked [3] Button "Save"\n...')]);
+      expect(lines(out)).toEqual(['Clicked "Save"']);
     });
   });
 });

@@ -230,6 +230,8 @@ export class ComputerSession {
     const engine = this.deps.engine;
     if (!engine || this.mode !== 'engine') throw new Error('Text read by sight can only be clicked with the fast reader, which is not available right now. Take a desktop_snapshot again.');
     const item = engine.ocrItem(index);
+    // taken now: the state read after the click forgets the old places, and the new read stays pinned to the same app
+    const pid = engine.ocrPid();
     const before = engine.current()?.view ?? null;
     // judged on the whole text that was read, not the shortened line the model saw
     await this.deps.gate?.(item.full);
@@ -239,7 +241,6 @@ export class ComputerSession {
     let sight: string;
     try {
       // the window was drawn again by the click; what is shown now is read by sight again so the next click has fresh places
-      const pid = engine.ocrPid();
       sight = (await engine.readOcr(targetApp, pid !== undefined ? { pid } : {})) ?? 'note: could not read the window by sight afterwards; call desktop_snapshot with ocr=true';
     } catch (err) {
       sight = `note: could not read the window by sight afterwards (${err instanceof Error ? err.message : String(err)}); call desktop_snapshot with ocr=true`;
@@ -377,10 +378,12 @@ export class ComputerSession {
   }
 
   browserFocus(target: string | number): Promise<string> {
+    this.deps.engine?.dropOcr();
     return this.deps.browser.focus(target);
   }
 
   browserOpen(url: string): Promise<string> {
+    this.deps.engine?.dropOcr();
     return this.deps.browser.open(url);
   }
 
@@ -389,10 +392,12 @@ export class ComputerSession {
   }
 
   browserClick(index: number): Promise<string> {
+    this.deps.engine?.dropOcr();
     return this.deps.browser.click(index);
   }
 
   browserType(index: number, text: string, submit?: boolean): Promise<string> {
+    this.deps.engine?.dropOcr();
     return this.deps.browser.type(index, text, submit === undefined ? undefined : { submit });
   }
 
@@ -401,6 +406,7 @@ export class ComputerSession {
   }
 
   browserDo(steps: DoStep[]): Promise<string> {
+    this.deps.engine?.dropOcr();
     return this.deps.browser.do(steps);
   }
 

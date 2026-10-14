@@ -258,6 +258,9 @@ describe('DesktopEngine reading a window by sight', () => {
     const engine = new DesktopEngine(helper);
     await engine.readOcr('Notes');
     await engine.clickOcr(1000001, 'right');
+    // a click uses the picture up: another one needs a new read
+    await expect(engine.clickOcr(1000001, 'open')).rejects.toThrow('not in last snapshot');
+    await engine.readOcr('Notes');
     await engine.clickOcr(1000001, 'open');
     const clicks = helper.calls.filter((c) => c.op === 'clickAt');
     expect(clicks[0]).toEqual({ op: 'clickAt', x: 125, y: 110, pid: 7, window: { x: 0, y: 0, width: 800, height: 600 }, button: 'right', count: 1 });

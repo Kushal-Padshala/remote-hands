@@ -235,7 +235,9 @@ function planMcp(name: string, args: Record<string, unknown>): Planned {
       return planBrowserDo(args);
     case 'desktop_click':
       // text read by sight is whatever was on the screen: never quoted, however the result words it
-      if (typeof args.index === 'number' && args.index >= OCR_ID_BASE) return { pill: 'CLICKING', after: () => 'Clicked some text on the screen' };
+      if (typeof args.index === 'number' && args.index >= OCR_ID_BASE) {
+        return { pill: 'CLICKING', before: 'Clicking, then reading the window again by sight. This takes a moment.', after: () => 'Clicked some text on the screen' };
+      }
       return {
         pill: 'CLICKING',
         after: (r) => {

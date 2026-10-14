@@ -10,6 +10,7 @@ import { BLIND_NOTE, OCR_HEADER, OCR_ID_BASE, type OcrReading } from '../desktop
 const WIN: AxNode = { id: 1, parent: 0, role: 'AXWindow', x: 100, y: 100, width: 800, height: 600 };
 const CLOSE: AxNode = { id: 2, parent: 1, role: 'AXButton', label: 'close button', actions: ['AXPress'], x: 110, y: 104, width: 14, height: 14 };
 const MENU: AxNode = { id: 3, parent: 0, role: 'AXMenuBarItem', label: 'File', actions: ['AXPress'], x: 20, y: 0, width: 30, height: 20 };
+const NAME: AxNode = { id: 5, parent: 1, role: 'AXTextField', label: 'Name', value: '', x: 200, y: 160, width: 120, height: 20 };
 const SAVE: AxNode = { id: 4, parent: 1, role: 'AXButton', label: 'Save', actions: ['AXPress'], x: 200, y: 120, width: 60, height: 20 };
 
 const READING: OcrReading = {
@@ -32,13 +33,15 @@ interface Fake extends AxHelperPort {
   nodes: AxNode[];
 }
 
-function fakeHelper(over: { nodes?: AxNode[]; ocr?: OcrReading | AxHelperError; clickAt?: AxHelperError } = {}): Fake {
+function fakeHelper(over: { nodes?: AxNode[]; ocr?: OcrReading | AxHelperError; clickAt?: AxHelperError; failOps?: Record<string, AxHelperError> } = {}): Fake {
   const fake: Fake = {
     calls: [],
     nodes: over.nodes ?? [WIN, CLOSE, MENU],
     ready: async () => true,
     request: (async (op: Record<string, unknown>) => {
       fake.calls.push(op);
+      const failure = over.failOps?.[String(op.op)];
+      if (failure) throw failure;
       switch (op.op) {
         case 'snapshot':
           return { ok: true, epoch: 9, app: { name: 'Game', pid: 321 }, window: { title: 'Lobby', x: 100, y: 100, width: 800, height: 600 }, nodes: fake.nodes, truncated: false, timedOut: false, elapsedMs: 1 } satisfies AxSnapshot;
@@ -162,8 +165,9 @@ describe('clicking text read by sight', () => {
     const click = ops(helper, 'clickAt')[0]!;
     expect(click).toMatchObject({ op: 'clickAt', x: 430, y: 310, pid: 321, windowId: 55, button: 'left', count: 1, window: { x: 100, y: 100, width: 800, height: 600 } });
     expect(out.startsWith(`clicked [${OCR_ID_BASE + 1}] text "Play" (read by sight)`)).toBe(true);
-    // the click redrew the window: it is read again so the next click has fresh places
+    // the click redrew the window: it is read again so the next click has fresh places, in the same app
     expect(ops(helper, 'ocr')).toHaveLength(1);
+    expect(ops(helper, 'ocr')[0]).toMatchObject({ pid: 321 });
     expect(out).toContain(OCR_HEADER);
   });
 
@@ -282,8 +286,27 @@ describe('clicking text read by sight', () => {
   });
 
   it('an action that fails half way still forgets the old places', async () => {
-    const { helper, session } = await sighted();
-    await expect(session.desktopType('x', undefined, { index: 2, submit: true })).rejects.toBeDefined();
+    const { helper, session } = await sighted({ nodes: [WIN, CLOSE, MENU, NAME], failOps: { typeText: new AxHelperError('failed', 'boom') } });
+    await session.desktopSnapshot('Game');
+    await session.desktopSnapshot('Game', undefined, undefined, true);
+    helper.calls.length = 0;
+    await expect(session.desktopType('x', undefined, { index: 5 })).rejects.toBeDefined();
+    expect(ops(helper, 'typeText')).toHaveLength(1);
+    await expect(session.desktopClick(OCR_ID_BASE + 1)).rejects.toThrow('not in last snapshot');
+    expect(ops(helper, 'clickAt')).toHaveLength(0);
+  });
+
+  it('a click whose answer is lost is not repeated on the same picture', async () => {
+    const { helper, session } = await sighted({ clickAt: new AxHelperError('timeout', 'no answer') });
+    await expect(session.desktopClick(OCR_ID_BASE + 1)).rejects.toBeDefined();
+    await expect(session.desktopClick(OCR_ID_BASE + 1)).rejects.toThrow('not in last snapshot');
+    expect(ops(helper, 'clickAt')).toHaveLength(1);
+  });
+
+  it('what a browser tool does to the screen also forgets the places', async () => {
+    const browser = { click: vi.fn().mockResolvedValue('ok'), focus: vi.fn(), open: vi.fn(), type: vi.fn(), do: vi.fn() } as unknown as ComputerSessionDeps['browser'];
+    const { helper, session } = await sighted({}, { browser });
+    await session.browserClick(3);
     await expect(session.desktopClick(OCR_ID_BASE + 1)).rejects.toThrow('not in last snapshot');
     expect(ops(helper, 'clickAt')).toHaveLength(0);
   });
