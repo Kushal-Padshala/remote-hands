@@ -108,6 +108,28 @@ describe('computerPrompt', () => {
   });
 });
 
+describe('reading a window by sight in the prompts', () => {
+  it('is taught on the Mac as the last resort, after the fast ways', () => {
+    expect(SLIM_COMPUTER_PROMPT).toMatch(/LAST resort/);
+    expect(SLIM_COMPUTER_PROMPT).toMatch(/ocr=true/);
+    expect(SLIM_COMPUTER_PROMPT).toMatch(/Never use ocr=true when Accessibility already lists the control/);
+  });
+
+  it('is not mentioned where there are no desktop tools', () => {
+    expect(computerPrompt('win32')).not.toMatch(/ocr/i);
+    expect(computerPrompt('win32')).not.toMatch(/by sight/i);
+  });
+
+  it('the tool descriptions say it is slower and a last resort', () => {
+    const tools = buildComputerTools({} as any, { platform: 'darwin' });
+    const snapshot = tools.find((t) => t.name === 'desktop_snapshot')!;
+    expect(snapshot.description).toMatch(/LAST RESORT/);
+    expect(snapshot.description).toMatch(/slower/);
+    expect(Object.keys(snapshot.inputSchema)).toContain('ocr');
+    expect(tools.find((t) => t.name === 'desktop_click')!.description).toMatch(/100001 and up/);
+  });
+});
+
 describe('buildComputerTools off the Mac', () => {
   it('offers no desktop tool, and the batch tool cannot run one', async () => {
     const tools = buildComputerTools({} as any, { platform: 'win32' });

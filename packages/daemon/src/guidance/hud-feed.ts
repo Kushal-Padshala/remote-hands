@@ -104,8 +104,12 @@ interface Result {
 interface Planned {
   /** Pill word while the call runs. */
   pill: string;
+  /** A sentence shown the moment the call starts, for a step that takes noticeably longer than the rest and would otherwise look stuck. */
+  before?: string;
   /** The sentence to show once it finished, or null to say nothing. Only called for a successful result. */
   after: (result: Result) => string | null;
+  /** A plainer sentence for a failure the person can do something about; null: the usual one. */
+  failure?: (result: Result) => string | null;
   /** A plain "That didn't work." is the agent's own business for reads, commands and unknown tools. */
   quietFailure?: true;
 }
@@ -188,13 +192,25 @@ function planBrowserDo(args: Record<string, unknown>): Planned {
   };
 }
 
+/** Reading a window by sight is the one slow way of looking; say so while it runs, so a pause there does not look like a hang. */
+const BY_SIGHT_BEFORE = "Reading this window by sight, because the app doesn't show its buttons. This takes a moment.";
+
+const bySight = (): Planned => ({
+  pill: 'READING THE SCREEN',
+  before: BY_SIGHT_BEFORE,
+  after: () => 'Read the window by sight',
+  failure: (r) => (/screen recording/i.test(r.output) ? 'Remote Hands needs Screen Recording permission to read this window. Switch it on in System Settings.' : null),
+  quietFailure: true,
+});
+
 function planMcp(name: string, args: Record<string, unknown>): Planned {
   switch (name) {
+    case 'desktop_snapshot':
+      return args.ocr === true ? bySight() : reading();
     case 'browser_snapshot':
     case 'browser_find':
     case 'browser_extract':
     case 'browser_tabs':
-    case 'desktop_snapshot':
     case 'desktop_windows':
       return reading();
     case 'browser_open': {
@@ -238,8 +254,11 @@ function planMcp(name: string, args: Record<string, unknown>): Planned {
       const app = typeof args.app === 'string' ? shorten(args.app, 30) : '';
       return { pill: 'CLICKING', after: () => (app ? `Used the ${app} menu` : 'Used a menu') };
     }
-    case 'computer_batch':
-      return { pill: 'WORKING', after: () => 'Ran several steps' };
+    case 'computer_batch': {
+      const steps = Array.isArray(args.steps) ? (args.steps as Array<Record<string, unknown>>) : [];
+      const sight = steps.some((s) => s?.tool === 'desktop_snapshot' && s.args && typeof s.args === 'object' && (s.args as Record<string, unknown>).ocr === true);
+      return { pill: 'WORKING', ...(sight ? { before: BY_SIGHT_BEFORE } : {}), after: () => 'Ran several steps' };
+    }
     default:
       return { pill: 'WORKING', after: none, quietFailure: true };
   }
@@ -324,7 +343,13 @@ export class HudFeed {
           this.pending.set(id, planned);
           if (this.pending.size > MAX_PENDING) this.pending.delete(this.pending.keys().next().value as string);
         }
-        this.pill(planned.pill);
+        if (planned.before && planned.before !== this.lastLine) {
+          this.lastLine = planned.before;
+          this.lastPill = planned.pill;
+          this.send(planned.pill, planned.before, 'ACTION');
+        } else {
+          this.pill(planned.pill);
+        }
         return;
       }
       case 'tool_result': {
@@ -333,8 +358,9 @@ export class HudFeed {
         this.pending.delete(id);
         if (planned) {
           const result = flattenResult(payload.ok !== false, payload.output);
-          const line = failureLine(result) ?? planned.after(result);
-          if (line && !(line === FAILED && planned.quietFailure)) this.line(line, failureLine(result) !== null ? 'PROBLEM' : 'ACTION');
+          const failed = failureLine(result);
+          const line = failed !== null ? (planned.failure?.(result) ?? failed) : planned.after(result);
+          if (line && !(line === FAILED && planned.quietFailure)) this.line(line, failed !== null ? 'PROBLEM' : 'ACTION');
         }
         this.pill('THINKING');
         return;

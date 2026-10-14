@@ -174,4 +174,51 @@ describe('plainSummary', () => {
     for (const h of hostile) plainSummary(h);
     expect(performance.now() - started).toBeLessThan(1500);
   });
+
+  describe('reading a window by sight (the last resort)', () => {
+    const NOTICE = "Reading this window by sight, because the app doesn't show its buttons. This takes a moment.";
+
+    it('says it the moment the call starts, so the wait does not look like a hang', () => {
+      const out = run([mcp('1', 'desktop_snapshot', { ocr: true })]);
+      expect(out).toEqual([{ status: 'READING THE SCREEN', text: NOTICE, role: 'ACTION' }]);
+    });
+
+    it('a normal snapshot stays the quiet READING word with no sentence', () => {
+      expect(run([mcp('1', 'desktop_snapshot', { app: 'Notes' })])).toEqual([{ status: 'READING', text: '' }]);
+      expect(run([mcp('1', 'desktop_snapshot', { ocr: false })])).toEqual([{ status: 'READING', text: '' }]);
+    });
+
+    it('says it was read by sight once it is done, then goes back to thinking', () => {
+      const out = run([mcp('1', 'desktop_snapshot', { ocr: true }), done('1', 'app: Game\nread by sight (OCR) of Game window: 3 text lines in 400 ms.')]);
+      expect(lines(out)).toEqual([NOTICE, 'Read the window by sight']);
+      expect(out[out.length - 1]).toEqual({ status: 'THINKING', text: '' });
+    });
+
+    it('asks for the Screen Recording switch when that is what is missing', () => {
+      const out = run([mcp('1', 'desktop_snapshot', { ocr: true }), done('1', envelope('error: Reading this window by sight needs macOS permission to record the screen (Screen Recording).', true), false)]);
+      expect(out.some((u) => u.role === 'PROBLEM' && /Screen Recording permission/.test(u.text))).toBe(true);
+    });
+
+    it('any other failure of the slow read is left to the agent to explain', () => {
+      const out = run([mcp('1', 'desktop_snapshot', { ocr: true }), done('1', envelope('error: boom', true), false)]);
+      expect(lines(out)).toEqual([NOTICE]);
+    });
+
+    it('a batch that contains the slow read says so up front too', () => {
+      const out = run([{ kind: 'tool_call', payload: { tool: 'call_mcp_tool', call_id: 'b', input: { ServerName: 'rh-computer', ToolName: 'computer_batch', Arguments: { steps: [{ tool: 'desktop_key', args: { combo: 'tab' } }, { tool: 'desktop_snapshot', args: { ocr: true } }] } } } }]);
+      expect(lines(out)).toEqual([NOTICE]);
+    });
+
+    it('does not repeat the notice twice in a row, but says it again for a later slow read', () => {
+      const twice = run([mcp('1', 'desktop_snapshot', { ocr: true }), mcp('2', 'desktop_snapshot', { ocr: true })]);
+      expect(lines(twice).filter((l) => l === NOTICE)).toHaveLength(1);
+      const later = run([mcp('1', 'desktop_snapshot', { ocr: true }), done('1', 'x'), mcp('2', 'desktop_snapshot', { ocr: true })]);
+      expect(lines(later).filter((l) => l === NOTICE)).toHaveLength(2);
+    });
+
+    it('a click on text read by sight is announced like any click, by its words', () => {
+      const out = run([mcp('1', 'desktop_click', { index: 100003 }), done('1', 'clicked [100003] text "Play" (read by sight)\nread by sight (OCR) of Game window')]);
+      expect(lines(out)).toEqual(['Clicked "Play"']);
+    });
+  });
 });
