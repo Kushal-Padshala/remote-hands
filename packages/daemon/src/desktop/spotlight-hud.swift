@@ -289,7 +289,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         guard let screen = NSScreen.main else { exit(1) }
         let screenRect = screen.frame
         let width: CGFloat = 680
-        let height: CGFloat = 84
+        // Two rows: the text on top, the model button on its own row below it.
+        let height: CGFloat = hudModels.isEmpty ? 84 : 116
         let x = screenRect.origin.x + (screenRect.width - width) / 2
         let y = screenRect.origin.y + screenRect.height * 0.65
 
@@ -358,8 +359,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         statusPill.isHidden = true
         rootView.addSubview(statusPill)
 
-        let pickerWidth: CGFloat = hudModels.isEmpty ? 0 : modelButtonWidth + 8
-        textField = NSTextField(frame: NSRect(x: 24, y: 16, width: width - 48 - pickerWidth, height: 28))
+        let textY: CGFloat = hudModels.isEmpty ? 16 : 52
+        textField = NSTextField(frame: NSRect(x: 24, y: textY, width: width - 48, height: 28))
         textField.isBordered = false
         textField.drawsBackground = false
         textField.focusRingType = .none
@@ -372,7 +373,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         rootView.addSubview(textField)
 
         if !hudModels.isEmpty {
-            let button = makePillButton(title: "", frame: NSRect(x: width - 24 - modelButtonWidth, y: 18, width: modelButtonWidth, height: 26), tint: Theme.secondary, fill: NSColor(white: 1.0, alpha: 0.10), action: #selector(onModelClicked(_:)))
+            let button = makePillButton(title: "", frame: NSRect(x: width - 24 - modelButtonWidth, y: 14, width: modelButtonWidth, height: 26), tint: Theme.secondary, fill: NSColor(white: 1.0, alpha: 0.10), action: #selector(onModelClicked(_:)))
             modelButton = button
             rootView.addSubview(button)
             updateModelButton()
