@@ -249,6 +249,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                 transitionToProgress(query: q)
             } else if let t = d["type"] as? String {
                 textField.stringValue = t
+                fitPromptHeight()
             } else if let q = d["picker"] as? String {
                 showContextPanel(query: q)
             } else if let name = d["snap"] as? String {
@@ -1031,6 +1032,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
 
         updateChipsDisplay()
         hideContextPanel()
+        fitPromptHeight()
     }
 
     func updateChipsDisplay() {
@@ -1106,7 +1108,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         return cell
     }
 
+    /// The prompt window grows upward with long or pasted text (up to a limit) so no line is cut off; the model button stays below.
+    func fitPromptHeight() {
+        guard !isExpanded, panel != nil, rootView != nil, textField != nil else { return }
+        let width = rootView.frame.width
+        let baseTextHeight: CGFloat = 28
+        let maxTextHeight: CGFloat = 150
+        let font = textField.font ?? NSFont.systemFont(ofSize: 18)
+        let measured = (textField.stringValue as NSString).boundingRect(
+            with: NSSize(width: width - 48 - 8, height: 10_000),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font]
+        ).height
+        let textHeight = min(maxTextHeight, max(baseTextHeight, ceil(measured) + 6))
+        let baseHeight: CGFloat = hudModels.isEmpty ? 84 : 116
+        let height = baseHeight + (textHeight - baseTextHeight)
+        guard abs(panel.frame.height - height) > 0.5 else { return }
+        var frame = panel.frame
+        frame.size.height = height
+        panel.setFrame(frame, display: true, animate: false)
+        rootView.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        badge.frame.origin.y = height - 28
+        closeButton.frame.origin.y = height - 32
+        attachmentChipsLabel.frame.origin.y = height - 28
+        textField.frame = NSRect(x: 24, y: hudModels.isEmpty ? 16 : 52, width: width - 48, height: textHeight)
+    }
+
     func controlTextDidChange(_ obj: Notification) {
+        fitPromptHeight()
         let current = textField.stringValue
         if let atIndex = current.lastIndex(of: "@") {
             let afterAt = String(current[current.index(after: atIndex)...])
