@@ -426,9 +426,8 @@ export class HudCoordinator {
       if (sendUpdate) {
         sendUpdate('STARTING', '');
       }
-      if (task.kind === 'browser' && process.platform === 'darwin') {
-        this.macosDriver.focusWindow('Google Chrome').catch(() => {});
-      }
+      // No window is brought forward here: the browser is driven in place (any browser, not only
+      // Chrome), and forcing Chrome to the front pulled the user out of the app they were in.
 
       // The fast lane gets the first try. It either finishes the request, or the agent carries on
       // (with a note of what was already done). It never fails the task: errors mean "continue".
