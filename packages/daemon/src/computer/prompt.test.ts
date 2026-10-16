@@ -9,6 +9,20 @@ describe('SLIM_COMPUTER_PROMPT', () => {
     expect([...mentioned].sort()).toEqual([...actual].sort());
   });
 
+  it('lists the arguments of every tool so the model never opens the tool schema files', () => {
+    const tools = buildComputerTools({} as any);
+    const line = SLIM_COMPUTER_PROMPT.split('\n').find((l) => l.startsWith('Tools (MCP server rh-computer)')) ?? '';
+    expect(line).toContain('never open the tool .json files');
+    const starts = tools.map((t) => ({ name: t.name, at: line.indexOf(`${t.name}{`) }));
+    for (const s of starts) expect(s.at, `${s.name} has a signature`).toBeGreaterThan(-1);
+    const ordered = [...starts].sort((a, b) => a.at - b.at);
+    for (const tool of tools) {
+      const i = ordered.findIndex((s) => s.name === tool.name);
+      const segment = line.slice(ordered[i]!.at, ordered[i + 1]?.at ?? line.length);
+      for (const key of Object.keys(tool.inputSchema)) expect(segment, `${tool.name} lists ${key}`).toContain(key);
+    }
+  });
+
   it('names every supported browser instead of "signed-in Chrome" and says selects/checkboxes need browser_do (fix pass 4)', () => {
     expect(SLIM_COMPUTER_PROMPT).not.toContain('signed-in Chrome');
     expect(SLIM_COMPUTER_PROMPT).toContain('signed-in browser (Chrome, Brave, Arc, Edge or Safari)');

@@ -7,9 +7,20 @@ const APPROVAL_RULE_START = 'Clicks, menu items and send/delete shortcuts (';
 const APPROVAL_KEYS_MAC = 'Cmd/Ctrl+Enter, Cmd+Shift+D, Cmd+Delete';
 const APPROVAL_RULE_END = ') that post, publish, submit, send, reply, pay, buy, delete, merge or deploy wait for the user\'s approval on their phone by themselves: do not run `rh approve` for them, just act. If the tool fails with `Approval rejected by user` or `was not pressed`, adjust per the reason and retry, or cancel. For other sensitive or irreversible actions (a shell command or an ungated key press that submits) run `rh approve "<exact action>" --task=<Task id from the turn> --action=<publish|delete|push|pay|send> --risk=high` and proceed only on exit code 0. On rejection read stderr, adjust, and re-request or cancel. After [HUMAN APPROVAL GRANTED] act immediately.';
 
+/**
+ * The arguments of every tool, so the model calls them without first opening each tool's schema
+ * file (agy lists MCP tools only by name; without this it spends a turn per tool reading its .json).
+ */
+const BROWSER_SIGNATURES =
+  'browser_tabs{} browser_focus{target} browser_open{url} browser_snapshot{} browser_click{index} browser_type{index,text,submit?} browser_find{query,limit?} browser_extract{max_chars?} browser_do{steps:[{op:click|type|select|check|hover|press|scroll|wait, index|target, text?, value?, checked?, key?, delta?, ms?, submit?}]}';
+const DESKTOP_SIGNATURES =
+  'desktop_snapshot{app?,filter?,index?,ocr?} desktop_click{index,app?,action?:press|open|menu|double|right} desktop_type{text,index?,replace?,submit?,app?} desktop_scroll{index,direction:up|down|left|right,amount?,app?} desktop_read{index,max_chars?,app?} desktop_drag{from,to,app?} desktop_key{combo,app?} desktop_open{app} desktop_menu{app,query} desktop_windows{}';
+const SIGNATURES_INTRO =
+  'Call each tool as call_mcp_tool{ServerName:"rh-computer",ToolName,Arguments}. Arguments are exactly as written here (? = optional), so call tools straight away and never open the tool .json files or view_file to learn them: ';
+
 export const SLIM_COMPUTER_PROMPT = [
   '[Context: Remote Hands computer use. You operate the user\'s Mac and signed-in browser (Chrome, Brave, Arc, Edge or Safari) directly. Act immediately; never run discovery commands.',
-  'Tools (MCP server rh-computer): desktop_snapshot, desktop_click, desktop_type, desktop_scroll, desktop_read, desktop_drag, desktop_key, desktop_open, desktop_menu, desktop_windows, browser_tabs, browser_focus, browser_open, browser_snapshot, browser_click, browser_type, browser_find, browser_do, browser_extract, computer_batch.',
+  'Tools (MCP server rh-computer). ' + SIGNATURES_INTRO + DESKTOP_SIGNATURES + ' ' + BROWSER_SIGNATURES + ' computer_batch{steps:[{tool,args}]}.',
   'Rules:',
   '1. Every action tool returns the new UI state. Do not call a snapshot after an action unless you need a filtered view. Desktop indexes come from the latest state and stay the same while the element stays on screen; browser ids are stable numbers (see rule 5).',
   '2. Reuse the active window, profile and tab. Use browser_tabs/browser_focus before browser_open. Never switch profiles or open duplicate tabs.',
@@ -26,7 +37,7 @@ export const SLIM_COMPUTER_PROMPT = [
 /** The rules a browser-only computer (Windows) follows; the browser and approval rules are the Mac ones, word for word. */
 const WINDOWS_COMPUTER_PROMPT = [
   '[Context: Remote Hands computer use on Windows. You operate a web browser window (Chrome or Edge) that Remote Hands controls for the user. Act immediately; never run discovery commands.',
-  'Tools (MCP server rh-computer): browser_tabs, browser_focus, browser_open, browser_snapshot, browser_click, browser_type, browser_find, browser_do, browser_extract, computer_batch.',
+  'Tools (MCP server rh-computer). ' + SIGNATURES_INTRO + BROWSER_SIGNATURES + ' computer_batch{steps:[{tool,args}]}.',
   'Rules:',
   '1. Every action tool returns the new page state. Do not call a snapshot after an action unless you need a filtered view. Browser ids are stable numbers (see rule 4).',
   '2. Reuse the open window and tab. Use browser_tabs/browser_focus before browser_open; do not open duplicate tabs. The browser is its own Remote Hands window: when a site asks the user to sign in, tell them to sign in in that window (once), then carry on.',
