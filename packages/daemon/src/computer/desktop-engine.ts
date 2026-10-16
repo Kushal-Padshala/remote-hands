@@ -49,7 +49,7 @@ export function describeHelperError(err: AxHelperError, app: string): Error | nu
   switch (err.code) {
     case 'not_trusted':
       return new Error(
-        'macOS is asking the user to allow "Remote Hands" to control this computer (a window titled "Accessibility Access"; if it was dismissed: System Settings > Privacy & Security > Accessibility > switch on "Remote Hands"). Tell the user to click "Open System Settings" and switch it on, then try again in a few seconds. Do not try to work around it.',
+        'macOS is asking the user to allow "Remote Hands" to control this computer (a window titled "Accessibility Access"; if it was dismissed: System Settings > Privacy & Security > Accessibility > switch on "Remote Hands"). Tell the user to click "Open System Settings" and switch it on, then try again in a few seconds. If it already shows as on, macOS is holding the permission of an older copy of the helper: tell the user to run `tccutil reset Accessibility com.remote-hands.helper` in Terminal and switch it on again once. Do not try to work around it.',
       );
     case 'no_app':
       return new Error(app ? `No running app matches "${app}". Use desktop_open to start it.` : 'No app is in front.');

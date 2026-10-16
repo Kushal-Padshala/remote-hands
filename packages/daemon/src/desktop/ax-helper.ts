@@ -184,7 +184,14 @@ export function ensureAxHelperBinary(opts: AxBinaryOptions = {}): Promise<AxBina
       fs.writeFileSync(path.join(path.dirname(path.dirname(binary)), 'Info.plist'), INFO_PLIST);
       // Signed by identifier alone, so a rebuilt helper keeps the permission the user already gave it.
       if (process.platform === 'darwin' && !opts.compile) {
-        spawnSync('codesign', ['-s', '-', '--force', '-i', AX_BUNDLE_ID, `-r=designated => identifier "${AX_BUNDLE_ID}"`, axHelperPaths(opts.home).bundle], { stdio: 'ignore' });
+        const bundle = axHelperPaths(opts.home).bundle;
+        const sign = (): void => {
+          spawnSync('codesign', ['-s', '-', '--force', '-i', AX_BUNDLE_ID, `-r=designated => identifier "${AX_BUNDLE_ID}"`, bundle], { stdio: 'ignore' });
+        };
+        sign();
+        // A grant macOS records for a copy signed any other way (the default is its code hash) stops matching
+        // at the next rebuild while Settings still shows it on: make sure the identifier requirement took.
+        if (!axSignatureIsStable(bundle)) sign();
       }
       // the earlier loose binary is not used any more
       fs.rmSync(path.join(path.dirname(axHelperPaths(opts.home).bundle), 'rh-ax'), { force: true });
@@ -199,6 +206,16 @@ export function ensureAxHelperBinary(opts: AxBinaryOptions = {}): Promise<AxBina
   })();
   buildsInFlight.set(binary, job);
   return job;
+}
+
+/** Whether the helper bundle's designated requirement is its identifier (stable across rebuilds), not its code hash. */
+export function axSignatureIsStable(bundle: string): boolean {
+  try {
+    const res = spawnSync('codesign', ['-d', '-r-', bundle], { encoding: 'utf-8', timeout: 8000 });
+    return `${res.stdout ?? ''}${res.stderr ?? ''}`.includes(`designated => identifier "${AX_BUNDLE_ID}"`);
+  } catch {
+    return false;
+  }
 }
 
 /** Whether Remote Hands may use Accessibility, asked of the built helper itself. `prompt` shows macOS's own permission window. */
