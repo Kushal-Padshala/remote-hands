@@ -121,6 +121,14 @@ describe('selected and expanded state', () => {
     expect(renderFull(page('edit', 'true'), { text: false })).toContain('[3] button "More" [expanded]');
   });
 
+  it('ignores an aria-expanded that is not true or false', () => {
+    const st = normalizeSnapshot({ url: 'u', title: 't', text: '', actions: [
+      { node: 1, role: 'button', label: 'A', kind: 'click', value: '', expanded: 'undefined' },
+      { node: 2, role: 'button', label: 'B', kind: 'click', value: '', expanded: '' },
+    ] });
+    expect(renderFull(st, { text: false }).split('\n').slice(1)).toEqual(['[1] button "A"', '[2] button "B"']);
+  });
+
   it('reports a tab switch and an opened menu as changes', () => {
     expect(renderDelta(page('edit', 'false'), page('review', 'true')).split('\n')).toEqual([
       'page: A — https://a.test/ (same page)',

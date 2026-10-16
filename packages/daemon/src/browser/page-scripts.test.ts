@@ -465,14 +465,68 @@ describe('buildActionScript: press and scroll', () => {
       expect(moved).toEqual([]);
     });
 
+    const withRect = (el: any) => {
+      el.getBoundingClientRect = () => ({ left: 100, top: 100, right: 900, bottom: 700, width: 800, height: 600 });
+    };
+
     it('an open dialog scrolls first even if the page behind it can move', () => {
       const page = makePage('<div id="modal" role="dialog"><div id="body"><p id="row">row</p></div></div>');
       const moved = scrollable(page, page.doc.getElementById('body'), { scrollHeight: 2000, clientHeight: 400, scrollTop: 0 });
+      withRect(page.doc.getElementById('modal'));
       (page.doc as any).elementsFromPoint = () => [page.doc.getElementById('row'), page.doc.getElementById('body'), page.doc.getElementById('modal')];
       (page.win as any).scrollBy = (arg: unknown) => { page.calls.scrollBy.push(arg); (page.win as any).scrollY = 300; };
       page.run({ op: 'scroll', delta: 300 });
       expect(moved).toEqual([{ top: 300, behavior: 'instant' }]);
       expect(page.calls.scrollBy).toEqual([]);
+    });
+
+    it('finds the open dialog even when an overlay covers the middle of the screen', () => {
+      const page = makePage('<div id="chat"></div><div id="modal" role="dialog"><div id="body"><p id="row">row</p></div></div>');
+      const moved = scrollable(page, page.doc.getElementById('body'), { scrollHeight: 2000, clientHeight: 400, scrollTop: 0 });
+      withRect(page.doc.getElementById('modal'));
+      (page.doc as any).elementsFromPoint = () => [page.doc.getElementById('row'), page.doc.getElementById('body'), page.doc.getElementById('modal')];
+      page.run({ op: 'scroll', delta: 300 });
+      expect(moved).toEqual([{ top: 300, behavior: 'instant' }]);
+    });
+
+    it('a dialog with nothing to scroll does not push the scroll into a list behind it', () => {
+      const page = makePage('<div id="list"><p id="row">row</p></div><div id="modal" role="dialog"><p id="msg">hi</p></div>');
+      const moved = scrollable(page, page.doc.getElementById('list'), { scrollHeight: 2000, clientHeight: 400, scrollTop: 0 });
+      withRect(page.doc.getElementById('modal'));
+      (page.doc as any).elementsFromPoint = () => [page.doc.getElementById('msg'), page.doc.getElementById('modal'), page.doc.getElementById('list')];
+      expect(page.run({ op: 'scroll', delta: 300 })).toEqual({ ok: true });
+      expect(moved).toEqual([]);
+    });
+
+    it('scrolls a reversed list (negative scrollTop) upwards and not past its end', () => {
+      const page = makePage('<div id="chat"><p id="row">row</p></div>');
+      const moved = scrollable(page, page.doc.getElementById('chat'), { scrollHeight: 2000, clientHeight: 400, scrollTop: 0 });
+      page.doc.getElementById('chat')!.style.flexDirection = 'column-reverse';
+      (page.doc as any).elementsFromPoint = () => [page.doc.getElementById('row'), page.doc.getElementById('chat')];
+      page.run({ op: 'scroll', delta: 300 });
+      expect(moved).toEqual([]);
+      page.run({ op: 'scroll', delta: -300 });
+      expect(moved).toEqual([{ top: -300, behavior: 'instant' }]);
+    });
+
+    it('uses the body as the scroller only when the root does not scroll', () => {
+      const page = makePage('<p id="row">row</p>');
+      const moved = scrollable(page, page.doc.body, { scrollHeight: 2000, clientHeight: 400, scrollTop: 0 });
+      (page.doc as any).elementsFromPoint = () => [page.doc.getElementById('row'), page.doc.body, page.doc.documentElement];
+      page.run({ op: 'scroll', delta: 300 });
+      expect(moved).toEqual([]);
+      page.doc.documentElement.style.overflowY = 'hidden';
+      page.run({ op: 'scroll', delta: 300 });
+      expect(moved).toEqual([{ top: 300, behavior: 'instant' }]);
+    });
+
+    it('a container whose scrollBy throws still lets the scroll succeed', () => {
+      const page = makePage('<div id="list"><p id="row">row</p></div>');
+      scrollable(page, page.doc.getElementById('list'), { scrollHeight: 2000, clientHeight: 400, scrollTop: 0 });
+      (page.doc.getElementById('list') as any).scrollBy = () => { throw new Error('page wrapper'); };
+      (page.doc as any).elementsFromPoint = () => [page.doc.getElementById('row'), page.doc.getElementById('list')];
+      expect(page.run({ op: 'scroll', delta: 300 })).toEqual({ ok: true });
+      expect((page.doc.getElementById('list') as any).scrollTop).toBe(300);
     });
 
     it('does not scroll a container that is already at the end in that direction', () => {

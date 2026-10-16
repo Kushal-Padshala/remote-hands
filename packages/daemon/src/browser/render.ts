@@ -111,7 +111,9 @@ export function normalizeSnapshot(raw: unknown): PageState {
     if (typeof a.value === 'string') el.value = a.value;
     if (a.checked !== undefined && a.checked !== null) el.checked = a.checked === true || a.checked === 'true';
     if (a.selected !== undefined && a.selected !== null) el.selected = a.selected === true || a.selected === 'true';
-    if (a.expanded !== undefined && a.expanded !== null) el.expanded = a.expanded === true || a.expanded === 'true';
+    // Only an explicit true or false: aria-expanded="undefined" means the element does not expand.
+    if (a.expanded === true || a.expanded === 'true') el.expanded = true;
+    else if (a.expanded === false || a.expanded === 'false') el.expanded = false;
     byNode.set(node, el);
     elements.push(el);
   }

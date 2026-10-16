@@ -427,43 +427,62 @@ const PRESS = String.raw`
 const SCROLL = String.raw`
   const delta = Number(op.delta) || 0;
   // Many pages (web apps, dialogs, long lists) scroll an inner container and leave the window still.
-  // The container in the middle of the screen is the one the person would scroll.
+  // The container in the middle of the screen is the one the person would scroll; an open dialog owns it.
   const roomLeft = (e) => {
-    let overflowY = '';
-    try { overflowY = String(window.getComputedStyle(e).overflowY); } catch (err) { return false; }
-    if (!/auto|scroll|overlay/.test(overflowY) || e.scrollHeight <= e.clientHeight + 1) return false;
-    return delta > 0 ? e.scrollTop + e.clientHeight < e.scrollHeight - 1 : e.scrollTop > 0;
+    let cs;
+    try { cs = window.getComputedStyle(e); } catch (err) { return false; }
+    if (!/auto|scroll|overlay/.test(String(cs.overflowY)) || e.scrollHeight <= e.clientHeight + 1) return false;
+    const top = e.scrollTop;
+    const span = e.scrollHeight - e.clientHeight;
+    // Reversed lists (chat, flex-direction: column-reverse) rest at 0 and scroll up through negative positions.
+    if (String(cs.flexDirection) === 'column-reverse') return delta > 0 ? top < -1 : top > 1 - span;
+    return delta > 0 ? top + e.clientHeight < e.scrollHeight - 1 : top > 0;
   };
-  const centerStack = () => {
+  const stackAt = (x, y) => {
     if (typeof document.elementsFromPoint !== 'function') return [];
-    try { return Array.from(document.elementsFromPoint(Math.floor(window.innerWidth / 2), Math.floor(window.innerHeight / 2))); } catch (err) { return []; }
+    try { return Array.from(document.elementsFromPoint(x, y)); } catch (err) { return []; }
   };
-  const innerScroller = (stack) => {
+  // The root and body belong to the window; body only counts when it is the page's own scroller
+  // (the root has overflow hidden).
+  const rootHidden = () => { try { return /hidden|clip/.test(String(window.getComputedStyle(document.documentElement).overflowY)); } catch (err) { return false; } };
+  const innerScroller = (stack, within) => {
     for (const el of stack) {
-      for (let n = el; n && n !== document.documentElement && n !== document.body; n = n.parentElement) {
+      for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+        if (within && !within.contains(n)) break;
+        if (n === document.body && !rootHidden()) break;
         if (roomLeft(n)) return n;
       }
     }
     return null;
   };
   const scrollInner = (e) => {
-    if (typeof e.scrollBy === 'function') e.scrollBy({ top: delta, behavior: 'instant' });
-    else e.scrollTop += delta;
+    try {
+      if (typeof e.scrollBy === 'function') { e.scrollBy({ top: delta, behavior: 'instant' }); return; }
+    } catch (err) {}
+    try { e.scrollTop += delta; } catch (err) {}
   };
-  const stack = centerStack();
-  const top = stack[0];
-  // An open dialog owns the scrolling even when the page behind it could also move.
-  const inDialog = Boolean(top && typeof top.closest === 'function' && top.closest('[role="dialog"],[aria-modal="true"],dialog[open]'));
-  const inner = inDialog ? innerScroller(stack) : null;
-  if (inner) {
-    scrollInner(inner);
-  } else {
-    const before = window.scrollY;
-    if (typeof window.scrollBy === 'function') window.scrollBy({ top: delta, behavior: 'instant' });
-    if (Math.abs((window.scrollY || 0) - (before || 0)) < 1) {
-      const fallback = innerScroller(stack);
-      if (fallback) scrollInner(fallback);
+  const activeDialog = () => {
+    let found = null;
+    for (const d of Array.from(document.querySelectorAll('[role="dialog"],[aria-modal="true"],dialog[open]'))) {
+      const r = typeof d.getBoundingClientRect === 'function' ? d.getBoundingClientRect() : null;
+      if (r && r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < window.innerHeight && r.left < window.innerWidth) found = d;
     }
+    return found;
+  };
+  const dialog = activeDialog();
+  if (dialog) {
+    const r = dialog.getBoundingClientRect();
+    const x = Math.floor(Math.max(0, Math.min(window.innerWidth - 1, r.left + r.width / 2)));
+    const y = Math.floor(Math.max(0, Math.min(window.innerHeight - 1, r.top + r.height / 2)));
+    const inner = innerScroller(stackAt(x, y), dialog);
+    if (inner) { scrollInner(inner); return out({ ok: true }); }
+  }
+  const before = window.scrollY;
+  if (typeof window.scrollBy === 'function') window.scrollBy({ top: delta, behavior: 'instant' });
+  // The window did not move: the page scrolls inside something else (not behind an open dialog).
+  if (!dialog && Math.abs((window.scrollY || 0) - (before || 0)) < 1) {
+    const fallback = innerScroller(stackAt(Math.floor(window.innerWidth / 2), Math.floor(window.innerHeight / 2)), null);
+    if (fallback) scrollInner(fallback);
   }
   return out({ ok: true });
 `;
