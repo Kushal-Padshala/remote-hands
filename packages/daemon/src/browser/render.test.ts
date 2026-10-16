@@ -126,58 +126,6 @@ describe('renderDelta', () => {
     expect(out).toBe('page: Sign up — https://example.com/signup (same page)\ntext: Wrong password\n(7 unchanged)');
   });
 
-  it('shows only the lines that are new, not the page text again', () => {
-    const before = normalizeSnapshot(rawPage({ text: 'Create account\nIt is free\nTerms apply' }));
-    const after = normalizeSnapshot(rawPage({ text: 'Create account\nIt is free\nTerms apply\nEmail is taken' }));
-    expect(renderDelta(before, after)).toBe('page: Sign up — https://example.com/signup (same page)\ntext: Email is taken\n(7 unchanged)');
-  });
-
-  it('counts a repeated message as new when it shows up one more time', () => {
-    const before = normalizeSnapshot(rawPage({ text: 'Required\nName' }));
-    const after = normalizeSnapshot(rawPage({ text: 'Required\nName\nRequired' }));
-    expect(renderDelta(before, after)).toContain('\ntext: Required\n');
-  });
-
-  it('says what disappeared when text only went away', () => {
-    const before = normalizeSnapshot(rawPage({ text: 'Create account\nPassword too short' }));
-    const after = normalizeSnapshot(rawPage({ text: 'Create account' }));
-    expect(renderDelta(before, after)).toBe('page: Sign up — https://example.com/signup (same page)\ntext gone: Password too short\n(7 unchanged)');
-  });
-
-  it('reports no visible change when only whitespace in the text moved', () => {
-    const before = normalizeSnapshot(rawPage({ text: 'Create account\nIt is free' }));
-    const after = normalizeSnapshot(rawPage({ text: '  Create account \r\n\nIt is free  ' }));
-    expect(renderDelta(before, after)).toBe('page: Sign up — https://example.com/signup (same page)\nno visible change');
-  });
-
-  it('cuts a long url in a same-page delta but keeps more of it when the page is new', () => {
-    const url = `https://example.com/signup?${'q=1&'.repeat(80)}`;
-    const a = normalizeSnapshot(rawPage({ url }));
-    const same = renderDelta(a, a).split('\n')[0]!;
-    expect(same.length).toBeLessThan(140);
-    expect(same.endsWith('… (same page)')).toBe(true);
-    const nav = renderDelta(null, a).split('\n')[1]!;
-    expect(nav.length).toBeGreaterThan(same.length);
-    expect(nav.length).toBeLessThan(340);
-  });
-
-  it('after a mostly new screen the full render carries only the text that is new', () => {
-    const before = normalizeSnapshot({ url: 'https://a.test/', title: 'A', text: 'Heading\nIntro', actions: [{ node: 1, role: 'button', label: 'Open', kind: 'click', value: '' }] });
-    const after = normalizeSnapshot({
-      url: 'https://a.test/',
-      title: 'A',
-      text: 'Heading\nIntro\nDelete this item? This cannot be undone',
-      actions: [
-        { node: 2, role: 'button', label: 'Cancel', kind: 'click', value: '' },
-        { node: 3, role: 'button', label: 'Delete', kind: 'click', value: '' },
-      ],
-    });
-    const out = renderDelta(before, after).split('\n');
-    expect(out[0]).toBe('changed: page navigated or re-rendered');
-    expect(out).toContain('text: Delete this item? This cannot be undone');
-    expect(out.join('\n')).not.toContain('Heading');
-  });
-
   it('renders the full page on navigation', () => {
     const out = renderDelta(base(), normalizeSnapshot(rawPage({ url: 'https://example.com/next' })));
     expect(out.split('\n')[0]).toBe('changed: page navigated or re-rendered');

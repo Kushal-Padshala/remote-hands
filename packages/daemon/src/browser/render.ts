@@ -43,11 +43,6 @@ const MAX_LABEL = 80;
 const MAX_OPTIONS = 8;
 const DEFAULT_MAX_LINES = 120;
 const DEFAULT_TEXT_CHARS = 1200;
-/** Page text a delta (or a full render after a change) carries: only what is new, so a short cap is enough. */
-const DELTA_TEXT_CHARS = 600;
-/** The url in the header of a same-page delta: the model has the full one already. */
-const SAME_PAGE_URL_CHARS = 100;
-const HEADER_URL_CHARS = 300;
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
@@ -156,42 +151,9 @@ export function renderElement(el: PageElement, maxOptions = MAX_OPTIONS): string
   return line;
 }
 
-function header(state: PageState, urlChars = HEADER_URL_CHARS): string {
+function header(state: PageState): string {
   const browser = state.browser ? `browser: ${clean(state.browser, 60)} · ` : '';
-  return `${browser}page: ${clean(state.title, 200)} — ${clean(state.url, urlChars)}`;
-}
-
-function textLines(text: string): string[] {
-  return text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-}
-
-/** The lines of `next` that `prev` did not have (repeats count), and the lines of `prev` that went away. */
-export function textChange(prev: string, next: string): { fresh: string[]; gone: string[] } {
-  const take = (from: string[], against: string[]): string[] => {
-    const left = new Map<string, number>();
-    for (const l of against) left.set(l, (left.get(l) ?? 0) + 1);
-    const out: string[] = [];
-    for (const l of from) {
-      const n = left.get(l) ?? 0;
-      if (n > 0) left.set(l, n - 1);
-      else out.push(l);
-    }
-    return out;
-  };
-  const before = textLines(prev);
-  const after = textLines(next);
-  return { fresh: take(after, before), gone: take(before, after) };
-}
-
-/** The `text:` line for what changed on a page: new lines, else what disappeared; null when neither. */
-function changeTextLine(prev: string, next: string, chars: number): string | null {
-  const { fresh, gone } = textChange(prev, next);
-  if (fresh.length > 0) return textLine(fresh.join('\n'), chars);
-  if (gone.length > 0) {
-    const line = textLine(gone.join('\n'), Math.min(chars, 160));
-    return line ? `text gone:${line.slice('text:'.length)}` : null;
-  }
-  return null;
+  return `${browser}page: ${clean(state.title, 200)} — ${clean(state.url, 500)}`;
 }
 
 function textLine(text: string, chars: number): string | null {
@@ -221,13 +183,7 @@ export function renderFull(state: PageState, opts: RenderOpts): string {
 }
 
 export function renderDelta(prev: PageState | null, next: PageState, opts: RenderOpts = { text: false }): string {
-  const textChars = opts.textChars ?? DELTA_TEXT_CHARS;
-  const full = (): string => {
-    // A new page or a mostly new screen (a dialog opening): what it says matters as much as its controls.
-    const sameDoc = prev !== null && prev.url === next.url;
-    const body = sameDoc ? { ...next, text: textChange(prev!.text, next.text).fresh.join('\n') } : next;
-    return `changed: page navigated or re-rendered\n${renderFull(body, { ...opts, text: true, textChars })}`;
-  };
+  const full = (): string => `changed: page navigated or re-rendered\n${renderFull(next, opts)}`;
   if (!prev || prev.url !== next.url || prev.title !== next.title) return full();
   const before = new Map(prev.elements.map((e) => [String(e.id), e]));
   const after = new Set(next.elements.map((e) => String(e.id)));
@@ -252,15 +208,18 @@ export function renderDelta(prev: PageState | null, next: PageState, opts: Rende
   for (const el of removed) lines.push(`- [${el.id}] ${quote(el.label)}`);
   const union = new Set([...before.keys(), ...after]).size;
   if (added.length + changed.length + removed.length > union / 2) return full();
-  const textLineNow = prev.text !== next.text ? changeTextLine(prev.text, next.text, textChars) : null;
+  const textChanged = prev.text !== next.text;
   // An unreadable frame that appeared (or changed count) is news the agent must hear even when
   // nothing else moved; one that went away needs no announcement.
   const framesChanged = (next.blockedFrames ?? 0) > 0 && next.blockedFrames !== prev.blockedFrames;
   const framesGone = (prev.blockedFrames ?? 0) > 0 && !next.blockedFrames;
   const scanChanged = Boolean(next.scanTruncated) !== Boolean(prev.scanTruncated);
-  const out = [`${header(next, SAME_PAGE_URL_CHARS)} (same page)`];
-  if (lines.length === 0 && !textLineNow && !framesChanged && !framesGone && !scanChanged) return `${out[0]}\nno visible change`;
-  if (textLineNow) out.push(textLineNow);
+  const out = [`${header(next)} (same page)`];
+  if (lines.length === 0 && !textChanged && !framesChanged && !framesGone && !scanChanged) return `${out[0]}\nno visible change`;
+  if (textChanged) {
+    const t = textLine(next.text, opts.textChars ?? DEFAULT_TEXT_CHARS);
+    if (t) out.push(t);
+  }
   const news = [
     ...(framesChanged ? [framesNote(next.blockedFrames!)] : []),
     ...(framesGone ? ['note: the frames that could not be read are gone'] : []),
