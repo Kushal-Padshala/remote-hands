@@ -426,7 +426,45 @@ const PRESS = String.raw`
 
 const SCROLL = String.raw`
   const delta = Number(op.delta) || 0;
-  if (typeof window.scrollBy === 'function') window.scrollBy({ top: delta, behavior: 'instant' });
+  // Many pages (web apps, dialogs, long lists) scroll an inner container and leave the window still.
+  // The container in the middle of the screen is the one the person would scroll.
+  const roomLeft = (e) => {
+    let overflowY = '';
+    try { overflowY = String(window.getComputedStyle(e).overflowY); } catch (err) { return false; }
+    if (!/auto|scroll|overlay/.test(overflowY) || e.scrollHeight <= e.clientHeight + 1) return false;
+    return delta > 0 ? e.scrollTop + e.clientHeight < e.scrollHeight - 1 : e.scrollTop > 0;
+  };
+  const centerStack = () => {
+    if (typeof document.elementsFromPoint !== 'function') return [];
+    try { return Array.from(document.elementsFromPoint(Math.floor(window.innerWidth / 2), Math.floor(window.innerHeight / 2))); } catch (err) { return []; }
+  };
+  const innerScroller = (stack) => {
+    for (const el of stack) {
+      for (let n = el; n && n !== document.documentElement && n !== document.body; n = n.parentElement) {
+        if (roomLeft(n)) return n;
+      }
+    }
+    return null;
+  };
+  const scrollInner = (e) => {
+    if (typeof e.scrollBy === 'function') e.scrollBy({ top: delta, behavior: 'instant' });
+    else e.scrollTop += delta;
+  };
+  const stack = centerStack();
+  const top = stack[0];
+  // An open dialog owns the scrolling even when the page behind it could also move.
+  const inDialog = Boolean(top && typeof top.closest === 'function' && top.closest('[role="dialog"],[aria-modal="true"],dialog[open]'));
+  const inner = inDialog ? innerScroller(stack) : null;
+  if (inner) {
+    scrollInner(inner);
+  } else {
+    const before = window.scrollY;
+    if (typeof window.scrollBy === 'function') window.scrollBy({ top: delta, behavior: 'instant' });
+    if (Math.abs((window.scrollY || 0) - (before || 0)) < 1) {
+      const fallback = innerScroller(stack);
+      if (fallback) scrollInner(fallback);
+    }
+  }
   return out({ ok: true });
 `;
 

@@ -431,6 +431,61 @@ describe('buildActionScript: press and scroll', () => {
     expect(page.calls.requestSubmit).toBe(0);
   });
 
+  describe('scroll in a page whose content scrolls inside a container', () => {
+    // jsdom has no layout: give one element a scrollable box and put it under the middle of the screen.
+    const scrollable = (page: Page, el: any, box: { scrollHeight: number; clientHeight: number; scrollTop: number }) => {
+      const win = page.win as any;
+      const state = { ...box };
+      Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => state.scrollHeight });
+      Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => state.clientHeight });
+      Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => state.scrollTop, set: (v: number) => { state.scrollTop = v; } });
+      el.style.overflowY = 'auto';
+      const moved: unknown[] = [];
+      el.scrollBy = (arg: unknown) => { moved.push(arg); };
+      win.innerWidth = 1000;
+      win.innerHeight = 800;
+      return moved;
+    };
+
+    it('scrolls the container under the middle of the screen when the window itself does not move', () => {
+      const page = makePage('<div id="list"><p id="row">row</p></div>');
+      const moved = scrollable(page, page.doc.getElementById('list'), { scrollHeight: 2000, clientHeight: 400, scrollTop: 0 });
+      (page.doc as any).elementsFromPoint = () => [page.doc.getElementById('row'), page.doc.getElementById('list'), page.doc.body];
+      expect(page.run({ op: 'scroll', delta: 300 })).toEqual({ ok: true });
+      expect(page.calls.scrollBy).toEqual([{ top: 300, behavior: 'instant' }]);
+      expect(moved).toEqual([{ top: 300, behavior: 'instant' }]);
+    });
+
+    it('leaves the window alone to do the scrolling when it moves', () => {
+      const page = makePage('<div id="list"><p id="row">row</p></div>');
+      const moved = scrollable(page, page.doc.getElementById('list'), { scrollHeight: 2000, clientHeight: 400, scrollTop: 0 });
+      (page.doc as any).elementsFromPoint = () => [page.doc.getElementById('row'), page.doc.getElementById('list')];
+      (page.win as any).scrollBy = (arg: unknown) => { page.calls.scrollBy.push(arg); (page.win as any).scrollY = 300; };
+      page.run({ op: 'scroll', delta: 300 });
+      expect(moved).toEqual([]);
+    });
+
+    it('an open dialog scrolls first even if the page behind it can move', () => {
+      const page = makePage('<div id="modal" role="dialog"><div id="body"><p id="row">row</p></div></div>');
+      const moved = scrollable(page, page.doc.getElementById('body'), { scrollHeight: 2000, clientHeight: 400, scrollTop: 0 });
+      (page.doc as any).elementsFromPoint = () => [page.doc.getElementById('row'), page.doc.getElementById('body'), page.doc.getElementById('modal')];
+      (page.win as any).scrollBy = (arg: unknown) => { page.calls.scrollBy.push(arg); (page.win as any).scrollY = 300; };
+      page.run({ op: 'scroll', delta: 300 });
+      expect(moved).toEqual([{ top: 300, behavior: 'instant' }]);
+      expect(page.calls.scrollBy).toEqual([]);
+    });
+
+    it('does not scroll a container that is already at the end in that direction', () => {
+      const page = makePage('<div id="list"><p id="row">row</p></div>');
+      const moved = scrollable(page, page.doc.getElementById('list'), { scrollHeight: 2000, clientHeight: 400, scrollTop: 1600 });
+      (page.doc as any).elementsFromPoint = () => [page.doc.getElementById('row'), page.doc.getElementById('list')];
+      page.run({ op: 'scroll', delta: 300 });
+      expect(moved).toEqual([]);
+      page.run({ op: 'scroll', delta: -300 });
+      expect(moved).toEqual([{ top: -300, behavior: 'instant' }]);
+    });
+  });
+
   it('scroll calls window.scrollBy with the delta', () => {
     const page = makePage(FORM);
     expect(page.run({ op: 'scroll', delta: 560 })).toEqual({ ok: true });
