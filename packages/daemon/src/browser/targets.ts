@@ -2,7 +2,8 @@ import { clean, findElements, type PageElement, type PageState } from './render.
 
 export type TargetOp = 'click' | 'type' | 'select' | 'check' | 'hover';
 
-export type TargetResult = { ok: true; el: PageElement & { node: number } } | { ok: false; reason: string };
+/** `none`: nothing on the page carries that label (as opposed to several, a wrong kind, or a page too big to judge). */
+export type TargetResult = { ok: true; el: PageElement & { node: number } } | { ok: false; reason: string; none?: true };
 
 const CHECKABLE_ROLES = new Set(['checkbox', 'radio', 'switch']);
 const SHOWN_CANDIDATES = 5;
@@ -84,5 +85,5 @@ export function resolveTarget(state: PageState, op: TargetOp, target: string): T
   if (prefix) return prefix;
   const near = findElements({ ...state, elements: pool }, target, SHOWN_CANDIDATES);
   const hint = near.length > 0 ? `; closest: ${listed(near)}` : '';
-  return { ok: false, reason: `no ${NOUN[op]} matches target "${clean(target, 80)}"${hint}` };
+  return { ok: false, reason: `no ${NOUN[op]} matches target "${clean(target, 80)}"${hint}`, none: true };
 }

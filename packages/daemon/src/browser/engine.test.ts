@@ -1284,6 +1284,81 @@ describe('action hints', () => {
   });
 });
 
+describe('do: a label that an earlier step reveals', () => {
+  const base = (extra: Array<Record<string, unknown>> = []): string =>
+    JSON.stringify(page({ actions: [{ node: 1, role: 'button', label: 'Add option', kind: 'click', value: '' }, ...extra] }));
+  const field = { node: 2, role: 'textbox', label: 'textbox', kind: 'fill', value: '' };
+
+  it('types into a field the click just revealed, in one call', async () => {
+    t.snapshots = [base(), base(), base([field])];
+    await engine.snapshot();
+    const out = await engine.do([{ op: 'click', target: 'Add option' }, { op: 'type', target: 'textbox', text: 'hi' }]);
+    expect(t.actionEvals().map(opOf)).toEqual([
+      { op: 'click', node: 1, label: 'Add option' },
+      { op: 'type', node: 2, label: 'textbox', text: 'hi' },
+    ]);
+    expect(out.split('\n')[0]).toBe('did: click, type');
+  });
+
+  it('waits for a field that renders a moment after the click', async () => {
+    t.snapshots = [base(), base(), base(), base(), base([field])];
+    await engine.snapshot();
+    await engine.do([{ op: 'click', target: 'Add option' }, { op: 'type', target: 'textbox', text: 'hi' }]);
+    expect(t.actionEvals().map(opOf)[1]).toEqual({ op: 'type', node: 2, label: 'textbox', text: 'hi' });
+  });
+
+  it('stops with the usual failure when the field never shows up, after the click that ran', async () => {
+    t.snapshots = [base()];
+    await engine.snapshot();
+    const err = await engine.do([{ op: 'click', target: 'Add option' }, { op: 'type', target: 'textbox', text: 'hi' }]).catch((e: Error) => e);
+    expect(String((err as Error).message)).toContain('step 2 type failed: no text field matches target "textbox"');
+    expect(String((err as Error).message)).not.toContain('No steps were run');
+    expect(t.actionEvals().map(opOf)).toEqual([{ op: 'click', node: 1, label: 'Add option' }]);
+  });
+
+  it('runs no deferred step once the call was abandoned or out of time while it looked for the field', async () => {
+    await engine.snapshot();
+    let abort!: () => void;
+    t.snapshots = [base(), (): string => { abort(); return base([field]); }];
+    const call = runInCallScope(() => engine.do([{ op: 'click', target: 'Add option' }, { op: 'type', target: 'textbox', text: 'hi' }]));
+    abort = call.abort;
+    await expect(call.result).rejects.toThrow('step 2 type failed: this call was abandoned after the tool timed out; remaining steps not run');
+    expect(t.actionEvals().map(opOf)).toEqual([{ op: 'click', node: 1, label: 'Add option' }]);
+
+    t.evals.length = 0;
+    t.snapshots = [base(), base(), (): string => { clock += 61_000; return base([field]); }];
+    await engine.snapshot();
+    await expect(engine.do([{ op: 'click', target: 'Add option' }, { op: 'type', target: 'textbox', text: 'hi' }])).rejects.toThrow(
+      'step 2 type failed:',
+    );
+    expect(t.actionEvals().map(opOf)).toEqual([{ op: 'click', node: 1, label: 'Add option' }]);
+  });
+
+  it('does not type into a field on another address that the click moved the page to', async () => {
+    const elsewhere = JSON.stringify(page({ url: 'https://example.com/other', actions: [field] }));
+    t.snapshots = [base(), base(), elsewhere];
+    await engine.snapshot();
+    // the click's own navigation check still sees the old address (the route changes a moment later)
+    t.probes = [JSON.stringify({ r: 'complete', p: false, o: null, u: 'https://example.com/signup', t: 'Sign up' })];
+    const out = await engine.do([{ op: 'click', target: 'Add option' }, { op: 'type', target: 'textbox', text: 'hi' }]);
+    expect(t.actionEvals().map(opOf)).toEqual([{ op: 'click', node: 1, label: 'Add option' }]);
+    expect(out).toContain('step 2 type not run: the page changed to a different document or address');
+  });
+
+  it('still refuses before running anything when the label is of the wrong kind or the step is incomplete', async () => {
+    t.snapshots = [base()];
+    await engine.snapshot();
+    await expect(engine.do([{ op: 'click', target: 'Add option' }, { op: 'type', target: 'Add option', text: 'x' }])).rejects.toThrow(
+      'step 2 type invalid: target "Add option" is not a text field here',
+    );
+    await expect(engine.do([{ op: 'click', target: 'Add option' }, { op: 'type', target: 'textbox' }])).rejects.toThrow(
+      'step 2 type invalid: text is required. No steps were run.',
+    );
+    await expect(engine.do([{ op: 'type', target: 'textbox', text: 'x' }])).rejects.toThrow('step 1 type invalid: no text field matches target "textbox"');
+    expect(t.actionEvals()).toHaveLength(0);
+  });
+});
+
 describe('do: label safety (review fixes)', () => {
   const buttons = (n: number, extra: Record<string, unknown> = {}): string =>
     JSON.stringify(page({ actions: Array.from({ length: n }, (_, i) => ({ node: 100 + i, role: 'button', label: i === 0 ? 'Remove' : `Other ${i}`, kind: 'click', value: '' })), ...extra }));
@@ -1502,8 +1577,8 @@ describe('do: label guards and abandonment (round 4 fixes)', () => {
     t.snapshots = [one('Open details')];
     await engine.snapshot();
     t.snapshots = [one('Delete account')];
-    // a batch that fails before it returns any state (nothing 'Nope' on the page)
-    await expect(engine.do([{ op: 'click', index: 1 }, { op: 'hover', target: 'Nope' }])).rejects.toThrow('no element matches target "Nope"');
+    // a batch that fails before it returns any state (the label names a button, not a text field)
+    await expect(engine.do([{ op: 'click', index: 1 }, { op: 'type', target: 'Menu', text: 'x' }])).rejects.toThrow('is not a text field here');
     expect(t.actionEvals()).toHaveLength(0);
     await engine.click(1); // the model still holds [1] "Open details"
     expect(t.actionEvals().map(opOf)[0]).toMatchObject({ op: 'click', node: 1, label: 'Open details' });

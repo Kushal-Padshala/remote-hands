@@ -70,6 +70,9 @@ const FIND_MAX_OPTIONS = 40;
 const STILL_NAVIGATING = 'note: page is still navigating';
 const NAV_PROBE_DELAY_MS = 80;
 const FAIL_SETTLE_MS = 150;
+/** A label that finds nothing in a later step is looked up again when the step runs (the earlier steps may reveal it), for up to this long. */
+const LATE_RESOLVE_MS = 1500;
+const LATE_POLL_MS = 150;
 
 interface Probe {
   u: string;
@@ -952,7 +955,11 @@ export class FastBrowserEngine implements BrowserPort {
     }
     // Numeric ids mean what the model saw (their label guards come from that view); labels are
     // resolved against the fresh look.
-    const plan = steps.map((step, i) => planStep(step, i + 1, shown?.state ?? null, modelView?.state ?? shown?.state ?? null));
+    // A label that matches nothing yet may be the field an earlier step reveals: from the second step on
+    // it is resolved when the step runs instead of refusing the whole batch.
+    const plan = steps.map((step, i) =>
+      planStep(step, i + 1, shown?.state ?? null, modelView?.state ?? shown?.state ?? null, i > 0 && shown !== null),
+    );
     const totalWait = plan.reduce((sum, p) => sum + p.ms, 0);
     if (totalWait > MAX_TOTAL_WAIT_MS) {
       throw new Error(`browser_do waits add up to ${totalWait} ms; the limit is ${MAX_TOTAL_WAIT_MS} ms per call. No steps were run.`);
@@ -992,11 +999,54 @@ export class FastBrowserEngine implements BrowserPort {
     let confirm: Confirm = null;
     let opened = false;
     let focused: string | null = null;
+    let lateMasked = false;
     for (let i = 0; i < plan.length; i += 1) {
-      const p = plan[i]!;
+      let p = plan[i]!;
       const n = i + 1;
       const stopped = stopReason();
       if (stopped) return fail(n, p.name, new Error(`${stopped}; remaining steps not run`));
+      if (p.deferred) {
+        // Look again at the page as the earlier steps left it; a field they reveal may take a moment to appear.
+        const until = this.now() + LATE_RESOLVE_MS;
+        let resolved: PlannedStep | null = null;
+        let replaced = false;
+        for (;;) {
+          let fresh: { state: PageState; origin: number | string | null };
+          try {
+            fresh = await this.readState(ctx);
+          } catch (err) {
+            return fail(n, p.name, err);
+          }
+          const urlNow = fresh.state.url;
+          if (
+            (origin !== null && fresh.origin !== null && String(fresh.origin) !== String(origin)) ||
+            (startUrl !== null && urlNow !== '' && withoutHash(urlNow) !== withoutHash(startUrl))
+          ) {
+            replaced = true;
+            break;
+          }
+          // The read took time: the call may have been abandoned or run out of time meanwhile.
+          const late = stopReason();
+          if (late) return fail(n, p.name, new Error(`${late}; remaining steps not run`));
+          try {
+            resolved = planStep(p.deferred, n, fresh.state, fresh.state, false, true);
+            break;
+          } catch (err) {
+            const again = (err as { noMatch?: boolean }).noMatch === true && this.now() < until && !stopReason();
+            if (!again) return fail(n, p.name, err);
+          }
+          await this.sleep(LATE_POLL_MS);
+        }
+        if (replaced) {
+          navigated = `step ${n} ${p.name} not run: the page changed to a different document or address; remaining steps not run`;
+          focused = null;
+          break;
+        }
+        const lastCheck = stopReason();
+        if (lastCheck) return fail(n, p.name, new Error(`${lastCheck}; remaining steps not run`));
+        p = resolved!;
+        if (p.masked) lateMasked = true;
+      }
       if (!p.op) {
         await this.sleep(p.ms);
         focused = null; // a wait gives the page time to move focus itself
@@ -1034,7 +1084,7 @@ export class FastBrowserEngine implements BrowserPort {
         }
       }
     }
-    const passwordTyped = plan.some((p) => p.masked);
+    const passwordTyped = lateMasked || plan.some((p) => p.masked);
     const body = await this.after(ctx, modelView?.state ?? shown?.state ?? null, unverified, origin, passwordTyped, confirm);
     if (body.startsWith('changed: page navigated')) focused = null;
     return [
@@ -1056,14 +1106,25 @@ interface PlannedStep {
   op: PageOp | null;
   index: number | null;
   ms: number;
+  /** The step, whose label matched nothing yet: it is resolved when it runs. `op` is not to be run. */
+  deferred?: DoStep;
 }
 
 /** Validates one `do` step against the shown page; throws `step N <op> invalid: ...`. */
-function planStep(step: DoStep, n: number, state: PageState | null, indexState: PageState | null = state): PlannedStep {
+function planStep(
+  step: DoStep,
+  n: number,
+  state: PageState | null,
+  indexState: PageState | null = state,
+  mayDefer = false,
+  /** The step is planned while the batch runs: nothing is said about steps not run. */
+  running = false,
+): PlannedStep {
   const name = String((step as { op?: unknown } | null)?.op ?? '');
-  const invalid = (reason: string): Error => new Error(`step ${n} ${name} invalid: ${reason}. No steps were run.`);
+  const invalid = (reason: string): Error => new Error(running ? reason : `step ${n} ${name} invalid: ${reason}. No steps were run.`);
   if (!ALL_OPS.has(name)) throw invalid('unknown op');
   let el: (PageElement & { node: number }) | undefined;
+  let deferred = false;
   if (INDEX_OPS.has(step.op)) {
     const hasIndex = step.index !== undefined;
     const hasTarget = step.target !== undefined;
@@ -1072,8 +1133,15 @@ function planStep(step: DoStep, n: number, state: PageState | null, indexState: 
       if (typeof step.target !== 'string') throw invalid('target must be text');
       if (!state) throw invalid('no page has been shown yet; call browser_snapshot first');
       const r = resolveTarget(state, step.op as TargetOp, step.target);
-      if (!r.ok) throw invalid(r.reason);
-      el = r.el;
+      if (r.ok) {
+        el = r.el;
+      } else if (mayDefer && r.none === true) {
+        deferred = true;
+        // Stands in for the field so the rest of the step is still checked now; it is never acted on.
+        el = { id: 0, node: 0, role: '', label: step.target } as PageElement & { node: number };
+      } else {
+        throw Object.assign(invalid(r.reason), { noMatch: r.none === true });
+      }
     } else {
       if (typeof step.index !== 'number' || !Number.isInteger(step.index)) throw invalid('index or target is required');
       const found = indexState?.elements.find((e) => e.id === step.index);
@@ -1090,34 +1158,35 @@ function planStep(step: DoStep, n: number, state: PageState | null, indexState: 
         ? 'quiet'
         : null;
   const base = { name, index: el ? (el.id as number) : null, ms: 0, masked: step.op === 'type' && el?.value === PASSWORD_MASK, confirm };
+  const mark = (p: PlannedStep): PlannedStep => (deferred ? { ...p, op: null, ms: 0, deferred: step } : p);
   switch (step.op) {
     case 'click':
-      return { ...base, op: { op: 'click', node: el!.node, label: el!.label } };
+      return mark({ ...base, op: { op: 'click', node: el!.node, label: el!.label } });
     case 'type': {
       if (typeof step.text !== 'string') throw invalid('text is required');
       const op: PageOp = step.submit === true
         ? { op: 'type', node: el!.node, label: el!.label, text: step.text, submit: true }
         : { op: 'type', node: el!.node, label: el!.label, text: step.text };
-      return { ...base, op };
+      return mark({ ...base, op });
     }
     case 'select':
       if (typeof step.value !== 'string' || !step.value) throw invalid('value is required');
-      return { ...base, op: { op: 'select', node: el!.node, label: el!.label, value: step.value } };
+      return mark({ ...base, op: { op: 'select', node: el!.node, label: el!.label, value: step.value } });
     case 'check':
       if (typeof step.checked !== 'boolean') throw invalid('checked is required');
-      return { ...base, op: { op: 'check', node: el!.node, label: el!.label, checked: step.checked } };
+      return mark({ ...base, op: { op: 'check', node: el!.node, label: el!.label, checked: step.checked } });
     case 'hover':
-      return { ...base, op: { op: 'hover', node: el!.node, label: el!.label } };
+      return mark({ ...base, op: { op: 'hover', node: el!.node, label: el!.label } });
     case 'press':
       if (typeof step.key !== 'string' || !step.key.trim()) throw invalid('key is required');
-      return { ...base, op: { op: 'press', key: step.key.toLowerCase() === 'enter' ? 'Enter' : step.key } };
+      return mark({ ...base, op: { op: 'press', key: step.key.toLowerCase() === 'enter' ? 'Enter' : step.key } });
     case 'scroll':
       if (typeof step.delta !== 'number' || !Number.isFinite(step.delta)) throw invalid('delta is required');
-      return { ...base, op: { op: 'scroll', delta: step.delta } };
+      return mark({ ...base, op: { op: 'scroll', delta: step.delta } });
     case 'wait': {
       const ms = step.ms;
       if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0 || ms > 5000) throw invalid('ms must be between 0 and 5000');
-      return { ...base, op: null, ms };
+      return mark({ ...base, op: null, ms });
     }
   }
   throw invalid('unknown op');
