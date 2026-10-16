@@ -49,6 +49,26 @@ describe('renderExtract', () => {
     expect(out).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
   });
 
+  it('budgets the whole response: a wide title and long url cannot push it past the limit', () => {
+    const o = { title: '日'.repeat(200), url: `https://x.test/${'q'.repeat(900)}`, text: 'a'.repeat(5000), more: true };
+    const out = renderExtract(o, extractWindow(undefined, undefined));
+    expect(Buffer.byteLength(out)).toBeLessThanOrEqual(3700);
+    const next = Number(/offset=(\d+)$/.exec(out)?.[1]);
+    expect(next).toBeGreaterThan(2000);
+    expect(out).toContain('a'.repeat(1000));
+    // the offset named is exactly where the shown text stopped
+    const shown = out.split('\n\n')[1]!.split('\n… more')[0]!;
+    expect(shown.length).toBe(next);
+  });
+
+  it('starts at the whole pair when an offset lands inside a surrogate pair', () => {
+    const text = `${'a'.repeat(199)}😀hello`;
+    const out = renderExtract(page(text), extractWindow(200, 200));
+    expect(out).not.toMatch(/(^|\n)[\udc00-\udfff]/);
+    expect(out).toContain('(text from character 199)');
+    expect(out).toContain('😀hello');
+  });
+
   it('shortens a very long url in the header', () => {
     const long = { ...page('x'), url: `https://x.test/${'q'.repeat(900)}` };
     const first = renderExtract(long, extractWindow(100, undefined)).split('\n')[1]!;

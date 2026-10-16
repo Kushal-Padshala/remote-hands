@@ -6,7 +6,10 @@ import { clean } from './render.js';
  * (the model reads on with `offset`), which keeps title, url and a continuation line under that size.
  */
 export const EXTRACT_MAX_CHARS = 3000;
-const EXTRACT_MAX_BYTES = 3000;
+/** Bytes for the whole response (header, text, continuation line); under the 3700 every result is held to. */
+const EXTRACT_RESPONSE_BYTES = 3500;
+const TAIL_RESERVE_BYTES = 120;
+const MIN_BODY_BYTES = 400;
 const HEADER_TITLE_CHARS = 150;
 const HEADER_URL_CHARS = 400;
 
@@ -27,24 +30,27 @@ export function renderExtract(o: Record<string, unknown>, win: { want: number; s
   const more = o.more === true;
   // The script marks a cut with a trailing ellipsis of its own; the window logic replaces it.
   const full = str(o.text);
-  const raw = more && full.endsWith('…') ? full.slice(0, -1) : full;
-  let end = Math.min(raw.length, win.start + win.want);
-  let slice = raw.slice(win.start, end);
-  while (slice.length > 0 && Buffer.byteLength(slice, 'utf8') > EXTRACT_MAX_BYTES) {
+  const raw = more && full.endsWith('\u2026') ? full.slice(0, -1) : full;
+  // An offset that lands inside a surrogate pair starts at the pair.
+  let start = win.start;
+  const first = raw.charCodeAt(start);
+  if (start > 0 && first >= 0xdc00 && first <= 0xdfff) start -= 1;
+  const title = clean(str(o.title), HEADER_TITLE_CHARS);
+  const head =
+    start === 0
+      ? `${title}\n${clean(str(o.url), HEADER_URL_CHARS)}\n\n`
+      : `${title}\n(text from character ${start})\n\n`;
+  const bodyBytes = Math.max(MIN_BODY_BYTES, EXTRACT_RESPONSE_BYTES - Buffer.byteLength(head, 'utf8') - TAIL_RESERVE_BYTES);
+  let end = Math.min(raw.length, start + win.want);
+  let slice = raw.slice(start, end);
+  while (slice.length > 0 && Buffer.byteLength(slice, 'utf8') > bodyBytes) {
     slice = slice.slice(0, Math.max(0, Math.floor(slice.length * 0.9)));
   }
-  end = win.start + slice.length;
   const last = slice.charCodeAt(slice.length - 1);
-  if (last >= 0xd800 && last <= 0xdbff) {
-    slice = slice.slice(0, -1);
-    end -= 1;
-  }
+  if (last >= 0xd800 && last <= 0xdbff) slice = slice.slice(0, -1);
+  end = start + slice.length;
+  if (slice === '' && start > 0) return `${head}(no more text on this page)`;
   const hasMore = more || raw.length > end;
-  const head =
-    win.start === 0
-      ? `${clean(str(o.title), HEADER_TITLE_CHARS)}\n${clean(str(o.url), HEADER_URL_CHARS)}\n\n`
-      : `${clean(str(o.title), HEADER_TITLE_CHARS)}\n(text from character ${win.start})\n\n`;
-  if (slice === '' && win.start > 0) return `${head}(no more text on this page)`;
   const tail = hasMore ? `\n… more text on this page: call browser_extract with offset=${end}` : '';
   return `${head}${slice}${tail}`;
 }

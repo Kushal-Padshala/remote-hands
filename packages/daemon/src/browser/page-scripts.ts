@@ -486,9 +486,9 @@ export function buildExtractScript(maxChars: number): string {
   let full = false;
   let truncated = false;
   const add = (raw) => {
-    if (full) { truncated = true; return; }
     const t = String(raw).replace(/\\s+/g, ' ').trim();
     if (!t) return;
+    if (full) { truncated = true; return; }
     text = text ? text + ' ' + t : t;
     if (text.length >= max) full = true;
   };

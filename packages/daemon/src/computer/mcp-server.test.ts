@@ -29,6 +29,20 @@ describe('createComputerMcpServer', () => {
     expect(res.isError).toBeFalsy();
   });
 
+  it('keeps every result under agy\'s spill size, errors included, except a tool that returns the very text asked for', async () => {
+    const big = Array.from({ length: 600 }, (_, i) => `line ${i} ${'x'.repeat(30)}`).join('\n');
+    const client = await connect([
+      { name: 'state', description: 'd', inputSchema: {}, handler: async () => big },
+      { name: 'boom', description: 'd', inputSchema: {}, handler: async () => { throw new Error(big); } },
+      { name: 'read', description: 'd', inputSchema: {}, handler: async () => big, keepWhole: true },
+    ]);
+    const text = async (name: string) => ((await client.callTool({ name, arguments: {} })).content as any[])[0].text as string;
+    expect(Buffer.byteLength(await text('state'))).toBeLessThanOrEqual(3700);
+    expect(await text('state')).toContain('more lines cut');
+    expect(Buffer.byteLength(await text('boom'))).toBeLessThanOrEqual(3700);
+    expect(await text('read')).toBe(big);
+  });
+
   it('reports each call to onCall with timing and outcome, never the arguments or result', async () => {
     const records: ToolCallRecord[] = [];
     const client = await connect(

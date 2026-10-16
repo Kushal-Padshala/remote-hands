@@ -473,6 +473,13 @@ describe('buildExtractScript', () => {
     expect(page.evalJson(buildExtractScript(26)).more).toBe(false);
     expect(page.evalJson(buildExtractScript(1000)).more).toBe(false);
   });
+
+  it('does not report more when only whitespace follows the last character that fits', () => {
+    const page = makePage(`<main><span>${'a'.repeat(200)}</span>\n   <p> \n </p></main>`);
+    const r = page.evalJson(buildExtractScript(200));
+    expect(r.more).toBe(false);
+    expect(r.text).toBe('a'.repeat(200));
+  });
 });
 
 describe('review fixes', () => {

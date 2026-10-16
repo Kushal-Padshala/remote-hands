@@ -28,6 +28,22 @@ describe('fitResult', () => {
     expect(out).toContain('the rest of this text is cut');
   });
 
+  it('keeps the start of one huge body line after a short header instead of dropping it', () => {
+    const body = 'word '.repeat(2000);
+    const out = fitResult(`element header\n${body}`);
+    expect(size(out)).toBeLessThanOrEqual(RESULT_MAX_BYTES);
+    expect(out.startsWith('element header\nword word word')).toBe(true);
+    expect(out).toContain('the rest of this text is cut');
+  });
+
+  it('never exceeds a tiny budget, note included', () => {
+    expect(size(fitResult('xx', 1))).toBeLessThanOrEqual(1);
+    const out = fitResult('abcdefghij'.repeat(100), 50);
+    expect(size(out)).toBeLessThanOrEqual(50);
+    expect(out.startsWith('abcdefghij')).toBe(true);
+    expect(fitResult('ok', 1000)).toBe('ok');
+  });
+
   it('measures bytes, not characters', () => {
     const lines = Array.from({ length: 300 }, () => '日本語のテキスト'.repeat(2)).join('\n');
     expect(size(fitResult(lines))).toBeLessThanOrEqual(RESULT_MAX_BYTES);

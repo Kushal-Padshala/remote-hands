@@ -7,6 +7,8 @@ export interface ComputerTool {
   description: string;
   inputSchema: Record<string, z.ZodType>;
   handler(args: any): Promise<string>;
+  /** The result is the very text asked for (desktop_read): cutting it would lose what cannot be read in parts. */
+  keepWhole?: boolean;
 }
 
 const app = z.string().optional().describe('Application name. Omit for the frontmost app.');
@@ -132,6 +134,7 @@ export function buildComputerTools(session: ComputerSession, opts: ComputerTools
         app,
       },
       handler: (a) => session.desktopRead(a.index, a.max_chars, a.app),
+      keepWhole: true,
     },
     {
       name: 'desktop_drag',

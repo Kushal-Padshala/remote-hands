@@ -69,7 +69,7 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
           const { result, abort } = runInCallScope(
             async (): Promise<Result> => {
               try {
-                return { content: [{ type: 'text' as const, text: fitResult(await tool.handler(args)) }] };
+                return { content: [{ type: 'text' as const, text: tool.keepWhole ? await tool.handler(args) : fitResult(await tool.handler(args)) }] };
               } catch (err: any) {
                 return { isError: true, content: [{ type: 'text' as const, text: fitResult(`error: ${err?.message ?? String(err)}`) }] };
               }
