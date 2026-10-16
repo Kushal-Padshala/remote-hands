@@ -230,11 +230,12 @@ export function buildComputerTools(session: ComputerSession, opts: ComputerTools
     {
       name: 'browser_extract',
       description:
-        'Read the visible text of the active page (articles, emails, long text) up to max_chars. Use it instead of browser_snapshot when you need to read content rather than find controls.',
+        'Read the visible text of the active page (articles, emails, long text). Use it instead of browser_snapshot when you need to read content rather than find controls. One call returns at most about 3000 characters; when the page has more, the result ends with a line naming the offset to pass to read on.',
       inputSchema: {
-        max_chars: z.number().int().min(200).max(20000).optional().describe('Maximum characters to return (200-20000).'),
+        max_chars: z.number().int().min(200).max(20000).optional().describe('Maximum characters to return (200-20000, but a single call never returns more than about 3000).'),
+        offset: z.number().int().min(0).optional().describe('Character position to start reading from, as named by the previous result.'),
       },
-      handler: (a) => session.browserExtract(a.max_chars),
+      handler: (a) => (a.offset === undefined ? session.browserExtract(a.max_chars) : session.browserExtract(a.max_chars, a.offset)),
     },
   ];
 

@@ -466,6 +466,13 @@ describe('buildExtractScript', () => {
     const page = makePage('<main>abcdefghijklmnopqrstuvwxyz</main>');
     expect(page.evalJson(buildExtractScript(10)).text).toBe('abcdefghij…');
   });
+
+  it('reports whether more text lies beyond maxChars', () => {
+    const page = makePage('<main>abcdefghijklmnopqrstuvwxyz</main>');
+    expect(page.evalJson(buildExtractScript(10)).more).toBe(true);
+    expect(page.evalJson(buildExtractScript(26)).more).toBe(false);
+    expect(page.evalJson(buildExtractScript(1000)).more).toBe(false);
+  });
 });
 
 describe('review fixes', () => {

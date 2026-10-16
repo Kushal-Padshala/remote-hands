@@ -4,6 +4,7 @@ import { buildActionScript, buildExtractScript } from './page-scripts.js';
 import { normalizeOpenUrl } from './engine.js';
 import { clean } from './render.js';
 import { okSoFar, type BrowserPort, type DoStep } from './port.js';
+import { extractWindow, renderExtract } from './extract.js';
 import { ABANDONED, isCallAborted } from '../computer/call-scope.js';
 
 export type LegacyBrowserDriver = Pick<
@@ -130,12 +131,11 @@ export class LegacyBrowserPort implements BrowserPort {
     return [`no match for "${clean(query)}"; first ${first.length} of ${lines.length} elements:`, ...first].join('\n');
   }
 
-  async extract(maxChars = 4000): Promise<string> {
+  async extract(maxChars?: number, offset?: number): Promise<string> {
     const run = this.driver.executeScript;
     if (!run) throw new Error('extract is not supported on the legacy path');
-    const o = decode(await run.call(this.driver, buildExtractScript(maxChars)));
-    const s = (x: unknown): string => (typeof x === 'string' ? x : '');
-    return `${s(o.title)}\n${s(o.url)}\n\n${s(o.text)}`;
+    const win = extractWindow(maxChars, offset);
+    return renderExtract(decode(await run.call(this.driver, buildExtractScript(win.limit))), win);
   }
 
   async do(steps: DoStep[]): Promise<string> {

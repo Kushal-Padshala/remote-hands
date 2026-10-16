@@ -530,14 +530,15 @@ export function buildExtractScript(maxChars: number): string {
     for (const c of n.childNodes) { if (truncated) return; walk(c, depth, kidsQuiet); }
   };
   if (root) walk(root, 0, false);
-  if (truncated || text.length > max) {
+  const more = truncated || text.length > max;
+  if (more) {
     // Cut at max without splitting a surrogate pair.
     let end = Math.min(max, text.length);
     const last = text.charCodeAt(end - 1);
     if (last >= 0xd800 && last <= 0xdbff) end -= 1;
     text = text.slice(0, end).trimEnd() + '\\u2026';
   }
-  return JSON.stringify({ title: document.title, url: location.href, text: text });
+  return JSON.stringify({ title: document.title, url: location.href, text: text, more: more });
 })()`;
 }
 

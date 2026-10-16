@@ -629,6 +629,19 @@ describe('find and extract', () => {
     t.extract = 'oops';
     await expect(engine.extract()).rejects.toThrow('unexpected page result: oops');
   });
+
+  it('pages a long page: caps one call, asks the script for offset + window, names the next offset', async () => {
+    const body = 'abcdefghij'.repeat(500);
+    t.extract = JSON.stringify({ title: 'T', url: 'https://x.test/', text: `${body.slice(0, 3000)}\u2026`, more: true });
+    const first = await engine.extract(20000);
+    expect(t.evals.at(-1)!.js).toContain('const max = 3000;');
+    expect(first).toContain('\n\nabcdefghij');
+    expect(first.endsWith('… more text on this page: call browser_extract with offset=3000')).toBe(true);
+    t.extract = JSON.stringify({ title: 'T', url: 'https://x.test/', text: body, more: false });
+    const second = await engine.extract(2000, 3000);
+    expect(t.evals.at(-1)!.js).toContain('const max = 5000;');
+    expect(second).toBe(`T\n(text from character 3000)\n\n${body.slice(3000, 5000)}`);
+  });
 });
 
 const TABS: TabInfo[] = [

@@ -410,8 +410,8 @@ export class ComputerSession {
     return this.deps.browser.do(steps);
   }
 
-  browserExtract(maxChars?: number): Promise<string> {
-    return this.deps.browser.extract(maxChars);
+  browserExtract(maxChars?: number, offset?: number): Promise<string> {
+    return offset === undefined ? this.deps.browser.extract(maxChars) : this.deps.browser.extract(maxChars, offset);
   }
 
 }

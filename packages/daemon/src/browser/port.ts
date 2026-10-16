@@ -23,7 +23,7 @@ export interface BrowserPort {
   type(index: number, text: string, opts?: { submit?: boolean }): Promise<string>;
   find(query: string, limit?: number): Promise<string>;
   do(steps: DoStep[]): Promise<string>;
-  extract(maxChars?: number): Promise<string>;
+  extract(maxChars?: number, offset?: number): Promise<string>;
 }
 
 /** `computer_batch` wording for the steps that succeeded before step `n` (1-based). */

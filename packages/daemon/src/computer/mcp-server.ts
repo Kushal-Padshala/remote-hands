@@ -4,6 +4,7 @@ import os from 'node:os';
 import { axHelperEnabledByDefault, ensureAxHelperBinary } from '../desktop/ax-helper.js';
 import { appendCallRecord, classifyError, type ToolCallRecord } from './call-log.js';
 import { runInCallScope } from './call-scope.js';
+import { fitResult } from './result-budget.js';
 import type { ComputerSession } from './session.js';
 import { buildComputerTools, type ComputerTool } from './tools.js';
 
@@ -68,9 +69,9 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
           const { result, abort } = runInCallScope(
             async (): Promise<Result> => {
               try {
-                return { content: [{ type: 'text' as const, text: await tool.handler(args) }] };
+                return { content: [{ type: 'text' as const, text: fitResult(await tool.handler(args)) }] };
               } catch (err: any) {
-                return { isError: true, content: [{ type: 'text' as const, text: `error: ${err?.message ?? String(err)}` }] };
+                return { isError: true, content: [{ type: 'text' as const, text: fitResult(`error: ${err?.message ?? String(err)}`) }] };
               }
             },
           );

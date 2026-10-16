@@ -12,7 +12,7 @@ const APPROVAL_RULE_END = ') that post, publish, submit, send, reply, pay, buy, 
  * file (agy lists MCP tools only by name; without this it spends a turn per tool reading its .json).
  */
 const BROWSER_SIGNATURES =
-  'browser_tabs{} browser_focus{target} browser_open{url} browser_snapshot{} browser_click{index} browser_type{index,text,submit?} browser_find{query,limit?} browser_extract{max_chars?} browser_do{steps:[{op:click|type|select|check|hover|press|scroll|wait, index|target, text?, value?, checked?, key?, delta?, ms?, submit?}]}';
+  'browser_tabs{} browser_focus{target} browser_open{url} browser_snapshot{} browser_click{index} browser_type{index,text,submit?} browser_find{query,limit?} browser_extract{max_chars?,offset?} browser_do{steps:[{op:click|type|select|check|hover|press|scroll|wait, index|target, text?, value?, checked?, key?, delta?, ms?, submit?}]}';
 const DESKTOP_SIGNATURES =
   'desktop_snapshot{app?,filter?,index?,ocr?} desktop_click{index,app?,action?:press|open|menu|double|right} desktop_type{text,index?,replace?,submit?,app?} desktop_scroll{index,direction:up|down|left|right,amount?,app?} desktop_read{index,max_chars?,app?} desktop_drag{from,to,app?} desktop_key{combo,app?} desktop_open{app} desktop_menu{app,query} desktop_windows{}';
 const SIGNATURES_INTRO =

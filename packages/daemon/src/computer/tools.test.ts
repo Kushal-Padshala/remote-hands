@@ -228,6 +228,8 @@ describe('buildComputerTools', () => {
     expect(session.browserExtract).toHaveBeenCalledWith(900);
     await tool('browser_extract').handler({});
     expect(session.browserExtract).toHaveBeenLastCalledWith(undefined);
+    await tool('browser_extract').handler({ max_chars: 900, offset: 2800 });
+    expect(session.browserExtract).toHaveBeenLastCalledWith(900, 2800);
   });
 
   describe('zod validation of the new browser tools', () => {

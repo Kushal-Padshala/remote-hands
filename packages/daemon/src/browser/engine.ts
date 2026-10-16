@@ -14,6 +14,7 @@ import {
 } from './page-scripts.js';
 import { clean, findElements, normalizeSnapshot, renderDelta, renderElement, renderFull, stateNotes, type PageElement, type PageState } from './render.js';
 import { okSoFar, type BrowserPort, type DoStep } from './port.js';
+import { extractWindow, renderExtract } from './extract.js';
 import { resolveTarget, type TargetOp } from './targets.js';
 import type { ActionGate } from '../action-gate.js';
 import { ABANDONED, isCallAborted } from '../computer/call-scope.js';
@@ -775,21 +776,20 @@ export class FastBrowserEngine implements BrowserPort {
     );
   }
 
-  async extract(maxChars = 4000): Promise<string> {
+  async extract(maxChars?: number, offset?: number): Promise<string> {
+    const win = extractWindow(maxChars, offset);
     return this.run(
       async (resolved) => {
         // Read the page the model is looking at (the snapshot's tab), like find/click do;
         // without a shown page, bind a concrete front tab like snapshot does.
         const shown = this.shown?.mode === 'fast' && this.shown.browser.name === resolved.browser.name ? this.shown : null;
         const ctx: Ctx = shown ? { browser: shown.browser, target: shown.target } : await this.concrete(resolved);
-        const text = await this.t.evaluate(ctx.browser, ctx.target, buildExtractScript(maxChars));
+        const text = await this.t.evaluate(ctx.browser, ctx.target, buildExtractScript(win.limit));
         const v = parsePage(text);
         if (!v || typeof v !== 'object') throw new Error(`unexpected page result: ${text.slice(0, 80)}`);
-        const o = v as Record<string, unknown>;
-        const s = (x: unknown): string => (typeof x === 'string' ? x : '');
-        return `${s(o.title)}\n${s(o.url)}\n\n${s(o.text)}`;
+        return renderExtract(v as Record<string, unknown>, win);
       },
-      () => this.legacy.extract(maxChars),
+      () => this.legacy.extract(maxChars, offset),
       false,
     );
   }
