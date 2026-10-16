@@ -12,6 +12,10 @@ export interface PageElement {
   kind: string;
   value?: string;
   checked?: boolean;
+  /** aria-selected (tabs, options): shown so a click that switches a tab is seen to have worked. */
+  selected?: boolean;
+  /** aria-expanded (menus, accordions, dropdown buttons): true = open, false = closed. */
+  expanded?: boolean;
   options?: string[];
   /** Dropdown choices the page script did not list (very long dropdowns). */
   optionsOmitted?: number;
@@ -106,6 +110,8 @@ export function normalizeSnapshot(raw: unknown): PageState {
     const el: PageElement = { id: node, node, role: str(a.role) || 'element', label, kind };
     if (typeof a.value === 'string') el.value = a.value;
     if (a.checked !== undefined && a.checked !== null) el.checked = a.checked === true || a.checked === 'true';
+    if (a.selected !== undefined && a.selected !== null) el.selected = a.selected === true || a.selected === 'true';
+    if (a.expanded !== undefined && a.expanded !== null) el.expanded = a.expanded === true || a.expanded === 'true';
     byNode.set(node, el);
     elements.push(el);
   }
@@ -143,6 +149,9 @@ export function renderElement(el: PageElement, maxOptions = MAX_OPTIONS): string
   let line = `[${el.id}] ${el.role} ${quote(el.label)}`;
   if (showsValue(el)) line += ` = ${quote(el.value ?? '')}`;
   if (el.checked === true) line += ' [checked]';
+  if (el.selected === true) line += ' [selected]';
+  if (el.expanded === true) line += ' [expanded]';
+  else if (el.expanded === false) line += ' [collapsed]';
   if (el.options && el.options.length > 0) {
     const shown = el.options.slice(0, maxOptions).map((o) => clean(o));
     const more = el.options.length - shown.length + (el.optionsOmitted ?? 0);

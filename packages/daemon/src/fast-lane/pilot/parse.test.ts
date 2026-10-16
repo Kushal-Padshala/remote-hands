@@ -131,6 +131,14 @@ describe('parseRendered: element line details', () => {
     expect(one('[6] textbox "Email" = ""').value).toBe('');
   });
 
+  it('reads past selected, expanded and collapsed markers without losing the element', () => {
+    expect(one('[8] tab "Review" [selected]')).toMatchObject({ role: 'tab', label: 'Review', selected: true });
+    expect(one('[9] button "More" [collapsed]')).toMatchObject({ role: 'button', label: 'More', expanded: false });
+    expect(one('[10] button "Menu" [expanded]')).toMatchObject({ id: '10', expanded: true });
+    expect(one('[11] option "Yes" [checked] [selected]')).toMatchObject({ checked: true, selected: true });
+    expect(one('[12] combobox "Country" = "France" [expanded] options: France | Spain')).toMatchObject({ value: 'France', expanded: true, options: ['France', 'Spain'] });
+  });
+
   it('keeps labels that contain brackets, arrows and unicode', () => {
     expect(one('[7] button "Next → [step 2] 🙂"').label).toBe('Next → [step 2] 🙂');
   });
@@ -161,6 +169,8 @@ function randomState(rand: () => number): PageState {
       const el: PageElement = { id: i + 1, node: i + 1, role, label: label(), kind: role === 'textbox' || role === 'combobox' ? 'fill' : 'click' };
       if (el.kind === 'fill' && rand() < 0.6) el.value = label();
       if ((role === 'checkbox' || role === 'radio') && rand() < 0.4) el.checked = true;
+      if (rand() < 0.2) el.selected = true;
+      if (rand() < 0.2) el.expanded = rand() < 0.5;
       elements.push(el);
     }
   }
@@ -177,6 +187,8 @@ function toPageElement(e: UiElement): PageElement {
   } else if (e.value !== undefined) base.kind = 'fill';
   if (e.value !== undefined) base.value = e.value;
   if (e.checked) base.checked = true;
+  if (e.selected) base.selected = true;
+  if (e.expanded !== undefined) base.expanded = e.expanded;
   return base;
 }
 

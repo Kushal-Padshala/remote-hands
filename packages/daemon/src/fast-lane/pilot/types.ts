@@ -6,6 +6,9 @@ export interface UiElement {
   label: string;
   value?: string;
   checked?: boolean;
+  /** aria-selected / aria-expanded as the page reports them (expanded false = collapsed). Read, never acted on. */
+  selected?: boolean;
+  expanded?: boolean;
   options?: string[];
   /** How many further options the engine summarised as `…(+N)` after the ones listed. */
   optionsMore?: number;

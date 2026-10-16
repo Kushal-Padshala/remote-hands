@@ -4,7 +4,8 @@ import type { PilotView, UiElement } from './types.js';
 const HEADER = /^(?:browser: (.*?) · )?page: (.*) — (.*?)( \(same page\))?$/;
 const ELEMENT = /^([+~] )?\[([^\]]+)\] ([^"]+?) "((?:[^"\\]|\\.)*)"(.*)$/;
 const REMOVED = /^- \[([^\]]+)\] "(?:[^"\\]|\\.)*"$/;
-const REST = /^(?: = "((?:[^"\\]|\\.)*)")?( \[checked\])?(?: options: (.*))?$/;
+// [selected], [expanded] and [collapsed] follow [checked]; the pilot does not use them but must still read the line.
+const REST = /^(?: = "((?:[^"\\]|\\.)*)")?( \[checked\])?( \[selected\])?( \[(?:expanded|collapsed)\])?(?: options: (.*))?$/;
 const MORE_OPTIONS = /^…\(\+(\d+)\)$/;
 
 const unquote = (s: string): string => s.replace(/\\(["\\])/g, '$1');
@@ -15,8 +16,10 @@ function parseElement(id: string, role: string, label: string, rest: string): Ui
   const el: UiElement = { id, role, label: unquote(label) };
   if (tail[1] !== undefined) el.value = unquote(tail[1]);
   if (tail[2] !== undefined) el.checked = true;
-  if (tail[3] !== undefined) {
-    const parts = tail[3].split(' | ');
+  if (tail[3] !== undefined) el.selected = true;
+  if (tail[4] !== undefined) el.expanded = tail[4] === ' [expanded]';
+  if (tail[5] !== undefined) {
+    const parts = tail[5].split(' | ');
     const last = parts.at(-1);
     const more = last === undefined ? null : MORE_OPTIONS.exec(last);
     if (more) {

@@ -94,6 +94,44 @@ describe('header with the browser name (fix pass 4)', () => {
   });
 });
 
+describe('selected and expanded state', () => {
+  const page = (tab: string, open: string) => normalizeSnapshot({
+    url: 'https://a.test/', title: 'A', text: '',
+    actions: [
+      { node: 1, role: 'tab', label: 'Edit', kind: 'click', value: '', selected: tab === 'edit' ? 'true' : 'false' },
+      { node: 2, role: 'tab', label: 'Review', kind: 'click', value: '', selected: tab === 'review' ? 'true' : 'false' },
+      { node: 3, role: 'button', label: 'More', kind: 'click', value: '', expanded: open },
+      { node: 4, role: 'button', label: 'Plain', kind: 'click', value: '' },
+      { node: 5, role: 'button', label: 'Other', kind: 'click', value: '' },
+      { node: 6, role: 'button', label: 'Another', kind: 'click', value: '' },
+      { node: 7, role: 'button', label: 'Last', kind: 'click', value: '' },
+    ],
+  });
+
+  it('shows which tab is selected and whether a disclosure is open or closed', () => {
+    expect(renderFull(page('edit', 'false'), { text: false }).split('\n').slice(1)).toEqual([
+      '[1] tab "Edit" [selected]',
+      '[2] tab "Review"',
+      '[3] button "More" [collapsed]',
+      '[4] button "Plain"',
+      '[5] button "Other"',
+      '[6] button "Another"',
+      '[7] button "Last"',
+    ]);
+    expect(renderFull(page('edit', 'true'), { text: false })).toContain('[3] button "More" [expanded]');
+  });
+
+  it('reports a tab switch and an opened menu as changes', () => {
+    expect(renderDelta(page('edit', 'false'), page('review', 'true')).split('\n')).toEqual([
+      'page: A — https://a.test/ (same page)',
+      '~ [1] tab "Edit"',
+      '~ [2] tab "Review" [selected]',
+      '~ [3] button "More" [expanded]',
+      '(4 unchanged)',
+    ]);
+  });
+});
+
 describe('renderDelta', () => {
   const base = (): PageState => normalizeSnapshot(rawPage());
 
