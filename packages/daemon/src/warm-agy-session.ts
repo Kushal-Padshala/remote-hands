@@ -38,6 +38,26 @@ export interface WarmAgySessionOptions {
   clearTimer?: (timer: NodeJS.Timeout) => void;
 }
 
+/**
+ * agy can flag a result as an error after a transient failure it already retried past (e.g. a
+ * one-off 500 from the model API) even though the turn finished. When the result text is what the
+ * model itself streamed as its answer, the work is done: an error result carries agy's own
+ * message, which is never streamed as agent text. Drop the flag then, and note that it was dropped.
+ */
+function clearStaleErrorFlag(event: EventInput, earlier: EventInput[]): void {
+  const payload = event.payload as any;
+  if (!payload?.is_error) return;
+  const summary = typeof payload.summary === 'string' ? payload.summary.trim() : '';
+  if (!summary) return;
+  const streamed = earlier
+    .filter((e) => e.kind === 'agent_text')
+    .map((e) => String((e.payload as any)?.text ?? ''))
+    .join('');
+  if (!streamed.includes(summary)) return;
+  delete payload.is_error;
+  payload.error_flag_ignored = true;
+}
+
 export function buildWarmAgyArgs(
   c: Omit<WarmSessionConfig, 'conversationId'> & { conversationId?: string | null | undefined },
 ): string[] {
@@ -270,6 +290,7 @@ export class WarmAgySession {
         return;
       }
       if (!event || !turn) continue;
+      if (event.kind === 'result') clearStaleErrorFlag(event, turn.events);
       turn.events.push(event);
       const conversationId = (event.payload as any)?.conversation_id;
       if (typeof conversationId === 'string') {

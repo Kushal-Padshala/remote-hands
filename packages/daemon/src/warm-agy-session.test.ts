@@ -321,6 +321,29 @@ describe('WarmAgySession lifecycle hardening', () => {
     expect(await t).toMatchObject({ failed: true, aborted: false, summary: 'quota exceeded' });
   });
 
+  it('keeps the turn done when an error-flagged result is the answer the model already streamed', async () => {
+    const { session, procs } = makeSession();
+    const seen: any[] = [];
+    const t = session.runTurn('a', config, (e) => void seen.push(e));
+    await Promise.resolve();
+    procs[0]!.stdout.write('{"event":"text","t":"### Summary\\n- made the form"}\n');
+    procs[0]!.reply('{"event":"text","t":"### Summary\\n- made the form"}', 'conv-1', 'ERROR');
+    const r = await t;
+    expect(r).toMatchObject({ failed: false, aborted: false });
+    const result = seen.find((e) => e.kind === 'result');
+    expect(result.payload.is_error).toBeUndefined();
+    expect(result.payload.error_flag_ignored).toBe(true);
+  });
+
+  it('still fails an error result whose text the model never streamed, even after streaming other text', async () => {
+    const { session, procs } = makeSession();
+    const t = session.runTurn('a', config);
+    await Promise.resolve();
+    procs[0]!.stdout.write('{"event":"text","t":"working on it"}\n');
+    procs[0]!.reply('quota exceeded', 'conv-1', 'ERROR');
+    expect(await t).toMatchObject({ failed: true, summary: 'quota exceeded' });
+  });
+
   it('a fatal error event fails the turn, kills the process, and the next turn resumes the conversation', async () => {
     const { session, procs, spawnFn, killFn } = makeSession();
     const t1 = session.runTurn('a', config);
