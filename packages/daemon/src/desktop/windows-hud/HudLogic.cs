@@ -956,6 +956,21 @@ namespace RemoteHands
             return rest.Length == 0 || "history".StartsWith(rest, StringComparison.Ordinal);
         }
 
+        /// <summary>True while the list of past chats (not the command row) is what the menu shows.</summary>
+        public static bool IsChatView(string text)
+        {
+            return IsMenuText(text) && text.ToLowerInvariant().StartsWith(History + " ", StringComparison.Ordinal);
+        }
+
+        /// <summary>First visible row of a long list: it moves only when the highlighted row would fall outside the window.</summary>
+        public static int Viewport(int first, int selected, int visible, int count)
+        {
+            int last = Math.Max(0, count - visible);
+            if (selected < first) first = selected;
+            else if (selected > first + visible - 1) first = selected - visible + 1;
+            return Math.Max(0, Math.Min(first, last));
+        }
+
         /// <summary>The rows to show for what is typed. `chats` is null until the daemon has answered.</summary>
         public static List<SlashRow> Rows(string text, List<ChatItem> chats)
         {

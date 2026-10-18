@@ -74,6 +74,20 @@ static class Tests
         Eq("a", turns[0].Answer, "answer");
         Eq(0, Slash.ParseChats(null).Count, "no items");
 
+        True(Slash.IsChatView("/history "), "the chat list is showing");
+        True(Slash.IsChatView("/History rename"), "the chat list with a filter");
+        True(!Slash.IsChatView("/hist"), "the command row is not the chat list");
+        True(!Slash.IsChatView("/history"), "no space yet is still the command row");
+        True(!Slash.IsChatView("hello"), "plain text is not the chat list");
+        // the window onto a long list moves only when the highlighted row leaves it, never because the mouse hovered a visible row
+        Eq(4, Slash.Viewport(4, 4, 7, 30), "hovering the top visible row keeps the window");
+        Eq(4, Slash.Viewport(4, 10, 7, 30), "the last visible row keeps the window");
+        Eq(5, Slash.Viewport(4, 11, 7, 30), "stepping past the bottom scrolls one row");
+        Eq(3, Slash.Viewport(4, 3, 7, 30), "stepping above the top scrolls up");
+        Eq(0, Slash.Viewport(9, 0, 7, 30), "back to the first row");
+        Eq(23, Slash.Viewport(0, 29, 7, 30), "the last row sits at the bottom");
+        Eq(0, Slash.Viewport(3, 1, 4, 4), "a short list never scrolls");
+
         Eq("{\"event\":\"history\"}", Messages.History(), "history line");
         Eq("{\"event\":\"resume\",\"id\":\"c\\\"1\"}", Messages.Resume("c\"1"), "resume line escapes the id");
 

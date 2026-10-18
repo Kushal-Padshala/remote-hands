@@ -1411,6 +1411,7 @@ namespace RemoteHands
     {
         List<SlashRow> rows = new List<SlashRow>();
         int selected;
+        int first; // first visible row: moves with the keyboard, never with the mouse
         readonly Font titleFont = new Font("Segoe UI Semibold", 10f);
         readonly Font smallFont = new Font("Segoe UI", 8.5f);
         string shown = "";
@@ -1450,6 +1451,7 @@ namespace RemoteHands
         {
             if (rows.Count == 0) return;
             selected = Math.Max(0, Math.Min(rows.Count - 1, selected + delta));
+            first = Slash.Viewport(first, selected, Math.Min(7, rows.Count), rows.Count);
             Invalidate();
         }
 
@@ -1462,10 +1464,15 @@ namespace RemoteHands
         {
             var key = new StringBuilder();
             foreach (SlashRow row in list) key.Append(row.Kind).Append('|').Append(row.Id).Append('|').Append(row.Title).Append('\n');
-            if (key.ToString() != shown) selected = 0;
+            if (key.ToString() != shown)
+            {
+                selected = 0;
+                first = 0;
+            }
             shown = key.ToString();
             rows = list;
             if (selected >= rows.Count) selected = rows.Count - 1;
+            first = Slash.Viewport(first, selected, Math.Min(7, rows.Count), rows.Count);
             int rowH = Dpi.S(38), pad = Dpi.S(6);
             int count = Math.Min(7, rows.Count);
             int w = pill.Width, h = count * rowH + 2 * pad;
@@ -1493,7 +1500,6 @@ namespace RemoteHands
             }
             // a long list scrolls to keep the selected row in view
             int visibleRows = Math.Min(7, rows.Count);
-            int first = Math.Max(0, Math.Min(selected - visibleRows + 1, rows.Count - visibleRows));
             for (int i = 0; i < visibleRows; i++)
             {
                 SlashRow row = rows[first + i];
@@ -1532,7 +1538,6 @@ namespace RemoteHands
         {
             int rowH = Dpi.S(38), pad = Dpi.S(6);
             int visibleRows = Math.Min(7, rows.Count);
-            int first = Math.Max(0, Math.Min(selected - visibleRows + 1, rows.Count - visibleRows));
             int index = (p.Y - pad) / rowH;
             if (p.Y < pad || index < 0 || index >= visibleRows) return -1;
             return first + index;
@@ -1588,6 +1593,7 @@ namespace RemoteHands
         readonly SlashPopover popover = new SlashPopover();
         List<ChatItem> chats;
         bool chatsRequested;
+        bool inChatView; // the chat list is showing: it is fetched once per opening so it is never stale
         int columnTop;
         bool arranging;
         bool closing;
@@ -1630,7 +1636,14 @@ namespace RemoteHands
 
             input.KeyDown += OnInputKeyDown;
             input.TextChanged += OnInputChanged;
-            sendButton.Click += delegate { Submit(); input.Focus(); };
+            sendButton.Click += delegate
+            {
+                // the arrow does what Enter does: with the / menu open it picks the highlighted row
+                SlashRow chosen = popover.Open && Slash.IsMenuText(input.Text) ? popover.Selected : null;
+                if (chosen != null && chosen.Kind != "info") OnSlashPicked(chosen);
+                else Submit();
+                input.Focus();
+            };
             popover.Picked += OnSlashPicked;
             LocationChanged += delegate { OnMoved(); };
             Layout_Collapsed();
@@ -1862,9 +1875,17 @@ namespace RemoteHands
             List<SlashRow> rows = Slash.Rows(input.Text, chats);
             if (rows.Count == 0)
             {
+                inChatView = false;
                 popover.HidePopover();
                 return;
             }
+            bool chatView = Slash.IsChatView(input.Text);
+            if (chatView && !inChatView && !chatsRequested)
+            {
+                chatsRequested = true;
+                Wire.Send(Messages.History());
+            }
+            inChatView = chatView;
             popover.ShowRows(this, RectangleToScreen(pillRect), rows);
         }
 
@@ -1874,11 +1895,6 @@ namespace RemoteHands
             {
                 input.Text = Slash.History + " ";
                 input.SelectionStart = input.Text.Length;
-                if (chats == null && !chatsRequested)
-                {
-                    chatsRequested = true;
-                    Wire.Send(Messages.History());
-                }
                 UpdatePopover();
             }
             else if (row.Kind == "chat")
