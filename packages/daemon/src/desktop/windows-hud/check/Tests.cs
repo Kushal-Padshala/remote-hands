@@ -29,8 +29,52 @@ static class Tests
         LinkTests();
         NameTests();
         MascotTests();
+        CardTests();
         Console.WriteLine(count + " checks, " + failures + " failed");
         return failures == 0 ? 0 : 1;
+    }
+
+    static void CardTests()
+    {
+        var stack = new CardStack();
+        Card goal = stack.Add(new FeedEntry(EntryKind.Goal, "open notes"), 0, true);
+        True(goal.Latest && goal.Working, "request card is live");
+        Card a = stack.Add(new FeedEntry(EntryKind.Step, "Opening Notes"), 10, true);
+        True(a.InProgress, "a new step is in progress");
+        Card b = stack.Add(new FeedEntry(EntryKind.Step, "Typing"), 20, true);
+        True(!a.InProgress && b.InProgress, "the next step finishes the last one");
+        stack.SetWorking(false, 100, 10);
+        True(!b.InProgress, "the end of the task finishes the step");
+        Eq(10, goal.FinishedSeconds, "request remembers how long it took");
+        Card answer = stack.Add(new FeedEntry(EntryKind.Answer, "All done"), 101, false);
+        Eq("Done", answer.Title, "answer title");
+        Eq("All done", answer.Body, "answer body");
+        True(object.ReferenceEquals(stack.Answer, answer), "answer is remembered");
+        Card second = stack.Add(new FeedEntry(EntryKind.Goal, "again"), 110, true);
+        True(!goal.Latest && !goal.Working && second.Latest, "the older request gives up its buttons");
+
+        foreach (Card c in stack.Cards) c.Height = 40;
+        Eq(5 * 40 + 4 * CardStack.Gap + CardStack.Tail, stack.Layout(), "stack height");
+        Eq(0, stack.Cards[0].Y, "first card at the top");
+        Eq(40 + CardStack.Gap, stack.Cards[1].Y, "second card below the first");
+        stack.Clear();
+        Eq(0, stack.Layout(), "empty stack has no height");
+
+        True(CardStack.IsDimmed(0, 6, false), "older card dims");
+        True(!CardStack.IsDimmed(0, 6, true), "hover undims");
+        True(!CardStack.IsDimmed(3, 6, false), "newest three stay clear");
+        Eq(600, CardStack.MaxHeight(900), "max height cap");
+        Eq(200, CardStack.MaxHeight(50), "max height floor");
+        Eq(0, CardStack.ClampScroll(-5, 500, 300), "scroll clamps at the top");
+        Eq(200, CardStack.ClampScroll(900, 500, 300), "scroll clamps at the end");
+        Eq(0, CardStack.ClampScroll(30, 100, 300), "short stack does not scroll");
+        Eq(1.0, CardStack.TopFade(0), "no fade at the top edge");
+        Eq(0.0, CardStack.TopFade(24), "top fades once scrolled");
+        Eq(1.0, CardStack.BottomFade(200, 500, 300), "no fade when the end is in view");
+        Eq(0.0, CardStack.BottomFade(0, 500, 300), "bottom fades while more waits");
+        Eq("Working...", CardStack.StatusLine("Working", true, 3, 1), "dots, no time yet");
+        Eq("Working.  \u00B7  12s", CardStack.StatusLine("Working", true, 1, 12), "time shows after three seconds");
+        Eq("Done  \u00B7  14s", CardStack.StatusLine("Done", false, 2, 14), "no dots when done");
     }
 
     static void MascotTests()

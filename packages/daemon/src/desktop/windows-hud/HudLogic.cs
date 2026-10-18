@@ -741,4 +741,162 @@ namespace RemoteHands
             return Expression.Neutral;
         }
     }
+
+    // ---- the card stack (progress view) -------------------------------------------------------
+
+    public enum CardKind { Request, Step, Note, Attention, Error, Answer }
+
+    /// <summary>One card in the stack: your request (with its live status), a step, a problem, a note or the answer.</summary>
+    public sealed class Card
+    {
+        public CardKind Kind;
+        public string Title = "";
+        public string Body = "";
+        /// <summary>A step that is still happening shows a turning ring instead of a check.</summary>
+        public bool InProgress;
+        /// <summary>Set by the view once the text is measured; Y is then the card's top inside the stack.</summary>
+        public int Height;
+        public int Y;
+        public int StartedTick;
+        public int FinishedSeconds = -1;
+        public bool Working;
+        public bool Latest;
+    }
+
+    /// <summary>The cards and the rules around them. The view measures and draws; everything that decides lives here.</summary>
+    public sealed class CardStack
+    {
+        public const int Gap = 12;
+        public const int Tail = 6;
+        public const int ToolbarHeight = 36;
+        public const int NewestClear = 3;
+
+        public readonly List<Card> Cards = new List<Card>();
+        Card active;
+        Card request;
+
+        public Card Request { get { return request; } }
+        public Card Answer;
+
+        public static CardKind KindFor(EntryKind kind)
+        {
+            switch (kind)
+            {
+                case EntryKind.Goal: return CardKind.Request;
+                case EntryKind.Step: return CardKind.Step;
+                case EntryKind.Attention: return CardKind.Attention;
+                case EntryKind.Error: return CardKind.Error;
+                case EntryKind.Answer: return CardKind.Answer;
+                default: return CardKind.Note;
+            }
+        }
+
+        /// <summary>Adds the card for a new entry. A new card means the step that was happening is done.</summary>
+        public Card Add(FeedEntry entry, int nowTick, bool working)
+        {
+            FinishActive();
+            var card = new Card();
+            card.Kind = KindFor(entry.Kind);
+            card.StartedTick = nowTick;
+            if (card.Kind == CardKind.Answer)
+            {
+                card.Title = "Done";
+                card.Body = entry.Text;
+                Answer = card;
+            }
+            else
+            {
+                card.Title = entry.Text;
+            }
+            if (card.Kind == CardKind.Step)
+            {
+                card.InProgress = true;
+                active = card;
+            }
+            if (card.Kind == CardKind.Request)
+            {
+                // the older request keeps its words but gives up the buttons
+                if (request != null) { request.Latest = false; request.Working = false; }
+                request = card;
+                card.Latest = true;
+                card.Working = working;
+            }
+            Cards.Add(card);
+            return card;
+        }
+
+        public void FinishActive()
+        {
+            if (active != null) active.InProgress = false;
+            active = null;
+        }
+
+        public void Clear()
+        {
+            Cards.Clear();
+            active = null;
+            request = null;
+            Answer = null;
+        }
+
+        /// <summary>The request card follows the task: working, then done (remembering how long it took).</summary>
+        public void SetWorking(bool working, int nowTick, int ticksPerSecond)
+        {
+            if (request == null) return;
+            if (request.Working && !working) request.FinishedSeconds = (nowTick - request.StartedTick) / ticksPerSecond;
+            if (!request.Working && working) request.FinishedSeconds = -1;
+            request.Working = working;
+            if (!working) FinishActive();
+        }
+
+        /// <summary>Stacks the cards from the top, one gap apart; returns the height of the whole stack.</summary>
+        public int Layout()
+        {
+            int y = 0;
+            foreach (Card card in Cards)
+            {
+                card.Y = y;
+                y += card.Height + Gap;
+            }
+            return Cards.Count == 0 ? 0 : y - Gap + Tail;
+        }
+
+        /// <summary>Cards older than the newest few are quieter until the mouse comes to read them.</summary>
+        public static bool IsDimmed(int index, int count, bool hovering)
+        {
+            return !hovering && count - 1 - index >= NewestClear;
+        }
+
+        /// <summary>The most the stack may take: what is left on screen, never under 200 and never over 600.</summary>
+        public static int MaxHeight(int room)
+        {
+            return Math.Max(200, Math.Min(600, room));
+        }
+
+        public static int ClampScroll(int offset, int content, int viewport)
+        {
+            return Math.Max(0, Math.Min(offset, Math.Max(0, content - viewport)));
+        }
+
+        /// <summary>Opacity (0..1) of the top edge: only fades when cards are scrolled up out of sight.</summary>
+        public static double TopFade(int offset)
+        {
+            return 1 - Math.Min(1, Math.Max(0, offset) / 24.0);
+        }
+
+        /// <summary>Opacity (0..1) of the bottom edge: only fades while more cards wait below.</summary>
+        public static double BottomFade(int offset, int content, int viewport)
+        {
+            int below = Math.Max(0, content - viewport - offset);
+            return 1 - Math.Min(1, below / 24.0);
+        }
+
+        /// <summary>"Working..." then the time once it is worth saying ("Working... - 12s").</summary>
+        public static string StatusLine(string word, bool working, int dots, int seconds)
+        {
+            string suffix = working ? new string('.', ((dots % 4) + 4) % 4) : "";
+            string time = seconds >= 3 ? "  \u00B7  " + seconds + "s" : "";
+            return word + suffix + time;
+        }
+    }
 }
