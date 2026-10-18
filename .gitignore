@@ -14,3 +14,6 @@ coverage/
 packages/cli/apps/
 packages/cli/bin/
 packages/daemon/bin/
+
+# graphify
+graphify-out/
