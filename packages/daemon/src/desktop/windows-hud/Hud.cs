@@ -1403,6 +1403,173 @@ namespace RemoteHands
         }
     }
 
+    /// <summary>
+    /// The small list that opens above the typing box when the line starts with / : the commands, then the past chats.
+    /// It never takes the keyboard (the box keeps it): the window above sends Up, Down, Enter and Esc here.
+    /// </summary>
+    sealed class SlashPopover : Form
+    {
+        List<SlashRow> rows = new List<SlashRow>();
+        int selected;
+        readonly Font titleFont = new Font("Segoe UI Semibold", 10f);
+        readonly Font smallFont = new Font("Segoe UI", 8.5f);
+        string shown = "";
+
+        public event Action<SlashRow> Picked;
+
+        public SlashPopover()
+        {
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            TopMost = true;
+            StartPosition = FormStartPosition.Manual;
+            BackColor = Theme.Pill;
+            DoubleBuffered = true;
+        }
+
+        protected override bool ShowWithoutActivation { get { return true; } }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var cp = base.CreateParams;
+                cp.ExStyle |= 0x08000000 | 0x00000080; // never takes focus, no taskbar button
+                return cp;
+            }
+        }
+
+        public bool Open { get { return Visible && rows.Count > 0; } }
+
+        public SlashRow Selected
+        {
+            get { return selected >= 0 && selected < rows.Count ? rows[selected] : null; }
+        }
+
+        public void Step(int delta)
+        {
+            if (rows.Count == 0) return;
+            selected = Math.Max(0, Math.Min(rows.Count - 1, selected + delta));
+            Invalidate();
+        }
+
+        public void HidePopover()
+        {
+            if (Visible) Hide();
+        }
+
+        public void ShowRows(Form owner, Rectangle pill, List<SlashRow> list)
+        {
+            var key = new StringBuilder();
+            foreach (SlashRow row in list) key.Append(row.Kind).Append('|').Append(row.Id).Append('|').Append(row.Title).Append('\n');
+            if (key.ToString() != shown) selected = 0;
+            shown = key.ToString();
+            rows = list;
+            if (selected >= rows.Count) selected = rows.Count - 1;
+            int rowH = Dpi.S(38), pad = Dpi.S(6);
+            int count = Math.Min(7, rows.Count);
+            int w = pill.Width, h = count * rowH + 2 * pad;
+            Rectangle wa = Screen.FromRectangle(pill).WorkingArea;
+            int y = pill.Bottom + Dpi.S(6);
+            if (y + h > wa.Bottom) y = pill.Top - h - Dpi.S(6);
+            Bounds = new Rectangle(pill.Left, y, w, h);
+            using (var path = Shapes.Rounded(new Rectangle(0, 0, w, h), Dpi.S(14)))
+            {
+                Region = new Region(path);
+            }
+            if (!Visible) Show(owner);
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            int rowH = Dpi.S(38), pad = Dpi.S(6);
+            using (var pen = new Pen(Theme.PillBorder))
+            using (var edge = Shapes.Rounded(new Rectangle(0, 0, Width - 1, Height - 1), Dpi.S(14)))
+            {
+                e.Graphics.DrawPath(pen, edge);
+            }
+            // a long list scrolls to keep the selected row in view
+            int visibleRows = Math.Min(7, rows.Count);
+            int first = Math.Max(0, Math.Min(selected - visibleRows + 1, rows.Count - visibleRows));
+            for (int i = 0; i < visibleRows; i++)
+            {
+                SlashRow row = rows[first + i];
+                var cell = new Rectangle(pad, pad + i * rowH, Width - 2 * pad, rowH);
+                if (first + i == selected && row.Kind != "info")
+                {
+                    using (var path = Shapes.Rounded(cell, Dpi.S(8)))
+                    using (var brush = new SolidBrush(Color.FromArgb(30, 255, 255, 255)))
+                    {
+                        e.Graphics.FillPath(brush, path);
+                    }
+                }
+                int badgeW = row.Badge.Length > 0 ? TextRenderer.MeasureText(row.Badge, smallFont).Width + Dpi.S(8) : 0;
+                int textX = cell.X + Dpi.S(14);
+                int textW = cell.Width - Dpi.S(28) - badgeW;
+                var flags = TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter;
+                if (row.Subtitle.Length > 0)
+                {
+                    TextRenderer.DrawText(e.Graphics, row.Title, titleFont, new Rectangle(textX, cell.Y + Dpi.S(3), textW, Dpi.S(18)), Theme.Text, flags);
+                    TextRenderer.DrawText(e.Graphics, row.Subtitle, smallFont, new Rectangle(textX, cell.Y + Dpi.S(20), textW, Dpi.S(15)), Theme.Secondary, flags);
+                }
+                else
+                {
+                    Color ink = row.Kind == "info" ? Theme.Tertiary : Theme.Text;
+                    TextRenderer.DrawText(e.Graphics, row.Title, titleFont, new Rectangle(textX, cell.Y, textW, cell.Height), ink, flags);
+                }
+                if (badgeW > 0)
+                {
+                    TextRenderer.DrawText(e.Graphics, row.Badge, smallFont, new Rectangle(cell.Right - Dpi.S(14) - badgeW, cell.Y, badgeW, cell.Height), Theme.Tertiary,
+                        TextFormatFlags.Right | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter);
+                }
+            }
+        }
+
+        int RowAt(Point p)
+        {
+            int rowH = Dpi.S(38), pad = Dpi.S(6);
+            int visibleRows = Math.Min(7, rows.Count);
+            int first = Math.Max(0, Math.Min(selected - visibleRows + 1, rows.Count - visibleRows));
+            int index = (p.Y - pad) / rowH;
+            if (p.Y < pad || index < 0 || index >= visibleRows) return -1;
+            return first + index;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            int at = RowAt(e.Location);
+            if (at >= 0 && at != selected && rows[at].Kind != "info")
+            {
+                selected = at;
+                Invalidate();
+            }
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (e.Button != MouseButtons.Left) return;
+            int at = RowAt(e.Location);
+            if (at < 0 || rows[at].Kind == "info") return;
+            selected = at;
+            if (Picked != null) Picked(rows[at]);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                titleFont.Dispose();
+                smallFont.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+    }
+
     /// <summary>The window: a prompt pill that stays under the progress cards once a request is sent.</summary>
     sealed class PromptForm : Form
     {
@@ -1418,6 +1585,9 @@ namespace RemoteHands
         CardsForm cards;
         readonly ContextMenuStrip modelMenu = new ContextMenuStrip();
         readonly ToolTip tips = new ToolTip();
+        readonly SlashPopover popover = new SlashPopover();
+        List<ChatItem> chats;
+        bool chatsRequested;
         int columnTop;
         bool arranging;
         bool closing;
@@ -1461,6 +1631,7 @@ namespace RemoteHands
             input.KeyDown += OnInputKeyDown;
             input.TextChanged += OnInputChanged;
             sendButton.Click += delegate { Submit(); input.Focus(); };
+            popover.Picked += OnSlashPicked;
             LocationChanged += delegate { OnMoved(); };
             Layout_Collapsed();
             ResumeLayout(false);
@@ -1660,6 +1831,7 @@ namespace RemoteHands
         void OnMoved()
         {
             if (arranging) return;
+            popover.HidePopover();
             if (state.IsExpanded)
             {
                 columnTop = Top - PillOffset();
@@ -1680,6 +1852,64 @@ namespace RemoteHands
                 mascot.TypedLength = input.Text.Length;
                 mascot.SetMood(input.Text.Length == 0 ? Mood.Idle : Mood.Typing);
             }
+            UpdatePopover();
+        }
+
+        // ---- the / menu ----------------------------------------------------------------------
+
+        void UpdatePopover()
+        {
+            List<SlashRow> rows = Slash.Rows(input.Text, chats);
+            if (rows.Count == 0)
+            {
+                popover.HidePopover();
+                return;
+            }
+            popover.ShowRows(this, RectangleToScreen(pillRect), rows);
+        }
+
+        void OnSlashPicked(SlashRow row)
+        {
+            if (row.Kind == "command")
+            {
+                input.Text = Slash.History + " ";
+                input.SelectionStart = input.Text.Length;
+                if (chats == null && !chatsRequested)
+                {
+                    chatsRequested = true;
+                    Wire.Send(Messages.History());
+                }
+                UpdatePopover();
+            }
+            else if (row.Kind == "chat")
+            {
+                input.Text = "";
+                popover.HidePopover();
+                Wire.Send(Messages.Resume(row.Id));
+            }
+            input.Focus();
+        }
+
+        /// <summary>A past chat was picked: its messages become cards and the next message continues it.</summary>
+        void ShowResumed(List<ChatTurn> turns)
+        {
+            string last = "";
+            foreach (ChatTurn turn in turns)
+            {
+                if (turn.Answer.Trim().Length > 0) last = turn.Answer.Trim();
+            }
+            bool first = !state.IsExpanded;
+            state.Resumed(last);
+            if (first) TransitionToProgress();
+            else cards.Reset();
+            foreach (ChatTurn turn in turns)
+            {
+                AppendEntry(EntryKind.Goal, turn.Goal);
+                cards.SetStatus("Done", Theme.Success, false);
+                AppendEntry(EntryKind.Answer, turn.Answer);
+            }
+            ApplyChrome();
+            FocusPill();
         }
 
         void OnInputKeyDown(object sender, KeyEventArgs e)
@@ -1694,6 +1924,18 @@ namespace RemoteHands
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            if (popover.Open)
+            {
+                if (keyData == Keys.Down) { popover.Step(1); return true; }
+                if (keyData == Keys.Up) { popover.Step(-1); return true; }
+                if (keyData == Keys.Enter || keyData == Keys.Tab)
+                {
+                    SlashRow chosen = popover.Selected;
+                    if (chosen != null && chosen.Kind != "info") { OnSlashPicked(chosen); return true; }
+                    return true; // only a note is showing: Enter must not send "/history " as a message
+                }
+                if (keyData == Keys.Escape) { popover.HidePopover(); return true; }
+            }
             if (keyData == Keys.Escape)
             {
                 if (state.IsExpanded && state.IsWorking) Stop();
@@ -1712,6 +1954,7 @@ namespace RemoteHands
         {
             string text = input.Text.Trim();
             if (text.Length == 0) return;
+            if (popover.Open && Slash.IsMenuText(text)) return; // the menu is waiting for a pick, not for a message
             input.Text = "";
             Wire.Send(Messages.Submit(text, args.App, args.WindowTitle, args.Models.Count > 0 ? modelKey : ""));
             if (args.Once)
@@ -1861,7 +2104,20 @@ namespace RemoteHands
             if (trimmed.Length == 0) return;
             var message = Json.Parse(trimmed) as Dictionary<string, object>;
             if (message == null) return;
-            if (Json.GetString(message, "event") == "context") return; // browser tabs and files to attach: not on Windows yet
+            string kind = Json.GetString(message, "event");
+            if (kind == "context") return; // browser tabs and files to attach: not on Windows yet
+            if (kind == "history-list")
+            {
+                chats = Slash.ParseChats(message.ContainsKey("items") ? message["items"] : null);
+                chatsRequested = false;
+                if (Slash.IsMenuText(input.Text)) UpdatePopover();
+                return;
+            }
+            if (kind == "resumed")
+            {
+                ShowResumed(Slash.ParseTurns(message.ContainsKey("turns") ? message["turns"] : null));
+                return;
+            }
             UpdateResult result = state.Apply(Json.GetString(message, "status"), Json.GetString(message, "text"), Json.GetString(message, "role"));
             if (result.Ignored) return;
             foreach (FeedEntry entry in result.Entries) AppendEntry(entry.Kind, entry.Text);
