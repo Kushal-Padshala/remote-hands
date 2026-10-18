@@ -1236,6 +1236,17 @@ final class ActivityFeed: NSView {
         }
     }
 
+    /// Starts over with no cards (a different chat was picked).
+    func reset() {
+        for card in cards { card.removeFromSuperview() }
+        cards.removeAll()
+        activeStep = nil
+        doc.frame = NSRect(x: 0, y: 0, width: cardWidth + ActivityCard.room * 2, height: 0)
+        scroll.contentView.setBoundsOrigin(.zero)
+        onChange?()
+        updateMask()
+    }
+
     func scrollToEnd() {
         scroll.contentView.setBoundsOrigin(NSPoint(x: 0, y: max(0, doc.frame.height - visibleHeight)))
         scroll.reflectScrolledClipView(scroll.contentView)
@@ -1316,7 +1327,7 @@ class ContextTableCell: NSTableCellView {
         titleField.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         titleField.textColor = Theme.text
         titleField.lineBreakMode = .byTruncatingTail
-        titleField.frame = NSRect(x: 38, y: 17, width: bounds.width - 90, height: 18)
+        titleField.frame = NSRect(x: 38, y: 17, width: bounds.width - 125, height: 18)
         titleField.autoresizingMask = [.width]
         addSubview(titleField)
 
@@ -1324,7 +1335,7 @@ class ContextTableCell: NSTableCellView {
         subtitleField.font = NSFont.systemFont(ofSize: 11, weight: .regular)
         subtitleField.textColor = Theme.secondary
         subtitleField.lineBreakMode = .byTruncatingTail
-        subtitleField.frame = NSRect(x: 38, y: 3, width: bounds.width - 90, height: 15)
+        subtitleField.frame = NSRect(x: 38, y: 3, width: bounds.width - 125, height: 15)
         subtitleField.autoresizingMask = [.width]
         addSubview(subtitleField)
 
@@ -1332,7 +1343,7 @@ class ContextTableCell: NSTableCellView {
         badgeField.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         badgeField.textColor = Theme.tertiary
         badgeField.alignment = .right
-        badgeField.frame = NSRect(x: bounds.width - 65, y: 10, width: 55, height: 18)
+        badgeField.frame = NSRect(x: bounds.width - 84, y: 10, width: 62, height: 18)
         badgeField.autoresizingMask = [.minXMargin]
         addSubview(badgeField)
     }
@@ -1514,7 +1525,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                 transitionToProgress(query: q)
             } else if let t = d["type"] as? String {
                 textField.stringValue = t
-                fitPromptHeight()
+                controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
             } else if d["followup"] != nil {
                 setFollowUp(visible: true, focus: false)
             } else if d["collapse"] != nil {
@@ -2066,6 +2077,70 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         }
     }
 
+    /// The chats /history listed (nil until the daemon answers).
+    var historyItems: [[String: Any]]?
+    var historyRequested = false
+
+    /// The / menu: one command now (/history), then the chats once /history is picked ("/history " + words filters them).
+    func showSlashPanel(_ text: String) {
+        let lower = text.lowercased()
+        if lower.hasPrefix("/history ") {
+            let query = String(lower.dropFirst("/history ".count)).trimmingCharacters(in: .whitespaces)
+            var rows: [[String: Any]] = []
+            if let chats = historyItems {
+                for chat in chats {
+                    let title = chat["title"] as? String ?? ""
+                    if !query.isEmpty && !title.lowercased().contains(query) { continue }
+                    let count = chat["count"] as? Int ?? 1
+                    rows.append(["type": "chat", "id": chat["id"] as? String ?? "", "label": title,
+                                 "subtitle": count == 1 ? "1 message" : "\(count) messages", "icon": "💬", "badge": chat["when"] as? String ?? ""])
+                }
+                if rows.isEmpty {
+                    rows = [["type": "info", "id": "", "label": chats.isEmpty ? "No chats yet" : "No chats match", "subtitle": "", "icon": "🕘", "badge": ""]]
+                }
+            } else {
+                rows = [["type": "info", "id": "", "label": "Loading chats…", "subtitle": "", "icon": "🕘", "badge": ""]]
+            }
+            filteredContextItems = rows
+        } else {
+            let query = String(lower.dropFirst())
+            if !query.isEmpty && !"history".hasPrefix(query) {
+                hideContextPanel()   // not a command: it is an ordinary message
+                return
+            }
+            filteredContextItems = [["type": "slash", "id": "/history", "label": "/history", "subtitle": "Continue a previous chat", "icon": "🕘", "badge": ""]]
+        }
+        presentPanelRows()
+    }
+
+    /// A row of the / menu was picked.
+    func pickSlashRow(_ item: [String: Any]) {
+        switch item["type"] as? String ?? "" {
+        case "slash":
+            textField.stringValue = "/history "
+            textField.currentEditor()?.selectedRange = NSRange(location: textField.stringValue.count, length: 0)
+            if historyItems == nil && !historyRequested {
+                historyRequested = true
+                print("{\"event\":\"history\"}")
+                fflush(stdout)
+            }
+            showSlashPanel(textField.stringValue)
+        case "chat":
+            guard let id = item["id"] as? String, !id.isEmpty else { return }
+            textField.stringValue = ""
+            hideContextPanel()
+            fitPromptHeight()
+            updateSendButton()
+            if let data = try? JSONSerialization.data(withJSONObject: ["event": "resume", "id": id]),
+               let json = String(data: data, encoding: .utf8) {
+                print(json)
+                fflush(stdout)
+            }
+        default:
+            break   // "Loading…" / "No chats yet": nothing to pick
+        }
+    }
+
     func showContextPanel(query: String) {
         if contextItems.isEmpty {
             discoverNativeContext()
@@ -2220,6 +2295,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             filteredContextItems = merged
         }
 
+        presentPanelRows()
+    }
+
+    /// Shows `filteredContextItems` in the popover under the pill (the @ attach list and the / menu share it).
+    func presentPanelRows() {
         if filteredContextItems.isEmpty {
             hideContextPanel()
             return
@@ -2307,6 +2387,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
     }
 
     func attachItem(_ item: [String: Any]) {
+        if let kind = item["type"] as? String, kind == "slash" || kind == "chat" || kind == "info" {
+            pickSlashRow(item)
+            return
+        }
         let itemType = item["type"] as? String ?? ""
         if itemType == "category" {
             let catName = item["category"] as? String ?? ""
@@ -2486,7 +2570,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             mascot?.mood = textField.stringValue.isEmpty ? .idle : .typing
         }
         let current = textField.stringValue
-        if let atIndex = current.lastIndex(of: "@") {
+        if current.hasPrefix("/") && !current.contains("@") && !current.contains("\n") {
+            showSlashPanel(current)
+        } else if let atIndex = current.lastIndex(of: "@") {
             let afterAt = String(current[current.index(after: atIndex)...])
             showContextPanel(query: afterAt)
         } else {
@@ -2736,6 +2822,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             return
         }
 
+        if dict["event"] as? String == "history-list" {
+            historyItems = dict["items"] as? [[String: Any]] ?? []
+            historyRequested = false
+            let current = textField?.stringValue ?? ""
+            if current.lowercased().hasPrefix("/history ") { showSlashPanel(current) }
+            return
+        }
+        if dict["event"] as? String == "resumed" {
+            showResumed(dict)
+            return
+        }
+
         let status = (dict["status"] as? String)?.uppercased() ?? "WORKING"
         let text = dict["text"] as? String ?? ""
         let role = dict["role"] as? String
@@ -2870,9 +2968,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         if visible && focus { panel.makeFirstResponder(textField) }
     }
 
-    func transitionToProgress(query: String) {
+    /// A past chat was picked: show its messages as cards and wait for the next one, which continues it.
+    func showResumed(_ dict: [String: Any]) {
+        let turns = dict["turns"] as? [[String: Any]] ?? []
+        if isExpanded {
+            isWorking = false
+            feed.reset()
+            requestCard = nil
+            answerCard = nil
+            answerText = ""
+        } else {
+            transitionToProgress(query: nil)
+        }
+        for turn in turns {
+            appendEntry(.goal, turn["goal"] as? String ?? "")
+            isWorking = false
+            setStatus("Done", color: Theme.success)
+            let answer = (turn["answer"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !answer.isEmpty { appendEntry(.answer, answer) }
+        }
+        mascot?.mood = .happy
+        setFollowUp(visible: true)
+        feed.scrollToEnd()
+    }
+
+    func transitionToProgress(query: String?) {
         isExpanded = true
-        isWorking = true
+        isWorking = query != nil
         hideContextPanel()
         let width = PromptLayout.windowWidth(hasModels: modelGlyph != nil)
         let root = FlippedView(frame: NSRect(x: 0, y: 0, width: width, height: panel.frame.height))
@@ -2910,7 +3032,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
 
         toolbar.alphaValue = 0
         layoutProgress(animated: false)
-        appendEntry(.goal, query)
+        if let first = query { appendEntry(.goal, first) }
         updateWorkingChrome()
         hudAnimate(0.3) { toolbar.animator().alphaValue = 1 }
     }
