@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -41,6 +42,18 @@ namespace RemoteHands
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
         [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
         [DllImport("gdi32.dll")] public static extern IntPtr CreateRoundRectRgn(int x1, int y1, int x2, int y2, int cx, int cy);
+
+        // the mascot's see-through window
+        [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
+        [StructLayout(LayoutKind.Sequential)] public struct SIZE { public int cx, cy; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)] public struct BLENDFUNCTION { public byte BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat; }
+        [DllImport("user32.dll", SetLastError = true)] public static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize, IntPtr hdcSrc, ref POINT pptSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
+        [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+        [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr hDC);
+        [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr hdc);
+        [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr hDC, IntPtr hObject);
+        [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr hObject);
 
         /// <summary>
         /// Brings the window to the front and gives it the keyboard. The hotkey listener first allows any program to do this
@@ -78,6 +91,10 @@ namespace RemoteHands
         public static readonly Color Warning = Color.FromArgb(255, 194, 77);
         public static readonly Color Danger = Color.FromArgb(255, 112, 112);
         public static readonly Color ButtonFill = Color.FromArgb(31, 31, 31);
+        /// <summary>The chat pill and the tags under it, and the send button.</summary>
+        public static readonly Color Pill = Color.FromArgb(29, 29, 29);
+        public static readonly Color PillBorder = Color.FromArgb(61, 61, 61);
+        public static readonly Color Send = Color.FromArgb(56, 107, 245);
 
         public static Color ForTone(Tone tone)
         {
@@ -206,6 +223,501 @@ namespace RemoteHands
         }
     }
 
+    /// <summary>The words in the prompt window, in one place so they are easy to change.</summary>
+    static class Copy
+    {
+        public const string Placeholder = "Start a new task\u2026";
+    }
+
+    /// <summary>A round button with a drawn glyph: the send arrow (dim until there is something to send) or the model sparkle.</summary>
+    sealed class RoundButton : Button
+    {
+        public enum Glyphs { Arrow, Sparkle }
+
+        bool ready;
+        readonly Glyphs glyph;
+        public bool Outlined;
+
+        public RoundButton(Glyphs glyph)
+        {
+            this.glyph = glyph;
+            FlatStyle = FlatStyle.Flat;
+            FlatAppearance.BorderSize = 0;
+            FlatAppearance.MouseOverBackColor = Theme.Pill;
+            FlatAppearance.MouseDownBackColor = Theme.Pill;
+            BackColor = Theme.Pill;
+            Cursor = Cursors.Hand;
+            TabStop = false;
+            UseVisualStyleBackColor = false;
+            SizeChanged += delegate { Round(); };
+        }
+
+        public bool Ready
+        {
+            get { return ready; }
+            set
+            {
+                if (ready == value) return;
+                ready = value;
+                Invalidate();
+            }
+        }
+
+        protected override bool ShowFocusCues { get { return false; } }
+
+        void Round()
+        {
+            if (Width <= 0 || Height <= 0) return;
+            Region = Region.FromHrgn(Native.CreateRoundRectRgn(0, 0, Width + 1, Height + 1, Width, Height));
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(Theme.Pill);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            float cx = Width / 2f, cy = Height / 2f;
+            if (glyph == Glyphs.Sparkle)
+            {
+                if (Outlined)
+                {
+                    using (var ring = new Pen(Theme.PillBorder)) e.Graphics.DrawEllipse(ring, 0, 0, Width - 1, Height - 1);
+                }
+                float r = Width * 0.21f, k = r * 0.12f;
+                using (var star = new GraphicsPath())
+                using (var brush = new SolidBrush(Theme.Secondary))
+                {
+                    star.AddBezier(new PointF(cx, cy - r), new PointF(cx + k, cy - k), new PointF(cx + k, cy - k), new PointF(cx + r, cy));
+                    star.AddBezier(new PointF(cx + r, cy), new PointF(cx + k, cy + k), new PointF(cx + k, cy + k), new PointF(cx, cy + r));
+                    star.AddBezier(new PointF(cx, cy + r), new PointF(cx - k, cy + k), new PointF(cx - k, cy + k), new PointF(cx - r, cy));
+                    star.AddBezier(new PointF(cx - r, cy), new PointF(cx - k, cy - k), new PointF(cx - k, cy - k), new PointF(cx, cy - r));
+                    star.CloseFigure();
+                    e.Graphics.FillPath(brush, star);
+                }
+                return;
+            }
+            Color fill = ready ? Theme.Send : Color.FromArgb(40, 58, 108);
+            Color arrow = ready ? Color.White : Color.FromArgb(170, 180, 205);
+            using (var brush = new SolidBrush(fill)) e.Graphics.FillEllipse(brush, 0, 0, Width - 1, Height - 1);
+            using (var pen = new Pen(arrow, Dpi.S(2)))
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                pen.LineJoin = LineJoin.Round;
+                float r = Width * 0.25f;
+                e.Graphics.DrawLine(pen, cx, cy + r, cx, cy - r);
+                e.Graphics.DrawLines(pen, new PointF[] { new PointF(cx - r, cy), new PointF(cx, cy - r), new PointF(cx + r, cy) });
+            }
+        }
+    }
+
+    /// <summary>
+    /// The mascot: a window of its own with per-pixel transparency, standing above the prompt (or in the corner of the
+    /// progress card). The body and the head are two pictures (the folder of PNGs the daemon writes, see assets/mascot);
+    /// the head moves and tilts on the neck toward the cursor, and the face is drawn here, in code, on its dark screen.
+    /// MascotBrain decides what it does. Without the pictures it is simply not shown.
+    /// </summary>
+    sealed class MascotForm : Form
+    {
+        readonly MascotBrain brain;
+        readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
+        readonly string dir;
+        Bitmap bodySource, headSource, bodyScaled, headScaled, canvas;
+        int width, height, centerX, bottomY, bobPixels, ticks;
+        string drawnKey = "";
+        Point lastCursor;
+        public readonly bool Available;
+        public readonly double Aspect;
+        /// <summary>Raised when "Close" is picked from the right-click menu.</summary>
+        public Action CloseRequested;
+        readonly ContextMenuStrip menu = new ContextMenuStrip();
+
+        public MascotForm(string dir)
+        {
+            this.dir = dir;
+            brain = new MascotBrain(Environment.TickCount);
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            TopMost = true;
+            StartPosition = FormStartPosition.Manual;
+            bodySource = LoadPicture("body");
+            headSource = LoadPicture("head");
+            if (bodySource != null && headSource != null && bodySource.Size == headSource.Size)
+            {
+                Available = true;
+                Aspect = (double)bodySource.Width / bodySource.Height;
+            }
+            timer.Interval = 50;
+            timer.Tick += delegate { Tick(); };
+            var close = new ToolStripMenuItem("Close");
+            close.Click += delegate { if (CloseRequested != null) CloseRequested(); };
+            menu.Items.Add(close);
+            MouseUp += delegate(object sender, MouseEventArgs e)
+            {
+                if (e.Button == MouseButtons.Right) menu.Show(Cursor.Position);
+            };
+        }
+
+        protected override bool ShowWithoutActivation { get { return true; } }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var cp = base.CreateParams;
+                // layered (per-pixel alpha: clear pixels pass clicks through), never takes focus, no taskbar button
+                cp.ExStyle |= 0x00080000 | 0x08000000 | 0x00000080;
+                return cp;
+            }
+        }
+
+        Bitmap LoadPicture(string name)
+        {
+            try
+            {
+                string file = Path.Combine(dir, name + ".png");
+                if (!File.Exists(file)) return null;
+                using (var stream = new MemoryStream(File.ReadAllBytes(file)))
+                using (var image = Image.FromStream(stream))
+                {
+                    return new Bitmap(image);
+                }
+            }
+            catch (Exception)
+            {
+                return null; // a missing or broken picture: no mascot
+            }
+        }
+
+        static Bitmap Scale(Bitmap source, int w, int h)
+        {
+            var result = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(result))
+            {
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.DrawImage(source, new Rectangle(0, 0, w, h));
+            }
+            return result;
+        }
+
+        /// <summary>Stand with its feet at (centerX, bottomY) on the screen, `h` pixels tall.</summary>
+        public void Stand(int centerXPixels, int bottomYPixels, int h)
+        {
+            if (!Available) return;
+            centerX = centerXPixels;
+            bottomY = bottomYPixels;
+            if (h != height)
+            {
+                height = h;
+                width = (int)Math.Round(h * Aspect);
+                if (bodyScaled != null) bodyScaled.Dispose();
+                if (headScaled != null) headScaled.Dispose();
+                if (canvas != null) canvas.Dispose();
+                bodyScaled = Scale(bodySource, width, height);
+                headScaled = Scale(headSource, width, height);
+                canvas = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+                drawnKey = "";
+            }
+            Draw(brain.Latest());
+        }
+
+        public void SetMood(Mood mood) { brain.SetMood(mood); }
+
+        public int TypedLength { set { brain.TypedLength = value; } }
+
+        /// <summary>A wink to say hello, then it starts watching.</summary>
+        public void Start()
+        {
+            brain.Play(Expression.Wink, 26, Expression.Neutral, 0);
+            timer.Start();
+        }
+
+        void Tick()
+        {
+            ticks++;
+            if (canvas == null) return;
+            float dpi = Dpi.Factor;
+            Point eye = new Point(centerX, bottomY - height + (int)(height * Face.EyeY));
+            Point cursor = Cursor.Position;
+            bool moved = Math.Abs(cursor.X - lastCursor.X) + Math.Abs(cursor.Y - lastCursor.Y) > 6 * dpi;
+            if (moved) lastCursor = cursor;
+            double lookX = Math.Max(-1, Math.Min(1, (cursor.X - eye.X) / (240.0 * dpi)));
+            double lookY = Math.Max(-1, Math.Min(1, (cursor.Y - eye.Y) / (170.0 * dpi)));
+            MascotPose pose = brain.Step(lookX, lookY, moved);
+            double sway = (Math.Sin(ticks * Math.PI * 2 / 60.0) * 0.5 + 0.5) * 3;
+            int bob = (int)Math.Round((sway + brain.HopOffset()) * dpi);
+            string key = pose.Key() + "|" + bob;
+            if (key == drawnKey) return;
+            drawnKey = key;
+            bobPixels = bob;
+            Draw(pose);
+        }
+
+        // ---- drawing -------------------------------------------------------------------------
+
+        void Draw(MascotPose pose)
+        {
+            if (canvas == null || !IsHandleCreated) return;
+            using (var g = Graphics.FromImage(canvas))
+            {
+                g.Clear(Color.Transparent);
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                g.DrawImageUnscaled(bodyScaled, 0, 0);
+                // the head turns about the neck
+                float px = (float)(Face.PivotX * width), py = (float)(Face.PivotY * height);
+                g.TranslateTransform(px + (float)(pose.HeadX * width), py + (float)(pose.HeadY * height));
+                g.RotateTransform((float)pose.HeadTilt);
+                g.TranslateTransform(-px, -py);
+                g.DrawImageUnscaled(headScaled, 0, 0);
+                DrawFace(g, pose);
+            }
+            Push();
+        }
+
+        static Color Shade(Color c, double alpha)
+        {
+            return Color.FromArgb((int)Math.Max(0, Math.Min(255, alpha * 255)), c.R, c.G, c.B);
+        }
+
+        /// <summary>Quadratic curve as the cubic GDI+ wants.</summary>
+        static void Quad(GraphicsPath path, PointF a, PointF c, PointF b)
+        {
+            var c1 = new PointF(a.X + 2f / 3f * (c.X - a.X), a.Y + 2f / 3f * (c.Y - a.Y));
+            var c2 = new PointF(b.X + 2f / 3f * (c.X - b.X), b.Y + 2f / 3f * (c.Y - b.Y));
+            path.AddBezier(a, c1, c2, b);
+        }
+
+        static GraphicsPath RoundedBox(RectangleF r, float below, float above)
+        {
+            var path = new GraphicsPath();
+            float bd = Math.Max(0.5f, below * 2), td = Math.Max(0.5f, above * 2);
+            path.AddArc(r.Left, r.Top, td, td, 180, 90);
+            path.AddArc(r.Right - td, r.Top, td, td, 270, 90);
+            path.AddArc(r.Right - bd, r.Bottom - bd, bd, bd, 0, 90);
+            path.AddArc(r.Left, r.Bottom - bd, bd, bd, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+        /// <summary>The eyes and mouth, in the head's own (turned) coordinates, clipped to its dark screen.</summary>
+        void DrawFace(Graphics g, MascotPose pose)
+        {
+            float W = width, H = height;
+            FaceSpec spec = pose.Spec;
+            var screen = new RectangleF((float)Face.VisorX0 * W, (float)Face.VisorY0 * H, (float)(Face.VisorX1 - Face.VisorX0) * W, (float)(Face.VisorY1 - Face.VisorY0) * H);
+            screen.Inflate(-0.01f * W, -0.008f * H);
+            using (var clip = RoundedBox(screen, 0.045f * W, 0.045f * W))
+            {
+                g.SetClip(clip, CombineMode.Intersect);
+            }
+            float ew = (float)Face.EyeW * W, eh = (float)Face.EyeH * H;
+            float lw = ew * 0.4f;
+            float shiftX = (float)(pose.GazeX * Face.GazeShiftX) * W, shiftY = (float)(pose.GazeY * Face.GazeShiftY) * H;
+            var left = new PointF((float)Face.EyeLeftX * W + shiftX, (float)Face.EyeY * H + shiftY);
+            var right = new PointF((float)Face.EyeRightX * W + shiftX, (float)Face.EyeY * H + shiftY);
+            var mouth = new PointF((float)Face.MouthX * W + shiftX * 0.8f, (float)Face.MouthY * H + shiftY * 0.8f);
+            Color cyan = spec.Warning ? Color.FromArgb(255, 120, 120) : Color.FromArgb(102, 247, 252);
+
+            DrawEye(g, spec.Left, left, 1, 1, spec, pose, ew, eh, lw, cyan);
+            DrawEye(g, spec.Right, right, -1, spec.RightScale, spec, pose, ew, eh, lw, cyan);
+            DrawMouth(g, mouth, spec, W, ew, cyan, pose.Fade);
+            if (spec.Zzz) DrawZs(g, pose, W, H, cyan);
+            g.ResetClip();
+        }
+
+        /// <summary>Strokes or fills a shape with a soft glow around it (a few wider, fainter passes underneath).</summary>
+        static void Glow(Graphics g, GraphicsPath path, bool fill, Color color, float lineWidth, double fade)
+        {
+            for (int i = 3; i >= 1; i--)
+            {
+                using (var pen = new Pen(Shade(color, 0.16 * fade), lineWidth + i * lineWidth * 0.9f))
+                {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Round;
+                    pen.LineJoin = LineJoin.Round;
+                    g.DrawPath(pen, path);
+                }
+            }
+            if (fill)
+            {
+                using (var brush = new SolidBrush(Shade(color, fade))) g.FillPath(brush, path);
+            }
+            else
+            {
+                using (var pen = new Pen(Shade(color, fade), lineWidth))
+                {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Round;
+                    pen.LineJoin = LineJoin.Round;
+                    g.DrawPath(pen, path);
+                }
+            }
+        }
+
+        void DrawEye(Graphics g, EyeShape shape, PointF c, float side, double scale, FaceSpec spec, MascotPose pose, float ew, float eh, float lw, Color color)
+        {
+            float w = (float)(ew * spec.EyeWidth * scale), h = (float)(eh * spec.EyeHeight * scale);
+            var state = g.Save();
+            g.TranslateTransform(c.X, c.Y);
+            using (var path = new GraphicsPath())
+            {
+                bool fill = false;
+                switch (shape)
+                {
+                    case EyeShape.Open:
+                        {
+                            float full = Math.Max(lw * 0.7f, h * (float)pose.Openness);
+                            float shown = Math.Max(lw * 0.7f, full * (float)(1 - spec.Lid));
+                            g.RotateTransform(side * (float)spec.Tilt * -1f);
+                            float rb = Math.Min(w, shown) * 0.42f;
+                            float rt = spec.Lid > 0 ? Math.Min(w, shown) * 0.12f : rb;
+                            using (var box = RoundedBox(new RectangleF(-w / 2, -shown / 2 + (full - shown) / 2, w, shown), rb, rt)) path.AddPath(box, false);
+                            fill = true;
+                            break;
+                        }
+                    case EyeShape.ArcUp:
+                        Quad(path, new PointF(-w * 0.95f, h * 0.2f), new PointF(0, -h * 0.62f), new PointF(w * 0.95f, h * 0.2f));
+                        break;
+                    case EyeShape.ArcDown:
+                        Quad(path, new PointF(-w * 0.95f, -h * 0.12f), new PointF(0, h * 0.5f), new PointF(w * 0.95f, -h * 0.12f));
+                        break;
+                    case EyeShape.ChevronRight:
+                        path.AddLines(new PointF[] { new PointF(-w * 0.7f, -h * 0.42f), new PointF(w * 0.7f, 0), new PointF(-w * 0.7f, h * 0.42f) });
+                        break;
+                    case EyeShape.ChevronLeft:
+                        path.AddLines(new PointF[] { new PointF(w * 0.7f, -h * 0.42f), new PointF(-w * 0.7f, 0), new PointF(w * 0.7f, h * 0.42f) });
+                        break;
+                    case EyeShape.Underscore:
+                        if (pose.CursorOn) path.AddLine(-w * 0.85f, h * 0.4f, w * 0.85f, h * 0.4f);
+                        break;
+                    case EyeShape.Cross:
+                        path.AddLine(-w * 0.7f, -h * 0.32f, w * 0.7f, h * 0.32f);
+                        path.StartFigure();
+                        path.AddLine(-w * 0.7f, h * 0.32f, w * 0.7f, -h * 0.32f);
+                        break;
+                }
+                if (path.PointCount > 0) Glow(g, path, fill, color, lw, pose.Fade);
+            }
+            g.Restore(state);
+        }
+
+        void DrawMouth(Graphics g, PointF m, FaceSpec spec, float W, float ew, Color color, double fade)
+        {
+            float mw = 0.056f * W * (float)spec.MouthSize;
+            float k = (float)spec.Curve;
+            var state = g.Save();
+            g.TranslateTransform(m.X, m.Y);
+            using (var path = new GraphicsPath())
+            {
+                bool fill = false;
+                switch (spec.Mouth)
+                {
+                    case MouthShape.Smile:
+                        Quad(path, new PointF(-mw, 0), new PointF(0, k * mw * 1.6f), new PointF(mw, 0));
+                        break;
+                    case MouthShape.Grin:
+                        path.AddLine(-mw, -mw * 0.15f, mw, -mw * 0.15f);
+                        path.AddArc(-mw, -mw * 0.15f - mw, mw * 2, mw * 2, 0, 180);
+                        path.CloseFigure();
+                        fill = true;
+                        break;
+                    case MouthShape.O:
+                        {
+                            float r = mw * 0.42f;
+                            path.AddEllipse(-r, -r * 1.2f, r * 2, r * 2.4f);
+                            break;
+                        }
+                    case MouthShape.Flat:
+                        path.AddLine(-mw * 0.55f, 0, mw * 0.55f, 0);
+                        break;
+                    case MouthShape.Wave:
+                        {
+                            var points = new PointF[25];
+                            for (int i = 0; i <= 24; i++)
+                            {
+                                float t = i / 24f;
+                                points[i] = new PointF((t - 0.5f) * mw * 1.8f, (float)Math.Sin(t * Math.PI * 3) * mw * 0.18f);
+                            }
+                            path.AddLines(points);
+                            break;
+                        }
+                    case MouthShape.Smirk:
+                        Quad(path, new PointF(-mw * 0.9f, mw * 0.1f), new PointF(mw * 0.1f, k * mw * 1.5f), new PointF(mw, -mw * 0.45f));
+                        break;
+                }
+                Glow(g, path, fill, color, ew * 0.3f, fade);
+            }
+            g.Restore(state);
+        }
+
+        static void DrawZs(Graphics g, MascotPose pose, float W, float H, Color color)
+        {
+            var baseAt = new PointF(0.6f * W, 0.27f * H);
+            for (int i = 0; i < 3; i++)
+            {
+                double t = (pose.ZPhase + i / 3.0) % 1.0;
+                float size = (float)(0.012 + 0.012 * t) * W;
+                double alpha = pose.Fade * Math.Sin(t * Math.PI);
+                using (var pen = new Pen(Shade(color, alpha), Math.Max(1f, size * 0.28f)))
+                {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Round;
+                    pen.LineJoin = LineJoin.Round;
+                    float x = baseAt.X + (float)t * 0.04f * W, y = baseAt.Y - (float)t * 0.07f * H;
+                    g.DrawLines(pen, new PointF[] { new PointF(x - size, y - size), new PointF(x + size, y - size), new PointF(x - size, y + size), new PointF(x + size, y + size) });
+                }
+            }
+        }
+
+        /// <summary>Hands the picture to the system as the window's whole appearance, with its own transparency.</summary>
+        void Push()
+        {
+            IntPtr screenDc = Native.GetDC(IntPtr.Zero);
+            IntPtr memoryDc = Native.CreateCompatibleDC(screenDc);
+            IntPtr bitmap = IntPtr.Zero;
+            IntPtr previous = IntPtr.Zero;
+            try
+            {
+                bitmap = canvas.GetHbitmap(Color.FromArgb(0));
+                previous = Native.SelectObject(memoryDc, bitmap);
+                var size = new Native.SIZE();
+                size.cx = width;
+                size.cy = height;
+                var source = new Native.POINT();
+                var destination = new Native.POINT();
+                destination.X = centerX - width / 2;
+                destination.Y = bottomY - height - bobPixels;
+                var blend = new Native.BLENDFUNCTION();
+                blend.BlendOp = 0;          // AC_SRC_OVER
+                blend.BlendFlags = 0;
+                blend.SourceConstantAlpha = 255;
+                blend.AlphaFormat = 1;      // AC_SRC_ALPHA: use the picture's own transparency
+                Native.UpdateLayeredWindow(Handle, screenDc, ref destination, ref size, memoryDc, ref source, 0, ref blend, 2);
+            }
+            catch (Exception)
+            {
+                // a drawing hiccup: the next tick tries again
+            }
+            finally
+            {
+                if (bitmap != IntPtr.Zero)
+                {
+                    Native.SelectObject(memoryDc, previous);
+                    Native.DeleteObject(bitmap);
+                }
+                Native.DeleteDC(memoryDc);
+                Native.ReleaseDC(IntPtr.Zero, screenDc);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) timer.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
     /// <summary>The window: a prompt box that becomes a progress feed once a request is sent.</summary>
     sealed class PromptForm : Form
     {
@@ -222,12 +734,17 @@ namespace RemoteHands
         readonly PillButton copyButton = new PillButton("Copy", Theme.Text, Theme.ButtonFill);
         readonly PillButton modelButton = new PillButton("", Theme.Secondary, Theme.ButtonFill);
         readonly TextBox input = new TextBox();
+        readonly RoundButton sendButton = new RoundButton(RoundButton.Glyphs.Arrow);
+        readonly RoundButton modelGlyph = new RoundButton(RoundButton.Glyphs.Sparkle);
+        MascotForm mascot;
+        Rectangle pillRect;
         readonly RoundPanel inputBox = new RoundPanel();
         readonly Panel divider = new Panel();
         readonly RichTextBox feed = new RichTextBox();
         readonly System.Windows.Forms.Timer spin = new System.Windows.Forms.Timer();
         readonly System.Windows.Forms.Timer copyReset = new System.Windows.Forms.Timer();
         readonly ContextMenuStrip modelMenu = new ContextMenuStrip();
+        readonly ToolTip tips = new ToolTip();
         int spinFrame;
         int answerStart = -1;
         bool closing;
@@ -271,6 +788,9 @@ namespace RemoteHands
             spinner.Visible = false;
 
             input.BorderStyle = BorderStyle.None;
+            input.Multiline = true;      // the pill grows with the text; Enter sends, Shift+Enter starts a new line
+            input.WordWrap = true;
+            input.ScrollBars = ScrollBars.None;
             input.BackColor = Theme.Background;
             input.ForeColor = Theme.Text;
             input.Font = new Font("Segoe UI", 15f);
@@ -298,7 +818,10 @@ namespace RemoteHands
             copyButton.Click += delegate { CopyAnswer(); };
             copyButton.Visible = false;
             modelButton.Click += OnModelClicked;
-            modelButton.Visible = args.Models.Count > 0;
+            modelButton.Visible = false;   // the progress card's label button; the prompt has the round one beside the pill
+            modelGlyph.Outlined = true;
+            modelGlyph.Visible = args.Models.Count > 0;
+            modelGlyph.Click += OnModelClicked;
             modelButton.TextAlign = ContentAlignment.MiddleCenter;
             UpdateModelButton();
 
@@ -327,6 +850,8 @@ namespace RemoteHands
             Controls.Add(feed);
             Controls.Add(inputBox);
             Controls.Add(modelButton);
+            Controls.Add(sendButton);
+            Controls.Add(modelGlyph);
             Controls.Add(input);
 
             // Every part of the window except the controls drags it.
@@ -336,6 +861,9 @@ namespace RemoteHands
             statusLabel.MouseDown += DragWindow;
 
             input.KeyDown += OnInputKeyDown;
+            input.TextChanged += OnInputChanged;
+            sendButton.Click += delegate { Submit(); input.Focus(); };
+            LocationChanged += delegate { PlaceMascot(); };
             Layout_Collapsed();
             ResumeLayout(false);
         }
@@ -353,31 +881,79 @@ namespace RemoteHands
             Region = Region.FromHrgn(Native.CreateRoundRectRgn(0, 0, Width + 1, Height + 1, Dpi.S(36), Dpi.S(36)));
         }
 
+        /// <summary>The small prompt: a chat pill that grows with the text, and a round model button beside it (the mascot stands on top).</summary>
         void Layout_Collapsed()
         {
-            int w = Dpi.S(680), h = Dpi.S(84);
+            bool hasModels = args.Models.Count > 0;
+            int w = Dpi.S(420) + (hasModels ? Dpi.S(8) + Dpi.S(52) : 0), h = Dpi.S(52);
             Rectangle wa = WorkArea();
-            Bounds = new Rectangle(wa.Left + (wa.Width - w) / 2, wa.Top + (int)(wa.Height * 0.28), w, h);
-            ApplyRegion();
-            dot.Location = new Point(Dpi.S(24), Dpi.S(15));
-            appName.Location = new Point(Dpi.S(38), Dpi.S(11));
-            closeButton.Bounds = new Rectangle(w - Dpi.S(44), Dpi.S(10), Dpi.S(26), Dpi.S(24));
-            int pill = modelButton.Visible ? Dpi.S(214) : 0;
-            input.Font = new Font("Segoe UI", 15f);
-            input.Bounds = new Rectangle(Dpi.S(24), Dpi.S(40), w - Dpi.S(48) - pill, Dpi.S(30));
-            modelButton.Bounds = new Rectangle(w - Dpi.S(24) - Dpi.S(206), Dpi.S(40), Dpi.S(206), Dpi.S(26));
+            Bounds = new Rectangle(wa.Left + (wa.Width - w) / 2, wa.Top + Math.Max(Dpi.S(190), (int)(wa.Height * 0.34)), w, h);
+            BackColor = Theme.Pill;
+            input.BackColor = Theme.Pill;
+            input.Font = new Font("Segoe UI", 11.25f);
+            closeButton.Visible = false;
+            dot.Visible = false;
+            appName.Visible = false;
+            modelButton.Visible = false;
+            sendButton.Visible = true;
+            modelGlyph.Visible = hasModels;
+            LayoutPill();
+        }
+
+        /// <summary>
+        /// The pill is the text plus 15 above and below it; the send arrow sits on its bottom line and the window grows
+        /// upward, so the mascot rides on top. Only the pill and the round button are part of the window: the gap
+        /// between them is see-through and click-through.
+        /// </summary>
+        void LayoutPill()
+        {
+            int pillW = Dpi.S(420), minH = Dpi.S(52), gap = Dpi.S(8), left = Dpi.S(22), right = Dpi.S(52);
+            bool hasModels = args.Models.Count > 0;
+            int lineH = TextRenderer.MeasureText("Ag", input.Font).Height;
+            int measured = lineH;
+            if (input.Text.Length > 0)
+            {
+                measured = TextRenderer.MeasureText(input.Text + "x", input.Font, new Size(pillW - left - right - Dpi.S(8), 10000), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding).Height;
+            }
+            int textH = Math.Min(lineH * 9 + Dpi.S(4), Math.Max(Dpi.S(22), measured + Dpi.S(4)));
+            int pillH = Math.Max(minH, textH + Dpi.S(30));
+            int w = pillW + (hasModels ? gap + minH : 0);
+            int bottom = Top + Height;
+            Bounds = new Rectangle(Left, bottom - pillH, w, pillH);
+            pillRect = new Rectangle(0, 0, pillW, pillH);
+            input.Bounds = new Rectangle(left, Dpi.S(15), pillW - left - right, textH);
+            sendButton.Bounds = new Rectangle(pillW - Dpi.S(10) - Dpi.S(32), pillH - Dpi.S(10) - Dpi.S(32), Dpi.S(32), Dpi.S(32));
+            modelGlyph.Bounds = new Rectangle(pillW + gap, pillH - minH, minH, minH);
+            using (var path = new GraphicsPath())
+            {
+                using (var pill = Shapes.Rounded(pillRect, Dpi.S(26))) path.AddPath(pill, false);
+                if (hasModels)
+                {
+                    using (var round = Shapes.Rounded(modelGlyph.Bounds, minH / 2)) path.AddPath(round, false);
+                }
+                Region = new Region(path);
+            }
+            PlaceMascot();
             Invalidate();
         }
 
         void Layout_Expanded()
         {
             Rectangle wa = WorkArea();
+            BackColor = Theme.Background;
+            sendButton.Visible = false;
+            modelGlyph.Visible = false;
+            modelButton.Visible = args.Models.Count > 0;
+            dot.Visible = true;
+            appName.Visible = true;
+            closeButton.Visible = true;
             int w = Dpi.S(640);
             int h = Math.Min(Dpi.S(600), Math.Max(Dpi.S(420), wa.Height - Dpi.S(80)));
             Bounds = new Rectangle(wa.Right - w - Dpi.S(24), wa.Top + Dpi.S(24), w, h);
             ApplyRegion();
-            dot.Location = new Point(Dpi.S(22), Dpi.S(19));
-            appName.Location = new Point(Dpi.S(36), Dpi.S(15));
+            int mascotRoom = mascot != null ? Dpi.S(54) : 0; // the mascot stands in the header's corner
+            dot.Location = new Point(Dpi.S(22) + mascotRoom, Dpi.S(19));
+            appName.Location = new Point(Dpi.S(36) + mascotRoom, Dpi.S(15));
             int statusX = appName.Right + Dpi.S(20);
             spinner.Location = new Point(statusX, Dpi.S(14));
             statusLabel.Location = new Point(statusX + Dpi.S(22), Dpi.S(15));
@@ -412,6 +988,15 @@ namespace RemoteHands
         {
             base.OnPaint(e);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            if (!state.IsExpanded)
+            {
+                using (var pen = new Pen(Theme.PillBorder))
+                using (var pill = Shapes.Rounded(new Rectangle(0, 0, pillRect.Width - 1, pillRect.Height - 1), Dpi.S(26)))
+                {
+                    e.Graphics.DrawPath(pen, pill);
+                }
+                return;
+            }
             using (var path = Shapes.Rounded(new Rectangle(0, 0, Width - 1, Height - 1), Dpi.S(18)))
             using (var pen = new Pen(Theme.Border))
             {
@@ -443,8 +1028,9 @@ namespace RemoteHands
             base.OnShown(e);
             Native.ForceForeground(Handle);
             Activate();
-            SetPlaceholder("Ask anything\u2026");
+            SetPlaceholder(Copy.Placeholder);
             input.Focus();
+            StartMascot();
             // A one-shot prompt has no daemon to listen to: it prints the first request and ends.
             if (!args.Once)
             {
@@ -467,6 +1053,57 @@ namespace RemoteHands
         }
 
         // ---- what the person does ------------------------------------------------------------
+
+        // ---- the mascot ----------------------------------------------------------------------
+
+        static string MascotDir()
+        {
+            string over = Environment.GetEnvironmentVariable("RH_MASCOT_DIR");
+            if (!string.IsNullOrEmpty(over)) return over;
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".remote-hands", "mascot");
+        }
+
+        void StartMascot()
+        {
+            MascotForm made = new MascotForm(MascotDir());
+            if (!made.Available)
+            {
+                made.Dispose();
+                return;
+            }
+            made.CloseRequested = Cancel;
+            mascot = made;
+            made.Show(this);
+            PlaceMascot();
+            made.Start();
+        }
+
+        /// <summary>On top of the prompt while it is small, in the header's corner once it is the progress card.</summary>
+        void PlaceMascot()
+        {
+            if (mascot == null) return;
+            if (state.IsExpanded)
+            {
+                int h = Dpi.S(50);
+                int w = (int)Math.Round(h * mascot.Aspect);
+                mascot.Stand(Left + Dpi.S(14) + w / 2, Top + Dpi.S(6) + h, h);
+            }
+            else
+            {
+                mascot.Stand(Left + Width / 2, Top - Dpi.S(4), Dpi.S(140));
+            }
+        }
+
+        void OnInputChanged(object sender, EventArgs e)
+        {
+            if (!state.IsExpanded) LayoutPill();
+            sendButton.Ready = input.Text.Trim().Length > 0;
+            if (mascot != null && !state.IsExpanded)
+            {
+                mascot.TypedLength = input.Text.Length;
+                mascot.SetMood(input.Text.Length == 0 ? Mood.Idle : Mood.Typing);
+            }
+        }
 
         void OnInputKeyDown(object sender, KeyEventArgs e)
         {
@@ -519,6 +1156,7 @@ namespace RemoteHands
             Layout_Expanded();
             appName.Text = args.App;
             ResumeLayout(true);
+            PlaceMascot();
             input.Focus();
         }
 
@@ -582,6 +1220,7 @@ namespace RemoteHands
             }
             if (label.Length == 0 && args.Models.Count > 0) label = args.Models[0].Label;
             modelButton.Text = label + "  \u25BE";
+            tips.SetToolTip(modelGlyph, "Model: " + label);
         }
 
         void OnModelClicked(object sender, EventArgs e)
@@ -600,7 +1239,8 @@ namespace RemoteHands
                 item.Click += OnModelPicked;
                 modelMenu.Items.Add(item);
             }
-            modelMenu.Show(modelButton, new Point(0, modelButton.Height));
+            Control anchor = state.IsExpanded ? (Control)modelButton : modelGlyph;
+            modelMenu.Show(anchor, new Point(0, anchor.Height));
         }
 
         void OnModelPicked(object sender, EventArgs e)
@@ -661,6 +1301,7 @@ namespace RemoteHands
         void ApplyChrome()
         {
             if (!state.IsExpanded) return;
+            if (mascot != null) mascot.SetMood(MascotBrain.MoodFor(state.IsWorking, state.StatusTone));
             statusLabel.Text = state.StatusWord;
             statusLabel.ForeColor = Theme.ForTone(state.StatusTone);
             spinner.Visible = state.IsWorking;

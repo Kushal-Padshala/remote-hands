@@ -7,6 +7,7 @@ import type { ExecFunction } from './macos-driver.js';
 import type { ContextAttachment } from '@remote-hands/shared';
 import { ContextService } from '../context/context-service.js';
 import { SPOTLIGHT_SWIFT_SOURCE } from './spotlight-source.generated.js';
+import { materializeMascotAssets } from './mascot-assets.js';
 import { clearHudReadyStatus, ensureWindowsHud, saveHudStatus } from './windows-hud.js';
 
 export interface SpotlightPromptResult {
@@ -73,6 +74,11 @@ export class SpotlightHudRunner {
    */
   prepare(): HotkeyHelperStatus {
     if (process.platform === 'win32') {
+      if (process.env.VITEST !== 'true') {
+        try {
+          materializeMascotAssets(os.homedir());
+        } catch {}
+      }
       const built = ensureWindowsHud();
       return built.ok ? { ok: true, path: built.path } : { ok: false, error: `could not build the hotkey program: ${built.error}` };
     }
@@ -86,6 +92,12 @@ export class SpotlightHudRunner {
   }
 
   private ensureBinary(): string | null {
+    // The HUD's mascot art, on both platforms (tests never write to the real home).
+    if (process.env.VITEST !== 'true') {
+      try {
+        materializeMascotAssets(os.homedir());
+      } catch {}
+    }
     // Windows: a small program built from C# with the compiler Windows ships.
     if (process.platform === 'win32') {
       const built = ensureWindowsHud();

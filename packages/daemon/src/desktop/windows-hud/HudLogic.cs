@@ -450,4 +450,295 @@ namespace RemoteHands
             return char.ToUpperInvariant(lower[0]) + lower.Substring(1);
         }
     }
+
+    public enum Mood { Idle, Typing, Working, Happy, Error, Stopped }
+
+    public enum Expression { Neutral, Listening, Happy, Content, Terminal, Focus, Thinking, Surprised, Sad, Error, Sleepy, Wink, Laugh, Smug }
+
+    public enum EyeShape { Open, ArcUp, ArcDown, ChevronRight, ChevronLeft, Underscore, Cross }
+
+    public enum MouthShape { Smile, Grin, O, Flat, Wave, Smirk }
+
+    /// <summary>What one expression looks like: the shape of each eye and of the mouth, and a few tweaks (same as the Mac HUD).</summary>
+    public sealed class FaceSpec
+    {
+        public EyeShape Left = EyeShape.Open;
+        public EyeShape Right = EyeShape.Open;
+        public double EyeWidth = 1;
+        public double EyeHeight = 1;
+        public double RightScale = 1;
+        /// <summary>Degrees; the left eye turns this way, the right one the opposite way.</summary>
+        public double Tilt;
+        /// <summary>How much of the eye is covered from the top.</summary>
+        public double Lid;
+        public MouthShape Mouth = MouthShape.Smile;
+        /// <summary>-1 frown ... 1 big smile.</summary>
+        public double Curve = 0.5;
+        public double MouthSize = 1;
+        /// <summary>Drawn in red instead of cyan.</summary>
+        public bool Warning;
+        public bool Zzz;
+        /// <summary>Where it looks whatever the cursor does (-1..1), or null.</summary>
+        public double? ForcedGazeX;
+        public double ForcedGazeY;
+
+        public static FaceSpec Of(Expression e)
+        {
+            var s = new FaceSpec();
+            switch (e)
+            {
+                case Expression.Listening: s.EyeWidth = 1.05; s.EyeHeight = 1.15; s.Curve = 0.65; break;
+                case Expression.Happy: s.Left = EyeShape.ArcUp; s.Right = EyeShape.ArcUp; s.Mouth = MouthShape.Grin; s.MouthSize = 0.9; break;
+                case Expression.Content: s.Left = EyeShape.ArcDown; s.Right = EyeShape.ArcDown; s.Curve = 0.8; break;
+                case Expression.Terminal: s.Left = EyeShape.ChevronRight; s.Right = EyeShape.Underscore; s.Curve = 0.25; s.MouthSize = 0.8; break;
+                case Expression.Focus: s.EyeHeight = 0.55; s.Mouth = MouthShape.Flat; break;
+                case Expression.Thinking: s.EyeWidth = 0.9; s.RightScale = 1.25; s.Mouth = MouthShape.Wave; s.MouthSize = 0.95; s.ForcedGazeX = 0.8; s.ForcedGazeY = -0.9; break;
+                case Expression.Surprised: s.EyeHeight = 1.4; s.EyeWidth = 1.12; s.Mouth = MouthShape.O; break;
+                case Expression.Sad: s.EyeHeight = 0.9; s.Tilt = 15; s.Curve = -0.7; break;
+                case Expression.Error: s.Left = EyeShape.Cross; s.Right = EyeShape.Cross; s.Mouth = MouthShape.Wave; s.Warning = true; break;
+                case Expression.Sleepy: s.Left = EyeShape.ArcDown; s.Right = EyeShape.ArcDown; s.Mouth = MouthShape.O; s.MouthSize = 0.45; s.Zzz = true; break;
+                case Expression.Wink: s.Right = EyeShape.ArcUp; s.Curve = 0.85; break;
+                case Expression.Laugh: s.Left = EyeShape.ChevronRight; s.Right = EyeShape.ChevronLeft; s.Mouth = MouthShape.Grin; s.MouthSize = 1.15; break;
+                case Expression.Smug: s.Lid = 0.5; s.Mouth = MouthShape.Smirk; s.Curve = 0.7; s.ForcedGazeX = 0.9; s.ForcedGazeY = 0; break;
+            }
+            return s;
+        }
+    }
+
+    /// <summary>Where things are on the mascot's pictures, as fractions of the picture (assets/mascot/meta.json). Same numbers as `Face` in the Mac HUD.</summary>
+    public static class Face
+    {
+        public const double VisorX0 = 0.2065, VisorY0 = 0.2192, VisorX1 = 0.6877, VisorY1 = 0.5100;
+        public const double EyeLeftX = 0.3261, EyeRightX = 0.5464, EyeY = 0.3611;
+        public const double EyeW = 0.0620, EyeH = 0.0760;
+        public const double MouthX = 0.4341, MouthY = 0.4258;
+        public const double PivotX = 0.4884, PivotY = 0.5466;
+        public const double HeadShiftX = 0.035, HeadShiftY = 0.018, HeadTilt = 7.0;
+        public const double GazeShiftX = 0.05, GazeShiftY = 0.03;
+    }
+
+    /// <summary>What the mascot looks like right now (one tick): the face, where it looks, how the head sits.</summary>
+    public sealed class MascotPose
+    {
+        public Expression Shown = Expression.Neutral;
+        public FaceSpec Spec = FaceSpec.Of(Expression.Neutral);
+        public double Fade = 1;
+        /// <summary>Eyes: 1 open ... 0 shut (a blink).</summary>
+        public double Openness = 1;
+        public double GazeX, GazeY;
+        /// <summary>The head's offset as a fraction of the picture, and its tilt in degrees (clockwise is positive).</summary>
+        public double HeadX, HeadY, HeadTilt;
+        public bool CursorOn = true;
+        public double ZPhase;
+
+        /// <summary>Changes when anything that is drawn changes (so an idle mascot costs nothing).</summary>
+        public string Key()
+        {
+            return Shown + "|" + (int)(Fade * 10) + "|" + (int)(Openness * 10) + "|" + (int)(GazeX * 20) + "|" + (int)(GazeY * 20) + "|" +
+                   (int)(HeadX * 4000) + "|" + (int)(HeadY * 4000) + "|" + (int)(HeadTilt * 10) + "|" + CursorOn + "|" + (Spec.Zzz ? (int)(ZPhase * 30) : 0);
+        }
+    }
+
+    /// <summary>
+    /// What the mascot feels and does: the same rules as the Mac window. It follows the cursor with its eyes and its whole
+    /// head, blinks, now and then makes a face when idle, looks down while someone types, shows a terminal prompt in its
+    /// eyes while a task runs, and smiles, frowns or dozes when it ends. One tick is 50 ms.
+    /// </summary>
+    public sealed class MascotBrain
+    {
+        static readonly double[] BlinkOpenness = new double[] { 0.45, 0.06, 0.45 };
+        static readonly int[] HopTable = new int[] { 0, 6, 11, 14, 11, 6, 0, 3, 5, 3, 0 };
+        static readonly Expression[] Ambient = new Expression[] { Expression.Content, Expression.Smug, Expression.Wink, Expression.Laugh, Expression.Content };
+
+        readonly Random rng;
+        readonly List<KeyValuePair<Expression, int>> reactions = new List<KeyValuePair<Expression, int>>();
+        readonly MascotPose pose = new MascotPose();
+        int tick;
+        int reactionLeft;
+        int happyUntil;
+        int hopStart = -1;
+        int nextBlink = 50;
+        int blinkStart = -1;
+        int nextAmbient = 200;
+        int ambientUntil;
+        bool hasAmbient;
+        Expression ambient = Expression.Neutral;
+        int nextThought = 150;
+        int thoughtUntil;
+        int lastActivity;
+        Expression wanted = Expression.Neutral;
+        Mood mood = Mood.Idle;
+
+        /// <summary>How much has been typed (a long request makes it concentrate).</summary>
+        public int TypedLength;
+
+        /// <param name="seed">for the timing of blinks and faces; tests pass a fixed one</param>
+        public MascotBrain(int seed)
+        {
+            rng = new Random(seed);
+        }
+
+        public Mood Current { get { return mood; } }
+
+        /// <summary>The pose as of the last tick.</summary>
+        public MascotPose Latest() { return pose; }
+
+        public void SetMood(Mood next)
+        {
+            if (next == mood) return;
+            mood = next;
+            lastActivity = tick;
+            if (next == Mood.Happy)
+            {
+                happyUntil = tick + 80;
+                hopStart = tick;
+            }
+        }
+
+        /// <summary>A click or a hello: a short run of faces ahead of whatever the mood says.</summary>
+        public void Play(Expression first, int firstTicks, Expression second, int secondTicks)
+        {
+            reactions.Clear();
+            reactions.Add(new KeyValuePair<Expression, int>(first, firstTicks));
+            if (secondTicks > 0) reactions.Add(new KeyValuePair<Expression, int>(second, secondTicks));
+            reactionLeft = firstTicks;
+        }
+
+        /// <summary>A click: jump in surprise, then laugh.</summary>
+        public void Poke()
+        {
+            Play(Expression.Surprised, 8, Expression.Laugh, 26);
+            hopStart = tick;
+        }
+
+        public static Mood MoodFor(bool working, Tone tone)
+        {
+            if (working) return Mood.Working;
+            switch (tone)
+            {
+                case Tone.Success: return Mood.Happy;
+                case Tone.Danger: return Mood.Error;
+                case Tone.Warning: return Mood.Stopped;
+                default: return Mood.Idle;
+            }
+        }
+
+        /// <summary>How high (in 96-dpi pixels) the little jump after a finished task has lifted it right now.</summary>
+        public int HopOffset()
+        {
+            if (hopStart < 0) return 0;
+            int i = tick - hopStart;
+            if (i >= HopTable.Length)
+            {
+                hopStart = -1;
+                return 0;
+            }
+            return HopTable[i];
+        }
+
+        /// <summary>
+        /// Advances one tick. (lookX, lookY) is where the cursor is from the eyes, -1..1 each way (y grows downward);
+        /// `activity` says the cursor moved since the last tick.
+        /// </summary>
+        public MascotPose Step(double lookX, double lookY, bool activity)
+        {
+            tick++;
+            if (activity) lastActivity = tick;
+            if (mood == Mood.Happy && tick >= happyUntil) mood = Mood.Idle;
+            wanted = Wanted();
+            FaceSpec spec = FaceSpec.Of(pose.Shown);
+
+            double gazeX = lookX, gazeY = lookY;
+            // typing: it reads along the text, from left to right as the request grows, looking down at it
+            if (mood == Mood.Typing) { gazeX = Math.Min(0.8, -0.7 + TypedLength * 0.03); gazeY = 0.9; }
+            if (spec.ForcedGazeX.HasValue) { gazeX = spec.ForcedGazeX.Value; gazeY = spec.ForcedGazeY; }
+            pose.GazeX += (gazeX - pose.GazeX) * 0.4;
+            pose.GazeY += (gazeY - pose.GazeY) * 0.4;
+
+            double headX = lookX, headY = lookY, tiltExtra = 0;
+            if (mood == Mood.Typing) { headX = lookX * 0.3; headY = 0.7; }
+            if (pose.Shown == Expression.Sleepy) { headX = 0; headY = 1.2; tiltExtra = 5; }
+            if (pose.Shown == Expression.Thinking) tiltExtra = -5;
+            pose.HeadX += (headX * Face.HeadShiftX - pose.HeadX) * 0.25;
+            pose.HeadY += (headY * Face.HeadShiftY - pose.HeadY) * 0.25;
+            pose.HeadTilt += ((headX * Face.HeadTilt + tiltExtra) - pose.HeadTilt) * 0.25;
+
+            // changing the face: the old one fades out, the new one fades in
+            if (pose.Shown != wanted)
+            {
+                pose.Fade -= 0.35;
+                if (pose.Fade <= 0)
+                {
+                    pose.Shown = wanted;
+                    pose.Fade = 0;
+                }
+            }
+            else if (pose.Fade < 1)
+            {
+                pose.Fade = Math.Min(1, pose.Fade + 0.35);
+            }
+
+            // blinking
+            pose.Openness = 1;
+            if (blinkStart < 0 && tick >= nextBlink) blinkStart = tick;
+            if (blinkStart >= 0)
+            {
+                int i = (tick - blinkStart) / 2;
+                if (i < BlinkOpenness.Length)
+                {
+                    pose.Openness = BlinkOpenness[i];
+                }
+                else
+                {
+                    blinkStart = -1;
+                    nextBlink = tick + (rng.Next(5) == 0 ? 7 : 50 + rng.Next(81));
+                }
+            }
+            pose.Spec = FaceSpec.Of(pose.Shown);
+            pose.CursorOn = (tick / 8) % 2 == 0;
+            pose.ZPhase = (tick % 60) / 60.0;
+            return pose;
+        }
+
+        /// <summary>A reaction first, then the mood, then (when idle) a little personality.</summary>
+        Expression Wanted()
+        {
+            if (reactions.Count > 0)
+            {
+                Expression current = reactions[0].Key;
+                if (--reactionLeft <= 0)
+                {
+                    reactions.RemoveAt(0);
+                    if (reactions.Count > 0) reactionLeft = reactions[0].Value;
+                }
+                return current;
+            }
+            switch (mood)
+            {
+                case Mood.Working:
+                    if (tick >= nextThought)
+                    {
+                        thoughtUntil = tick + 36;
+                        nextThought = thoughtUntil + 100 + rng.Next(121);
+                    }
+                    return tick < thoughtUntil ? Expression.Thinking : Expression.Terminal;
+                case Mood.Happy: return Expression.Happy;
+                case Mood.Error: return Expression.Error;
+                case Mood.Stopped: return Expression.Sleepy;
+                case Mood.Typing: return TypedLength > 90 ? Expression.Focus : Expression.Listening;
+            }
+            if (tick - lastActivity > 1000) return Expression.Sleepy;
+            if (hasAmbient && tick < ambientUntil) return ambient;
+            hasAmbient = false;
+            if (tick >= nextAmbient)
+            {
+                ambient = Ambient[rng.Next(Ambient.Length)];
+                hasAmbient = true;
+                ambientUntil = tick + 20 + rng.Next(13);
+                nextAmbient = ambientUntil + 160 + rng.Next(141);
+                return ambient;
+            }
+            return Expression.Neutral;
+        }
+    }
 }

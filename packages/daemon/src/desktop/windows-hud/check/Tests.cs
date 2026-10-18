@@ -28,8 +28,93 @@ static class Tests
         StateTests();
         LinkTests();
         NameTests();
+        MascotTests();
         Console.WriteLine(count + " checks, " + failures + " failed");
         return failures == 0 ? 0 : 1;
+    }
+
+    static void MascotTests()
+    {
+        // idle: looks at the cursor with eyes and head, and blinks
+        var idle = new MascotBrain(7);
+        MascotPose p = null;
+        for (int i = 0; i < 40; i++) p = idle.Step(1, 0, true);
+        True(p.GazeX > 0.95 && p.HeadX > Face.HeadShiftX * 0.9 && p.HeadTilt > Face.HeadTilt * 0.9, "eyes, head and tilt follow a cursor on the right");
+        for (int i = 0; i < 40; i++) p = idle.Step(-1, 1, true);
+        True(p.GazeX < -0.95 && p.GazeY > 0.95 && p.HeadX < -Face.HeadShiftX * 0.9 && p.HeadY > Face.HeadShiftY * 0.9 && p.HeadTilt < -Face.HeadTilt * 0.9, "and one down on the left");
+        bool shut = false;
+        bool reopened = false;
+        for (int i = 0; i < 400; i++)
+        {
+            p = idle.Step(0, 0, true);
+            if (p.Openness < 0.1) shut = true;
+            else if (shut && p.Openness == 1) reopened = true;
+        }
+        True(shut && reopened, "it blinks and opens its eyes again");
+
+        // typing: looks down at the text, wherever the cursor is; a long request makes it concentrate
+        var typing = new MascotBrain(1);
+        typing.SetMood(Mood.Typing);
+        for (int i = 0; i < 40; i++) p = typing.Step(-1, -1, true);
+        True(p.GazeY > 0.85 && Math.Abs(p.GazeX + 0.7) < 0.05, "looks down at the start of the text while typing");
+        Eq(Expression.Listening, p.Shown, "an ordinary request: listening");
+        typing.TypedLength = 30;
+        for (int i = 0; i < 40; i++) p = typing.Step(-1, -1, true);
+        True(Math.Abs(p.GazeX - 0.2) < 0.05, "and reads along as the text grows");
+        typing.TypedLength = 200;
+        for (int i = 0; i < 10; i++) p = typing.Step(0, 0, true);
+        Eq(Expression.Focus, p.Shown, "a long request: focus");
+
+        // working: a terminal prompt in the eyes, now and then a thoughtful look
+        var work = new MascotBrain(3);
+        work.SetMood(Mood.Working);
+        var seen = new HashSet<Expression>();
+        for (int i = 0; i < 600; i++) seen.Add(work.Step(0, 0, true).Shown);
+        True(seen.Contains(Expression.Terminal) && seen.Contains(Expression.Thinking) && !seen.Contains(Expression.Happy) && !seen.Contains(Expression.Error), "working shows the terminal prompt and thinks now and then");
+
+        // the end of a task
+        var done = new MascotBrain(1);
+        done.SetMood(Mood.Happy);
+        for (int i = 0; i < 6; i++) p = done.Step(0, 0, true);
+        Eq(Expression.Happy, p.Shown, "a finished task smiles");
+        True(done.HopOffset() >= 0, "hop offset is readable");
+        for (int i = 0; i < 20; i++) done.Step(0, 0, true);
+        Eq(0, done.HopOffset(), "the hop ends");
+        for (int i = 0; i < 100; i++) p = done.Step(0, 0, true);
+        Eq(Mood.Idle, done.Current, "the smile fades back to idle");
+        var bad = new MascotBrain(1);
+        bad.SetMood(Mood.Error);
+        for (int i = 0; i < 6; i++) p = bad.Step(0, 0, true);
+        True(p.Shown == Expression.Error && p.Spec.Warning, "a failed task looks upset, in red");
+        var stopped = new MascotBrain(1);
+        stopped.SetMood(Mood.Stopped);
+        for (int i = 0; i < 6; i++) p = stopped.Step(0, 0, true);
+        True(p.Shown == Expression.Sleepy && p.Spec.Zzz, "a stopped task dozes");
+
+        // click: surprise, then laughter
+        var poke = new MascotBrain(1);
+        poke.Poke();
+        var kinds = new HashSet<Expression>();
+        for (int i = 0; i < 60; i++) kinds.Add(poke.Step(0, 0, true).Shown);
+        True(kinds.Contains(Expression.Surprised) && kinds.Contains(Expression.Laugh), "a poke surprises it, then makes it laugh");
+
+        // left alone for a long time it falls asleep, and wakes when the cursor moves
+        var lonely = new MascotBrain(5);
+        for (int i = 0; i < 1100; i++) p = lonely.Step(0, 0, false);
+        Eq(Expression.Sleepy, p.Shown, "it dozes off after about a minute alone");
+        for (int i = 0; i < 12; i++) p = lonely.Step(0, 0, true);
+        True(p.Shown != Expression.Sleepy, "and wakes when the cursor moves");
+
+        // idle faces: over a few minutes it makes some of its small faces
+        var ambient = new MascotBrain(9);
+        var faces = new HashSet<Expression>();
+        for (int i = 0; i < 4000; i++) faces.Add(ambient.Step(0, 0, true).Shown);
+        True(faces.Contains(Expression.Neutral) && faces.Count >= 3, "idle: now and then a small face");
+
+        Eq(Mood.Working, MascotBrain.MoodFor(true, Tone.Success), "working beats the tone");
+        Eq(Mood.Happy, MascotBrain.MoodFor(false, Tone.Success), "done");
+        Eq(Mood.Error, MascotBrain.MoodFor(false, Tone.Danger), "failed");
+        Eq(Mood.Stopped, MascotBrain.MoodFor(false, Tone.Warning), "stopped");
     }
 
     static void JsonTests()
