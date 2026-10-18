@@ -16,6 +16,7 @@ import { agyCommand } from '../system/windows.js';
 import { computerPrompt } from '../computer/prompt.js';
 import { DynamicPowerManager } from '../system/power-manager.js';
 import { HudFeed, plainSummary } from './hud-feed.js';
+import { buildChatHistory, toHistoryItems, type ChatTurn, type HudHistoryItem } from './chat-history.js';
 
 /** The warm agy process is stopped after this long unused; the hotkey starts a fresh one while the user types. */
 const HUD_AGY_IDLE_MS = Number(process.env.RH_HUD_AGY_IDLE_MS ?? 10 * 60_000);
@@ -191,6 +192,18 @@ export function formatContextualTaskPrompt(
   return lines.join('\n');
 }
 
+export interface HudResumed {
+  id: string;
+  title: string;
+  turns: ChatTurn[];
+}
+
+/** What the prompt window can ask for with /history: the list of chats and the choice of one. */
+export interface HudHistory {
+  list: () => Promise<HudHistoryItem[]>;
+  resume: (id: string) => Promise<HudResumed | null>;
+}
+
 export interface HudCoordinatorOptions {
   hudRunner?: SpotlightHudRunner | undefined;
   intentResolver?: IntentResolver | undefined;
@@ -359,6 +372,33 @@ export class HudCoordinator {
     this.currentConversationId = undefined;
     this.defaultRunner?.newConversation(this.warmHint());
     await this.stopActiveTask(reason);
+  }
+
+  private async loadChats(): Promise<ReturnType<typeof buildChatHistory>> {
+    const store = this.getStore() as { listTasks?: (o: { limit: number }) => Promise<any[]> } | null;
+    if (!store || typeof store.listTasks !== 'function') return [];
+    const tasks = await store.listTasks({ limit: 400 }).catch(() => [] as any[]);
+    return buildChatHistory(tasks);
+  }
+
+  /** The chats /history shows. */
+  async historyList(nowMs: number = Date.now()): Promise<HudHistoryItem[]> {
+    return toHistoryItems(await this.loadChats(), nowMs);
+  }
+
+  /** Makes the next task continue that chat. A running task is stopped first. Null (nothing changes) for an unknown id. */
+  async resumeChat(id: string): Promise<HudResumed | null> {
+    const chat = (await this.loadChats()).find((c) => c.id === id);
+    if (!chat) return null;
+    if (this.hasActiveTask()) await this.stopActiveTask('Switched to another chat');
+    this.currentConversationId = chat.id;
+    this.lastTaskDigest = undefined;
+    this.lastDigestFromFastLane = false;
+    return { id: chat.id, title: chat.title, turns: chat.turns };
+  }
+
+  private historyMenu(): HudHistory {
+    return { list: () => this.historyList(), resume: (id) => this.resumeChat(id) };
   }
 
   hasActiveTask(): boolean {
@@ -703,6 +743,7 @@ export class HudCoordinator {
           },
           undefined,
           this.modelMenu(),
+          this.historyMenu(),
         );
       });
     }
@@ -748,7 +789,7 @@ export class HudCoordinator {
               this.stopActiveTask('User stopped task from Spotlight HUD', sendUpdate).catch(() => {});
             },
           ];
-          promptArgs.push(event.windowTitle || undefined, this.modelMenu());
+          promptArgs.push(event.windowTitle || undefined, this.modelMenu(), this.historyMenu());
           activePrompt = (this.hudRunner.openInteractivePrompt as any)(...promptArgs);
         }
       } catch {}

@@ -340,7 +340,7 @@ describe('HudCoordinator', () => {
     expect(mockHudRunner.startListener).toHaveBeenCalled();
 
     await capturedListener({ event: 'hotkey', app: 'Safari' });
-    expect(mockHudRunner.openInteractivePrompt).toHaveBeenCalledWith('Safari', expect.any(Function), expect.any(Function), expect.any(Function), undefined, expect.objectContaining({ model: 'gemini-flash-fast', onModel: expect.any(Function) }));
+    expect(mockHudRunner.openInteractivePrompt).toHaveBeenCalledWith('Safari', expect.any(Function), expect.any(Function), expect.any(Function), undefined, expect.objectContaining({ model: 'gemini-flash-fast', onModel: expect.any(Function) }), expect.objectContaining({ list: expect.any(Function), resume: expect.any(Function) }));
 
     await submitHandler({ query: 'start advertising campaign', app: 'Safari' }, dummySender);
     expect(mockStore.createTask).toHaveBeenCalledWith(
@@ -1336,5 +1336,103 @@ describe('HudCoordinator model choice', () => {
     expect(readHudModelKey(dir)).toBe('claude-sonnet');
     await coordinator.handleResult({ query: 'and now do the follow up work', app: 'Notes', model: 'claude-sonnet' });
     expect(store.createTask).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'claude-sonnet-4-6' }));
+  });
+});
+
+describe('HudCoordinator history', () => {
+  const wrap = (goal: string) => `Goal: ${goal}\n\nActive Environment Context:\n- Frontmost Application: Notes`;
+  const row = (id: string | null, goal: string, summary: string, at: string, status = 'done') => ({
+    prompt: wrap(goal), status, conversation_id: id, result_summary: summary, created_at: at, finished_at: at,
+  });
+  let hudRunner: any;
+
+  const make = (store: any, extra: Record<string, unknown> = {}) =>
+    new HudCoordinator({
+      hudRunner,
+      intentResolver: { resolve: vi.fn() } as any,
+      guidanceManager: { startSession: vi.fn() } as any,
+      macosDriver: {
+        getActiveWindowContext: vi.fn().mockResolvedValue({ app: 'Notes', title: 'x', url: '', isBrowser: false }),
+        focusWindow: vi.fn().mockResolvedValue(undefined),
+      } as any,
+      store,
+      ...extra,
+    });
+
+  beforeEach(() => {
+    hudRunner = { openPrompt: vi.fn(), startListener: vi.fn(), openInteractivePrompt: vi.fn() };
+  });
+
+  it('lists the chats that can be continued, newest first', async () => {
+    const store = {
+      listTasks: vi.fn().mockResolvedValue([
+        row('a', 'old chat', 'x', '2026-10-10T10:00:00.000Z'),
+        row('b', 'new chat', 'y', '2026-10-17T10:00:00.000Z'),
+        row(null, 'fast one', 'z', '2026-10-17T11:00:00.000Z'),
+      ]),
+    };
+    const items = await make(store).historyList(Date.parse('2026-10-18T10:00:00.000Z'));
+    expect(items.map((i) => i.id)).toEqual(['b', 'a']);
+    expect(items[0]).toMatchObject({ title: 'new chat', count: 1 });
+  });
+
+  it('answers with an empty list when the store cannot list tasks', async () => {
+    expect(await make({}).historyList()).toEqual([]);
+  });
+
+  it('resumes a chat: returns its turns and the next task carries its conversation id', async () => {
+    let submit: any;
+    hudRunner.openInteractivePrompt = vi.fn().mockImplementation((_a: any, onSubmit: any) => {
+      submit = onSubmit;
+      return { close: vi.fn() };
+    });
+    const created: any[] = [];
+    const store = {
+      listTasks: vi.fn().mockResolvedValue([row('conv-old', 'rename the campaign', 'Renamed', '2026-10-16T10:00:00.000Z')]),
+      createTask: vi.fn().mockImplementation(async (input: any) => {
+        const t = { id: `t${created.length + 1}`, ...input };
+        created.push(t);
+        return t;
+      }),
+      markTaskRunning: vi.fn().mockImplementation(async (id: string) => ({ id, status: 'running' })),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+    };
+    const runner = { run: vi.fn().mockResolvedValue({ status: 'done', summary: 'ok', conversationId: 'conv-old' }) };
+    const c = make(store, { runner, autoExecute: true });
+    c.startListening();
+    await hudRunner.startListener.mock.calls[0]![0]({ event: 'hotkey', app: 'Notes' });
+    const resumed = await c.resumeChat('conv-old');
+    expect(resumed).toEqual({ id: 'conv-old', title: 'rename the campaign', turns: [{ goal: 'rename the campaign', answer: 'Renamed' }] });
+    await submit({ query: 'now make it shorter', app: 'Notes' }, () => {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(created[0].conversation_id).toBe('conv-old');
+  });
+
+  it('hands the prompt window the history so /history works', async () => {
+    const store = { listTasks: vi.fn().mockResolvedValue([row('a', 'x', 'y', '2026-10-10T10:00:00.000Z')]) };
+    const c = make(store, { runner: { run: vi.fn() } });
+    c.startListening();
+    await hudRunner.startListener.mock.calls[0]![0]({ event: 'hotkey', app: 'Notes' });
+    const history = hudRunner.openInteractivePrompt.mock.calls[0]![6];
+    expect((await history.list()).map((i: any) => i.id)).toEqual(['a']);
+    expect((await history.resume('a')).id).toBe('a');
+  });
+
+  it('does nothing for an id that is not in the list', async () => {
+    const store = { listTasks: vi.fn().mockResolvedValue([row('a', 'x', 'y', '2026-10-10T10:00:00.000Z')]) };
+    const c = make(store);
+    const stop = vi.spyOn(c, 'stopActiveTask');
+    expect(await c.resumeChat('nope')).toBeNull();
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it('stops a running task before it switches chats', async () => {
+    const store = { listTasks: vi.fn().mockResolvedValue([row('a', 'x', 'y', '2026-10-10T10:00:00.000Z')]) };
+    const c = make(store);
+    vi.spyOn(c, 'hasActiveTask').mockReturnValue(true);
+    const stop = vi.spyOn(c, 'stopActiveTask').mockResolvedValue();
+    await c.resumeChat('a');
+    expect(stop).toHaveBeenCalledTimes(1);
   });
 });
