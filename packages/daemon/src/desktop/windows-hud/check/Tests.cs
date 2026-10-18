@@ -30,8 +30,59 @@ static class Tests
         NameTests();
         MascotTests();
         CardTests();
+        SlashTests();
         Console.WriteLine(count + " checks, " + failures + " failed");
         return failures == 0 ? 0 : 1;
+    }
+
+    static void SlashTests()
+    {
+        True(Slash.IsMenuText("/"), "slash alone opens the menu");
+        True(Slash.IsMenuText("/hist"), "prefix opens the menu");
+        True(!Slash.IsMenuText("hello"), "ordinary text does not");
+        True(!Slash.IsMenuText("/usr/bin question"), "a path-like message does not");
+        True(!Slash.IsMenuText("/history\nmore"), "multi-line text does not");
+        True(!Slash.IsMenuText("/a@b"), "an @ means attach, not a command");
+
+        List<SlashRow> rows = Slash.Rows("/hi", null);
+        Eq(1, rows.Count, "one command row");
+        Eq("command", rows[0].Kind, "command kind");
+        Eq("/history", rows[0].Title, "command title");
+        Eq(0, Slash.Rows("/zzz", null).Count, "no match: no rows");
+
+        Eq("info", Slash.Rows("/history ", null)[0].Kind, "not loaded: loading row");
+        var chats = new List<ChatItem>();
+        chats.Add(new ChatItem { Id = "a", Title = "Rename the campaign", When = "2d ago", Count = 3 });
+        chats.Add(new ChatItem { Id = "b", Title = "Write headlines", When = "5h ago", Count = 1 });
+        Eq(2, Slash.Rows("/history ", chats).Count, "all chats");
+        List<SlashRow> filtered = Slash.Rows("/history  HEAD", chats);
+        Eq(1, filtered.Count, "filter by words, ignoring case");
+        Eq("b", filtered[0].Id, "filtered chat");
+        Eq("1 message", filtered[0].Subtitle, "singular");
+        Eq("3 messages", Slash.Rows("/history ", chats)[0].Subtitle, "plural");
+        Eq("5h ago", filtered[0].Badge, "time badge");
+        Eq("No chats yet", Slash.Rows("/history ", new List<ChatItem>())[0].Title, "empty list");
+        Eq("No chats match", Slash.Rows("/history zzz", chats)[0].Title, "no match");
+
+        var parsed = Json.Parse("{\"items\":[{\"id\":\"a\",\"title\":\"T\",\"when\":\"1h ago\",\"count\":2},{\"bad\":1}]}") as Dictionary<string, object>;
+        List<ChatItem> items = Slash.ParseChats(parsed["items"]);
+        Eq(1, items.Count, "bad rows are skipped");
+        Eq(2, items[0].Count, "count parsed");
+        var resumed = Json.Parse("{\"turns\":[{\"goal\":\"g\",\"answer\":\"a\"},{\"goal\":\"\",\"answer\":\"x\"}]}") as Dictionary<string, object>;
+        List<ChatTurn> turns = Slash.ParseTurns(resumed["turns"]);
+        Eq(2, turns.Count, "turns parsed");
+        Eq("a", turns[0].Answer, "answer");
+        Eq(0, Slash.ParseChats(null).Count, "no items");
+
+        Eq("{\"event\":\"history\"}", Messages.History(), "history line");
+        Eq("{\"event\":\"resume\",\"id\":\"c\\\"1\"}", Messages.Resume("c\"1"), "resume line escapes the id");
+
+        var state = new HudState();
+        state.Resumed("last answer");
+        True(state.IsExpanded && !state.IsWorking, "resumed: shown, not working");
+        Eq("Done", state.StatusWord, "resumed: done");
+        Eq("last answer", state.AnswerText, "resumed: answer kept for copy");
+        True(state.CopyVisible, "resumed: copy available");
     }
 
     static void CardTests()

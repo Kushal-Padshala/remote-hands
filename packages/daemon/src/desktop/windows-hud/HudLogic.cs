@@ -248,6 +248,8 @@ namespace RemoteHands
         public static string Model(string modelKey) { return "{\"event\":\"model\",\"model\":" + Json.Quote(modelKey) + "}"; }
         public static string Stop() { return "{\"event\":\"stop\"}"; }
         public static string Cancel() { return "{\"event\":\"cancel\"}"; }
+        public static string History() { return "{\"event\":\"history\"}"; }
+        public static string Resume(string id) { return "{\"event\":\"resume\",\"id\":" + Json.Quote(id) + "}"; }
 
         public static string Hotkey(string app, string windowTitle)
         {
@@ -320,6 +322,18 @@ namespace RemoteHands
             StopVisible = true;
             CopyVisible = false;
             AnswerText = "";
+        }
+
+        /// <summary>A past chat was picked: shown, nothing running, the last answer ready to copy.</summary>
+        public void Resumed(string lastAnswer)
+        {
+            IsExpanded = true;
+            IsWorking = false;
+            StatusWord = "Done";
+            StatusTone = Tone.Success;
+            StopVisible = false;
+            AnswerText = lastAnswer ?? "";
+            CopyVisible = AnswerText.Length > 0;
         }
 
         /// <summary>The person pressed Stop (or Esc while working).</summary>
@@ -898,6 +912,132 @@ namespace RemoteHands
             string suffix = working ? new string('.', ((dots % 4) + 4) % 4) : "";
             string time = seconds >= 3 ? "  \u00B7  " + seconds + "s" : "";
             return word + suffix + time;
+        }
+    }
+
+    // ---- /history -----------------------------------------------------------------------------
+
+    public sealed class ChatItem
+    {
+        public string Id = "";
+        public string Title = "";
+        public string When = "";
+        public int Count;
+    }
+
+    public sealed class ChatTurn
+    {
+        public string Goal = "";
+        public string Answer = "";
+    }
+
+    /// <summary>One line of the menu above the prompt: a command, a past chat, or a note ("Loading...").</summary>
+    public sealed class SlashRow
+    {
+        public string Kind = "info";
+        public string Id = "";
+        public string Title = "";
+        public string Subtitle = "";
+        public string Badge = "";
+    }
+
+    public static class Slash
+    {
+        public const string History = "/history";
+
+        /// <summary>A line that starts with / and could still become a command; anything else is an ordinary message.</summary>
+        public static bool IsMenuText(string text)
+        {
+            if (text == null || text.Length == 0 || text[0] != '/') return false;
+            if (text.IndexOf('\n') >= 0 || text.IndexOf('@') >= 0) return false;
+            string lower = text.ToLowerInvariant();
+            if (lower.StartsWith(History + " ", StringComparison.Ordinal)) return true;
+            string rest = lower.Substring(1);
+            return rest.Length == 0 || "history".StartsWith(rest, StringComparison.Ordinal);
+        }
+
+        /// <summary>The rows to show for what is typed. `chats` is null until the daemon has answered.</summary>
+        public static List<SlashRow> Rows(string text, List<ChatItem> chats)
+        {
+            var rows = new List<SlashRow>();
+            if (!IsMenuText(text)) return rows;
+            string lower = text.ToLowerInvariant();
+            if (lower.StartsWith(History + " ", StringComparison.Ordinal))
+            {
+                string query = lower.Substring(History.Length + 1).Trim();
+                if (chats == null)
+                {
+                    rows.Add(Info("Loading chats..."));
+                    return rows;
+                }
+                foreach (ChatItem chat in chats)
+                {
+                    if (query.Length > 0 && chat.Title.ToLowerInvariant().IndexOf(query, StringComparison.Ordinal) < 0) continue;
+                    var row = new SlashRow();
+                    row.Kind = "chat";
+                    row.Id = chat.Id;
+                    row.Title = chat.Title;
+                    row.Subtitle = chat.Count == 1 ? "1 message" : chat.Count + " messages";
+                    row.Badge = chat.When;
+                    rows.Add(row);
+                }
+                if (rows.Count == 0) rows.Add(Info(chats.Count == 0 ? "No chats yet" : "No chats match"));
+                return rows;
+            }
+            var command = new SlashRow();
+            command.Kind = "command";
+            command.Id = History;
+            command.Title = History;
+            command.Subtitle = "Continue a previous chat";
+            rows.Add(command);
+            return rows;
+        }
+
+        static SlashRow Info(string title)
+        {
+            var row = new SlashRow();
+            row.Title = title;
+            return row;
+        }
+
+        public static List<ChatItem> ParseChats(object items)
+        {
+            var result = new List<ChatItem>();
+            var list = items as List<object>;
+            if (list == null) return result;
+            foreach (object entry in list)
+            {
+                var d = entry as Dictionary<string, object>;
+                if (d == null) continue;
+                string id = Json.GetString(d, "id");
+                string title = Json.GetString(d, "title");
+                if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(title)) continue;
+                var chat = new ChatItem();
+                chat.Id = id;
+                chat.Title = title;
+                chat.When = Json.GetString(d, "when") ?? "";
+                object count;
+                chat.Count = d.TryGetValue("count", out count) && count is double ? (int)(double)count : 1;
+                result.Add(chat);
+            }
+            return result;
+        }
+
+        public static List<ChatTurn> ParseTurns(object turns)
+        {
+            var result = new List<ChatTurn>();
+            var list = turns as List<object>;
+            if (list == null) return result;
+            foreach (object entry in list)
+            {
+                var d = entry as Dictionary<string, object>;
+                if (d == null) continue;
+                var turn = new ChatTurn();
+                turn.Goal = Json.GetString(d, "goal") ?? "";
+                turn.Answer = Json.GetString(d, "answer") ?? "";
+                result.Add(turn);
+            }
+            return result;
         }
     }
 }
