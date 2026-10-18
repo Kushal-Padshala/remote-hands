@@ -1427,6 +1427,26 @@ describe('HudCoordinator history', () => {
     expect(stop).not.toHaveBeenCalled();
   });
 
+  it('keeps the chosen chat when the task it stopped finishes late with its own conversation', async () => {
+    const store = {
+      listTasks: vi.fn().mockResolvedValue([row('chosen', 'x', 'y', '2026-10-10T10:00:00.000Z')]),
+      markTaskRunning: vi.fn().mockImplementation(async (id: string) => ({ id, status: 'running' })),
+      appendEvent: vi.fn().mockResolvedValue(undefined),
+      completeTask: vi.fn().mockResolvedValue(undefined),
+      cancelTask: vi.fn().mockResolvedValue(undefined),
+    };
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const runner = { run: vi.fn().mockImplementation(async () => { await gate; return { status: 'done', summary: 's', conversationId: 'stale-A' }; }) };
+    const c = make(store, { runner });
+    const running = c.executeTaskStandalone({ id: 'tA' } as any, () => {});
+    await new Promise((r) => setTimeout(r, 10));
+    await c.resumeChat('chosen');
+    release();
+    await running;
+    expect((c as any).currentConversationId).toBe('chosen');
+  });
+
   it('stops a running task before it switches chats', async () => {
     const store = { listTasks: vi.fn().mockResolvedValue([row('a', 'x', 'y', '2026-10-10T10:00:00.000Z')]) };
     const c = make(store);

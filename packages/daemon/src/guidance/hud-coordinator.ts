@@ -241,6 +241,8 @@ export class HudCoordinator {
   private activeExecution?: { taskId: string; abortController: AbortController } | undefined;
   private currentTaskId?: string | undefined;
   private currentConversationId?: string | undefined;
+  /** Bumped whenever the conversation is chosen on purpose, so a task that settles late cannot overwrite the choice. */
+  private conversationEpoch = 0;
   private lastTaskDigest?: PreviousTaskDigest | undefined;
   /** The last digest came from a fast-lane task, which the agent's own conversation knows nothing about. */
   private lastDigestFromFastLane = false;
@@ -369,6 +371,7 @@ export class HudCoordinator {
   }
 
   async cancelActiveTask(reason = 'Task cancelled by user from HUD'): Promise<void> {
+    this.conversationEpoch++;
     this.currentConversationId = undefined;
     this.defaultRunner?.newConversation(this.warmHint());
     await this.stopActiveTask(reason);
@@ -390,6 +393,7 @@ export class HudCoordinator {
   async resumeChat(id: string): Promise<HudResumed | null> {
     const chat = (await this.loadChats()).find((c) => c.id === id);
     if (!chat) return null;
+    this.conversationEpoch++;
     if (this.hasActiveTask()) await this.stopActiveTask('Switched to another chat');
     this.currentConversationId = chat.id;
     this.lastTaskDigest = undefined;
@@ -416,6 +420,7 @@ export class HudCoordinator {
     this.lastTaskDigest = undefined;
     const abortController = new AbortController();
     const execution = { taskId: task.id, abortController };
+    const epoch = this.conversationEpoch;
     this.activeExecution = execution;
 
     if (signal) {
@@ -501,7 +506,7 @@ export class HudCoordinator {
         if (!abortController.signal.aborted) feed?.event(event);
       }, abortController.signal);
 
-      if (res.conversationId) {
+      if (res.conversationId && epoch === this.conversationEpoch) {
         this.currentConversationId = res.conversationId;
       }
 
@@ -771,6 +776,7 @@ export class HudCoordinator {
             activePrompt.close();
             activePrompt = null;
           }
+          this.conversationEpoch++;
           this.currentConversationId = undefined;
           this.defaultRunner?.newConversation(this.warmHint());
           this.fastLane?.prewarm();

@@ -303,6 +303,9 @@ export class SpotlightHudRunner {
       }
     };
 
+    // A prompt typed right after picking a chat must see that chat: it waits for the switch, nothing else waits for it.
+    let pendingResume: Promise<void> | null = null;
+
     let buffer = '';
     child.stdout?.on('data', (chunk) => {
       buffer += chunk.toString('utf-8');
@@ -322,7 +325,11 @@ export class SpotlightHudRunner {
               attachments: Array.isArray(parsed.attachments) ? parsed.attachments : undefined,
               ...(typeof parsed.model === 'string' ? { model: parsed.model } : {}),
             };
-            Promise.resolve(onSubmit(res, sendUpdate)).catch(() => {});
+            if (pendingResume) {
+              pendingResume.then(() => Promise.resolve(onSubmit(res, sendUpdate))).catch(() => {});
+            } else {
+              Promise.resolve(onSubmit(res, sendUpdate)).catch(() => {});
+            }
           } else if (parsed.event === 'model') {
             if (modelMenu && typeof parsed.model === 'string') {
               try {
@@ -341,10 +348,20 @@ export class SpotlightHudRunner {
               .then((items) => sendEvent({ event: 'history-list', items }))
               .catch(() => sendEvent({ event: 'history-list', items: [] }));
           } else if (parsed.event === 'resume' && typeof parsed.id === 'string') {
-            const resume = history ? history.resume(parsed.id) : Promise.resolve(null);
-            resume
-              .then((chat) => sendEvent(chat ? { event: 'resumed', ...chat } : { event: 'history-list', items: [] }))
-              .catch(() => sendEvent({ event: 'history-list', items: [] }));
+            const id: string = parsed.id;
+            const previous = pendingResume ?? Promise.resolve();
+            const mine: Promise<void> = previous.then(async () => {
+              try {
+                const chat = history ? await history.resume(id) : null;
+                sendEvent(chat ? { event: 'resumed', ...chat } : { event: 'history-list', items: [] });
+              } catch {
+                sendEvent({ event: 'history-list', items: [] });
+              }
+            });
+            pendingResume = mine;
+            mine.then(() => {
+              if (pendingResume === mine) pendingResume = null;
+            });
           } else if (parsed.event === 'cancel') {
             triggerCancel();
             try {

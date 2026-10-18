@@ -120,6 +120,27 @@ describe('SpotlightHudRunner', () => {
     expect(lines.filter((l) => l.event === 'history-list').at(-1)).toEqual({ event: 'history-list', items: [] });
   });
 
+  it('holds a prompt that arrives while a chat is being resumed until the switch is done', async () => {
+    let onData: ((chunk: Buffer) => void) | undefined;
+    vi.mocked(spawn).mockImplementationOnce(((..._a: unknown[]) => ({
+      on: vi.fn(), stdout: { on: (_e: string, cb: (chunk: Buffer) => void) => { onData = cb; } },
+      stdin: { writable: true, write: () => true }, killed: false, kill: vi.fn(), unref: vi.fn(),
+    })) as never);
+    const order: string[] = [];
+    let finish!: () => void;
+    const history = {
+      list: vi.fn().mockResolvedValue([]),
+      resume: vi.fn().mockImplementation(() => new Promise((r) => { finish = () => { order.push('resumed'); r({ id: 'c1', title: 't', turns: [] }); }; })),
+    };
+    runner.openInteractivePrompt('Notes', () => { order.push('submit'); }, undefined, undefined, undefined, undefined, history);
+    onData!(Buffer.from('{"event":"resume","id":"c1"}\n{"event":"submit","query":"next","app":"Notes"}\n'));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(order).toEqual([]);
+    finish();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(order).toEqual(['resumed', 'submit']);
+  });
+
   it('answers /history with an empty list when no history is offered', async () => {
     let onData: ((chunk: Buffer) => void) | undefined;
     const written: string[] = [];
