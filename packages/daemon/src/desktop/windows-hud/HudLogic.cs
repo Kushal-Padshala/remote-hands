@@ -756,6 +756,7 @@ namespace RemoteHands
         public bool InProgress;
         /// <summary>Set by the view once the text is measured; Y is then the card's top inside the stack.</summary>
         public int Height;
+        public int TitleHeight;
         public int Y;
         public int StartedTick;
         public int FinishedSeconds = -1;
