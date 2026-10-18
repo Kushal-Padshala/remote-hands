@@ -9,6 +9,7 @@ import { ContextService } from '../context/context-service.js';
 import { SPOTLIGHT_SWIFT_SOURCE } from './spotlight-source.generated.js';
 import { materializeMascotAssets } from './mascot-assets.js';
 import { clearHudReadyStatus, ensureWindowsHud, saveHudStatus } from './windows-hud.js';
+import type { HudHistory } from '../guidance/hud-coordinator.js';
 
 export interface SpotlightPromptResult {
   query: string;
@@ -233,6 +234,7 @@ export class SpotlightHudRunner {
     onStop?: (sendUpdate?: HudUpdateSender) => void,
     windowTitle?: string | undefined,
     modelMenu?: HudModelMenu | undefined,
+    history?: HudHistory | undefined,
   ): { close: () => void } {
     const target = this.ensureBinary();
     if (!target) {
@@ -293,6 +295,14 @@ export class SpotlightHudRunner {
       }
     };
 
+    const sendEvent = (payload: Record<string, unknown>) => {
+      if (!child.killed && child.stdin && child.stdin.writable) {
+        try {
+          child.stdin.write(JSON.stringify(payload) + '\n');
+        } catch {}
+      }
+    };
+
     let buffer = '';
     child.stdout?.on('data', (chunk) => {
       buffer += chunk.toString('utf-8');
@@ -325,6 +335,16 @@ export class SpotlightHudRunner {
                 onStop(sendUpdate);
               } catch {}
             }
+          } else if (parsed.event === 'history') {
+            const list = history ? history.list() : Promise.resolve([]);
+            list
+              .then((items) => sendEvent({ event: 'history-list', items }))
+              .catch(() => sendEvent({ event: 'history-list', items: [] }));
+          } else if (parsed.event === 'resume' && typeof parsed.id === 'string') {
+            const resume = history ? history.resume(parsed.id) : Promise.resolve(null);
+            resume
+              .then((chat) => sendEvent(chat ? { event: 'resumed', ...chat } : { event: 'history-list', items: [] }))
+              .catch(() => sendEvent({ event: 'history-list', items: [] }));
           } else if (parsed.event === 'cancel') {
             triggerCancel();
             try {

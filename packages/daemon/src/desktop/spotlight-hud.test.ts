@@ -99,6 +99,40 @@ describe('SpotlightHudRunner', () => {
     expect(submitted).toEqual([{ query: 'do it', app: 'Notes', windowTitle: undefined, attachments: undefined, model: 'a' }]);
   });
 
+  it('answers /history and /resume lines from the prompt window', async () => {
+    let onData: ((chunk: Buffer) => void) | undefined;
+    const written: string[] = [];
+    vi.mocked(spawn).mockImplementationOnce(((..._a: unknown[]) => ({
+      on: vi.fn(), stdout: { on: (_e: string, cb: (chunk: Buffer) => void) => { onData = cb; } },
+      stdin: { writable: true, write: (s: string) => { written.push(s); return true; } }, killed: false, kill: vi.fn(), unref: vi.fn(),
+    })) as never);
+    const history = {
+      list: vi.fn().mockResolvedValue([{ id: 'c1', title: 'hello', when: '1h ago', count: 2 }]),
+      resume: vi.fn().mockImplementation(async (id: string) => (id === 'c1' ? { id: 'c1', title: 'hello', turns: [{ goal: 'g', answer: 'a' }] } : null)),
+    };
+    runner.openInteractivePrompt('Notes', () => {}, undefined, undefined, undefined, undefined, history);
+    onData!(Buffer.from('{"event":"history"}\n{"event":"resume","id":"c1"}\n{"event":"resume","id":"gone"}\n'));
+    await new Promise((r) => setTimeout(r, 10));
+    const lines = written.map((w) => JSON.parse(w));
+    expect(lines).toContainEqual({ event: 'history-list', items: [{ id: 'c1', title: 'hello', when: '1h ago', count: 2 }] });
+    expect(lines).toContainEqual({ event: 'resumed', id: 'c1', title: 'hello', turns: [{ goal: 'g', answer: 'a' }] });
+    // an id that is gone: the window gets an empty list instead of waiting forever
+    expect(lines.filter((l) => l.event === 'history-list').at(-1)).toEqual({ event: 'history-list', items: [] });
+  });
+
+  it('answers /history with an empty list when no history is offered', async () => {
+    let onData: ((chunk: Buffer) => void) | undefined;
+    const written: string[] = [];
+    vi.mocked(spawn).mockImplementationOnce(((..._a: unknown[]) => ({
+      on: vi.fn(), stdout: { on: (_e: string, cb: (chunk: Buffer) => void) => { onData = cb; } },
+      stdin: { writable: true, write: (s: string) => { written.push(s); return true; } }, killed: false, kill: vi.fn(), unref: vi.fn(),
+    })) as never);
+    runner.openInteractivePrompt('Notes', () => {});
+    onData!(Buffer.from('{"event":"history"}\n'));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(written.map((w) => JSON.parse(w))).toContainEqual({ event: 'history-list', items: [] });
+  });
+
   it('offers no model arguments when there is no choice to make', () => {
     runner.openInteractivePrompt('Notes', () => {});
     const args = vi.mocked(spawn).mock.calls.at(-1)![1] as string[];
