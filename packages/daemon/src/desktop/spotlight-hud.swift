@@ -1736,6 +1736,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
     }
 
     @objc func onSendClicked() {
+        // The arrow does what Return does: with the / menu open it picks the highlighted row instead of sending the words.
+        if contextPanel?.isVisible == true, textField.stringValue.hasPrefix("/") {
+            let sel = contextTableView?.selectedRow ?? 0
+            if sel >= 0 && sel < filteredContextItems.count {
+                attachItem(filteredContextItems[sel])
+                return
+            }
+        }
         _ = submitPrompt()
     }
 
@@ -2080,11 +2088,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
     /// The chats /history listed (nil until the daemon answers).
     var historyItems: [[String: Any]]?
     var historyRequested = false
+    /// True while the chat list is what the / menu shows, so it is fetched once per opening and kept fresh.
+    var inHistoryView = false
+
+    func requestHistory() {
+        guard !historyRequested else { return }
+        historyRequested = true
+        print("{\"event\":\"history\"}")
+        fflush(stdout)
+    }
 
     /// The / menu: one command now (/history), then the chats once /history is picked ("/history " + words filters them).
     func showSlashPanel(_ text: String) {
         let lower = text.lowercased()
         if lower.hasPrefix("/history ") {
+            if !inHistoryView {
+                inHistoryView = true
+                requestHistory()
+            }
             let query = String(lower.dropFirst("/history ".count)).trimmingCharacters(in: .whitespaces)
             var rows: [[String: Any]] = []
             if let chats = historyItems {
@@ -2103,6 +2124,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             }
             filteredContextItems = rows
         } else {
+            inHistoryView = false
             let query = String(lower.dropFirst())
             if !query.isEmpty && !"history".hasPrefix(query) {
                 hideContextPanel()   // not a command: it is an ordinary message
@@ -2119,11 +2141,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
         case "slash":
             textField.stringValue = "/history "
             textField.currentEditor()?.selectedRange = NSRange(location: textField.stringValue.count, length: 0)
-            if historyItems == nil && !historyRequested {
-                historyRequested = true
-                print("{\"event\":\"history\"}")
-                fflush(stdout)
-            }
             showSlashPanel(textField.stringValue)
         case "chat":
             guard let id = item["id"] as? String, !id.isEmpty else { return }
@@ -2380,6 +2397,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
     }
 
     func hideContextPanel() {
+        inHistoryView = false
         if let cp = contextPanel, cp.isVisible {
             panel.removeChildWindow(cp)
             cp.orderOut(nil)
@@ -2799,16 +2817,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
     // MARK: - Updates from the daemon
 
     func setupInputReader() {
+        var pending = LineBuffer()
         FileHandle.standardInput.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty { return }
-            guard let text = String(data: data, encoding: .utf8) else { return }
-            let lines = text.split(separator: "\n")
-            for line in lines {
-                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty,
-                      let jsonData = trimmed.data(using: .utf8),
-                      let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else { continue }
+            for line in pending.append(data) {
+                guard let dict = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }
                 DispatchQueue.main.async {
                     self?.handleUpdate(dict)
                 }
@@ -3137,4 +3151,20 @@ if mode == "listen" {
     let delegate = AppDelegate(targetApp: appName, initialContext: initialContext, targetWindowTitle: windowTitle)
     app.delegate = delegate
     app.run()
+}
+
+/// Keeps the bytes of a line that arrives in pieces (a long answer is bigger than one pipe read) until its newline comes.
+struct LineBuffer {
+    private var held = Data()
+
+    mutating func append(_ chunk: Data) -> [Data] {
+        held.append(chunk)
+        var lines: [Data] = []
+        while let newline = held.firstIndex(of: 0x0A) {
+            let line = held.subdata(in: held.startIndex..<newline)
+            held.removeSubrange(held.startIndex...newline)
+            if !line.allSatisfy({ $0 == 0x20 || $0 == 0x09 || $0 == 0x0D }) { lines.append(line) }
+        }
+        return lines
+    }
 }
