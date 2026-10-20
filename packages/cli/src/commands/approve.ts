@@ -106,7 +106,8 @@ export async function approveCommand(args: string[], context: CommandContext = {
       stdout(`Approval request created (${approval.id}). Waiting for decision on mobile app...`);
 
       try {
-        const decided = await localStore.waitForApprovalDecision(approval.id, parsed.timeoutSeconds * 1000);
+        context.onApprovalWait?.(true);
+        const decided = await localStore.waitForApprovalDecision(approval.id, parsed.timeoutSeconds * 1000).finally(() => context.onApprovalWait?.(false));
         if (decided.status === 'approved') {
           stdout('Approval granted.');
           return 0;
@@ -181,28 +182,33 @@ export async function approveCommand(args: string[], context: CommandContext = {
   const startTime = Date.now();
   const timeoutMs = parsed.timeoutSeconds * 1000;
 
-  while (Date.now() - startTime < timeoutMs) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    try {
-      const current = await client.getApproval(approval.id);
-      if (current.decision === 'approved') {
-        stdout('Approval granted.');
-        return 0;
-      }
-      if (current.decision === 'rejected') {
-        const reason =
-          current.rejection_reason ||
-          (typeof current.tool_payload === 'object' && current.tool_payload !== null
-            ? (current.tool_payload as any).rejection_reason
-            : null);
-        if (reason) {
-          stderr(`Approval rejected by user: ${reason}`);
-        } else {
-          stderr('Approval rejected by user.');
+  context.onApprovalWait?.(true);
+  try {
+    while (Date.now() - startTime < timeoutMs) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      try {
+        const current = await client.getApproval(approval.id);
+        if (current.decision === 'approved') {
+          stdout('Approval granted.');
+          return 0;
         }
-        return 1;
-      }
-    } catch {}
+        if (current.decision === 'rejected') {
+          const reason =
+            current.rejection_reason ||
+            (typeof current.tool_payload === 'object' && current.tool_payload !== null
+              ? (current.tool_payload as any).rejection_reason
+              : null);
+          if (reason) {
+            stderr(`Approval rejected by user: ${reason}`);
+          } else {
+            stderr('Approval rejected by user.');
+          }
+          return 1;
+        }
+      } catch {}
+    }
+  } finally {
+    context.onApprovalWait?.(false);
   }
 
   stderr('Approval request timed out.');

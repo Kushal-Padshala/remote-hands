@@ -264,6 +264,11 @@ export class LocalServer {
             return;
           }
           const approval = await this.options.store.decideApproval(approvalId, decision, body.reason ?? body.rejectionReason);
+          // The first answer stands: one that came too late, or for a task that has ended, is not announced as made.
+          if (approval.decision !== decision) {
+            this.sendJson(res, 409, { error: `The approval is already ${approval.decision}`, approval });
+            return;
+          }
           this.broadcast(approval.task_id, {
             type: 'approval.decided',
             approval_id: approvalId,

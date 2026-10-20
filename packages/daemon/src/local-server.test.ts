@@ -196,6 +196,19 @@ describe('LocalServer', () => {
     expect(decideJson.approval.status).toBe('approved');
   });
 
+  it('does not announce an answer that did not stand (already answered, or the task ended)', async () => {
+    const task = await store.createTask({ goal: 'Late answer', workspacePath: os.homedir() });
+    const approval = await store.createApproval(task.id, { summary: 'Press "Pay"', action: 'pay', risk: 'high' });
+    await store.decideApproval(approval.id, 'rejected', 'no');
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/approvals/${approval.id}/decision`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision: 'approved' }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).approval.status).toBe('rejected');
+  });
+
   it('redirects loopback GET / without token to authenticated token URL', async () => {
     const redirectRes = await fetch(`http://127.0.0.1:${server.port}/`, {
       redirect: 'manual',

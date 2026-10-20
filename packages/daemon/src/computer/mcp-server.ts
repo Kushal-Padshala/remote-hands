@@ -52,7 +52,7 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
     const arm = () => {
       clearTimeout(timer);
       if (over) return;
-      armedAt = Date.now();
+      armedAt = performance.now();
       timer = setTimeout(() => {
         abandon();
         fire({ isError: true, content: [{ type: 'text', text: formatTimeout(limit) }] });
@@ -64,7 +64,7 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
     watchWaiting((waiting) => {
       if (waiting) {
         clearTimeout(timer);
-        left = Math.max(0, left - (Date.now() - armedAt));
+        left = Math.max(0, left - (performance.now() - armedAt));
       } else {
         left = Math.max(left, AFTER_APPROVAL_MS);
         arm();

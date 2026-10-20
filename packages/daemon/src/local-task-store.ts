@@ -465,12 +465,13 @@ export class LocalTaskStore implements TaskStore {
     reason?: string,
   ): Promise<void> {
     const nowIso = new Date().toISOString();
+    // The time is read by SQLite itself while it makes the change, so a statement that is held up cannot approve after expiry.
     this.db.prepare(`
       UPDATE approvals
       SET status = ?, rejection_reason = ?, decided_at = ?
-      WHERE id = ? AND status = 'pending' AND expires_at > ?
+      WHERE id = ? AND status = 'pending' AND expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         AND (? = 'rejected' OR NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = approvals.task_id AND t.status IN ('cancelled', 'failed', 'done')))
-    `).run(status, reason ?? null, nowIso, id, nowIso, status);
+    `).run(status, reason ?? null, nowIso, id, status);
 
     const updated = await this.getApproval(id);
     if (updated && updated.status !== 'pending') {

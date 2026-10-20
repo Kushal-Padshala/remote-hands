@@ -36,6 +36,19 @@ describe('createActionGate', () => {
     await expect(broken('Delete')).rejects.not.toThrow('The user did not allow it.');
   });
 
+  it('reports only the wait for the answer to the caller, so setting up the request is not part of it', async () => {
+    const seen: string[] = [];
+    const approve = vi.fn(async (_args: string[], ctx: any) => {
+      seen.push('set up');
+      ctx.onApprovalWait(true);
+      seen.push('waiting');
+      ctx.onApprovalWait(false);
+      return 0;
+    });
+    await createActionGate({ env: {}, taskId: 'task-1', approve })('Post', { onWait: (w) => seen.push(w ? 'wait on' : 'wait off') });
+    expect(seen).toEqual(['set up', 'wait on', 'waiting', 'wait off']);
+  });
+
   it('never writes approval chatter to stdout (the MCP server uses it for JSON-RPC)', async () => {
     const stdout = vi.fn();
     const approve = vi.fn(async (_args: string[], ctx: any) => {

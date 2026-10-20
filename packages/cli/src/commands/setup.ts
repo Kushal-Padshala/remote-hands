@@ -85,6 +85,8 @@ export interface CommandContext {
   client?: any;
   frameSource?: any;
   localStore?: any;
+  /** `rh approve`: told when it starts and stops waiting for the person's answer (not while it is only setting up the request). */
+  onApprovalWait?: ((waiting: boolean) => void) | undefined;
   hudServiceManager?: any | undefined;
   /** Injected pieces of `rh fast-lane` and the HUD's fast lane (tests): the local model service, home folder and memory. */
   fastLane?: {
