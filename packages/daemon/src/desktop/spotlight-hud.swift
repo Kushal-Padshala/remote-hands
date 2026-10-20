@@ -855,7 +855,7 @@ final class CardIcon: NSView {
     }
 }
 
-enum CardStyle { case request, step, note, attention, error, answer }
+enum CardStyle { case request, step, note, attention, error, answer, approval }
 
 /// One thing that happened, as a small rounded card: your request (with its live status), a step the agent took,
 /// a problem, or the final answer. Cards are measured once, when they are made.
@@ -892,6 +892,12 @@ final class ActivityCard: NSView {
     private var finishedAfter: Int?
     var onCopy: (() -> Void)?
     private var copyButton: HudGlyphButton?
+    /// An approval card: true to allow, false to deny. Called once; the buttons then stand down until the daemon answers.
+    var onDecision: ((Bool) -> Void)?
+    private var decisionButtons: [HudActionButton] = []
+    private var decisionX: CGFloat = 0
+    private var decisionY: CGFloat = 0
+    private var decisionLabel: NSTextField?
 
     init(style: CardStyle, title: String, body: NSAttributedString?, width: CGFloat, inProgress: Bool = false) {
         self.style = style
@@ -909,7 +915,7 @@ final class ActivityCard: NSView {
         case .step: icon = CardIcon(kind: inProgress && style == .step ? .spinner : .check, color: Theme.success)
         case .answer: icon = CardIcon(kind: .check, color: Theme.success)
         case .error: icon = CardIcon(kind: .cross, color: Theme.danger)
-        case .attention: icon = CardIcon(kind: .bang, color: Theme.warning)
+        case .attention, .approval: icon = CardIcon(kind: .bang, color: Theme.warning)
         case .note: icon = CardIcon(kind: .dot, color: NSColor(white: 1.0, alpha: 0.16))
         case .request: icon = nil
         }
@@ -925,6 +931,7 @@ final class ActivityCard: NSView {
         case .answer: titleColor = Theme.text; titleFont = NSFont.systemFont(ofSize: 14, weight: .semibold)
         case .note: titleColor = Theme.tertiary; titleFont = NSFont.systemFont(ofSize: 13, weight: .regular)
         case .attention: titleColor = Theme.warning; titleFont = NSFont.systemFont(ofSize: 13.5, weight: .medium)
+        case .approval: titleColor = Theme.text; titleFont = NSFont.systemFont(ofSize: 13.5, weight: .semibold)
         case .error: titleColor = Theme.danger; titleFont = NSFont.systemFont(ofSize: 13.5, weight: .medium)
         }
         let (titleView, titleH) = ActivityCard.textView(NSAttributedString(string: title, attributes: [.font: titleFont, .foregroundColor: titleColor]), width: textW, selectable: false)
@@ -938,6 +945,24 @@ final class ActivityCard: NSView {
             surface.addSubview(view)
             bodyView = view
             y += 3 + h
+        }
+        if style == .approval {
+            // Allow and Deny sit under the words, left-aligned with them
+            y += 12
+            decisionY = y
+            let allow = ActivityCard.decisionButton(title: "Allow", tint: .white, fill: Theme.send, frame: NSRect(x: textX, y: y, width: 92, height: 30))
+            allow.target = self
+            allow.action = #selector(allowClicked)
+            allow.toolTip = "Let it go on"
+            let deny = ActivityCard.decisionButton(title: "Deny", tint: Theme.text, fill: NSColor(white: 1.0, alpha: 0.12), frame: NSRect(x: textX + 92 + 8, y: y, width: 92, height: 30))
+            deny.target = self
+            deny.action = #selector(denyClicked)
+            deny.toolTip = "Do not do it"
+            surface.addSubview(allow)
+            surface.addSubview(deny)
+            decisionButtons = [allow, deny]
+            decisionX = textX
+            y += 30
         }
         let surfaceHeight = max(46, y + ActivityCard.vertical)
         cardHeight = surfaceHeight + ActivityCard.room
@@ -995,6 +1020,42 @@ final class ActivityCard: NSView {
 
     @objc private func copyClicked() { onCopy?() }
     @objc private func stopClicked() { onStop?() }
+    @objc private func allowClicked() { decide(true) }
+    @objc private func denyClicked() { decide(false) }
+
+    private func decide(_ allow: Bool) {
+        guard decisionLabel == nil else { return }
+        for b in decisionButtons { b.isHidden = true }
+        showDecision(allow ? "Allowing…" : "Denying…", color: Theme.secondary)
+        onDecision?(allow)
+    }
+
+    /// Replaces the buttons with a word: what was answered, or that the question is no longer open.
+    func showDecision(_ text: String, color: NSColor) {
+        for b in decisionButtons { b.isHidden = true }
+        // the line saying it is waiting is no longer true
+        bodyView?.textStorage?.setAttributedString(NSAttributedString(string: ""))
+        decisionLabel?.removeFromSuperview()
+        let label = NSTextField(labelWithString: text)
+        label.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        label.textColor = color
+        label.frame = NSRect(x: decisionX, y: decisionY + 6, width: 240, height: 18)
+        surface.addSubview(label)
+        decisionLabel = label
+    }
+
+    /// A small pill-shaped button for the approval card.
+    static func decisionButton(title: String, tint: NSColor, fill: NSColor, frame: NSRect) -> HudActionButton {
+        let b = HudActionButton(frame: frame)
+        b.bezelStyle = .regularSquare
+        b.isBordered = false
+        b.wantsLayer = true
+        b.layer?.cornerRadius = frame.height / 2
+        b.layer?.masksToBounds = true
+        b.layer?.backgroundColor = fill.cgColor
+        b.attributedTitle = NSAttributedString(string: title, attributes: [.foregroundColor: tint, .font: NSFont.systemFont(ofSize: 12.5, weight: .semibold)])
+        return b
+    }
 
     /// Older cards keep their solid background but their words go quieter (until the mouse comes to read them).
     func setDimmed(_ dimmed: Bool) {
@@ -1453,6 +1514,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
     var toolbar: ToolbarView!
     var requestCard: ActivityCard?
     var answerCard: ActivityCard?
+    /// The Allow / Deny cards still open, by approval id.
+    var approvalCards: [String: ActivityCard] = [:]
     var statusTimer: Timer?
     /// The pill comes back for a follow-up (pencil, return arrow, or just start typing) and goes when one is sent.
     var pillVisible = true
@@ -1530,6 +1593,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
                 setFollowUp(visible: true, focus: false)
             } else if d["collapse"] != nil {
                 onToolbarCollapse()
+            } else if let id = d["decide"] as? String {
+                approvalCards[id]?.showDecision("Allowing…", color: Theme.secondary)
             } else if let name = d["mascot"] as? String {
                 let look = (d["look"] as? [Double]).map { CGPoint(x: $0[0], y: $0[1]) } ?? .zero
                 mascot?.hold(name, look: look)
@@ -2847,6 +2912,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             showResumed(dict)
             return
         }
+        if dict["event"] as? String == "approval" {
+            showApproval(dict)
+            return
+        }
+        if dict["event"] as? String == "approval-closed" {
+            closeApproval(id: dict["id"] as? String ?? "", outcome: dict["outcome"] as? String ?? "expired")
+            return
+        }
 
         let status = (dict["status"] as? String)?.uppercased() ?? "WORKING"
         let text = dict["text"] as? String ?? ""
@@ -2980,6 +3053,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTable
             if hudAnimated { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: hide) } else { hide() }
         }
         if visible && focus { panel.makeFirstResponder(textField) }
+    }
+
+    /// The agent is about to do something it must not do without a yes (publish, send, pay, delete): ask, with Allow and Deny.
+    func showApproval(_ dict: [String: Any]) {
+        guard let id = dict["id"] as? String, !id.isEmpty, approvalCards[id] == nil else { return }
+        let summary = (dict["summary"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !isExpanded { transitionToProgress(query: nil) }
+        // a folded feed would hide the question
+        if feedCollapsed { onToolbarCollapse() }
+        let title = summary.isEmpty ? "Allow this action?" : "Allow: \(summary)?"
+        let note = NSAttributedString(string: "The agent is waiting for your OK.", attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: Theme.secondary])
+        let card = ActivityCard(style: .approval, title: title, body: note, width: PromptLayout.pillWidth)
+        card.onDecision = { [weak self] allow in self?.answerApproval(id: id, allow: allow) }
+        approvalCards[id] = card
+        feed.append(card)
+        mascot?.noticeAction("press")
+        setStatus("Waiting for you", color: Theme.warning)
+        feed.scrollToEnd()
+    }
+
+    /// Sends the answer; the daemon replies with `approval-closed`, which settles the card.
+    func answerApproval(id: String, allow: Bool) {
+        let dict: [String: Any] = ["event": "approval", "id": id, "decision": allow ? "approved" : "rejected"]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict), let json = String(data: data, encoding: .utf8) else { return }
+        print(json)
+        fflush(stdout)
+    }
+
+    /// The question is over (answered here, on the phone, timed out, or the task ended).
+    func closeApproval(id: String, outcome: String) {
+        guard let card = approvalCards.removeValue(forKey: id) else { return }
+        switch outcome {
+        case "approved": card.showDecision("Allowed", color: Theme.success)
+        case "rejected": card.showDecision("Denied", color: Theme.danger)
+        default: card.showDecision("No longer waiting", color: Theme.tertiary)
+        }
+        if approvalCards.isEmpty && isWorking { setStatus("Working", color: Theme.secondary) }
     }
 
     /// A past chat was picked: show its messages as cards and wait for the next one, which continues it.

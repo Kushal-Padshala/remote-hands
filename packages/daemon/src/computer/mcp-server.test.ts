@@ -4,7 +4,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { z } from 'zod';
 import { createComputerMcpServer, type ComputerMcpServerOptions } from './mcp-server.js';
 import type { ToolCallRecord } from './call-log.js';
-import { isCallAborted } from './call-scope.js';
+import { abandonAwareGate, isCallAborted } from './call-scope.js';
 import type { ComputerTool } from './tools.js';
 
 async function connect(tools: ComputerTool[], opts?: ComputerMcpServerOptions) {
@@ -198,6 +198,35 @@ describe('createComputerMcpServer', () => {
     const ok = await client.callTool({ name: 'fast', arguments: {} });
     expect(ok.isError).toBeFalsy();
     expect(ok.content).toEqual([{ type: 'text', text: 'quick' }]);
+  });
+
+  it('the time limit stands still while the call waits for the person to approve, then starts over', async () => {
+    let allow!: () => void;
+    const gate = abandonAwareGate(() => new Promise<void>((r) => { allow = r; }));
+    const acted = vi.fn();
+    const client = await connect(
+      [{ name: 'press', description: 'p', inputSchema: {}, handler: async () => { await gate('Submit'); acted(); return 'pressed'; } }],
+      { callTimeoutMs: 40 },
+    );
+    const call = client.callTool({ name: 'press', arguments: {} });
+    await new Promise((r) => setTimeout(r, 150)); // well past the limit, still waiting for the answer
+    expect(acted).not.toHaveBeenCalled();
+    allow();
+    const res = await call;
+    expect(res.isError).toBeFalsy();
+    expect(res.content).toEqual([{ type: 'text', text: 'pressed' }]);
+    expect(acted).toHaveBeenCalledTimes(1);
+  });
+
+  it('a call that keeps working after the approval still times out', async () => {
+    const gate = abandonAwareGate(async () => {});
+    const client = await connect(
+      [{ name: 'press', description: 'p', inputSchema: {}, handler: async () => { await gate('Submit'); await new Promise(() => {}); return 'never'; } }],
+      { callTimeoutMs: 40 },
+    );
+    const res = await client.callTool({ name: 'press', arguments: {} });
+    expect(res.isError).toBe(true);
+    expect(res.content).toEqual([{ type: 'text', text: 'error: tool call timed out after 0.04s' }]);
   });
 
   it('the default call timeout is 90 s in the message', async () => {

@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { LocalTaskStore } from '../local-task-store.js';
 import { HUD_MODELS, readHudModelKey, writeHudModelKey } from '../hud-models.js';
 import {
   HudCoordinator,
@@ -340,7 +341,7 @@ describe('HudCoordinator', () => {
     expect(mockHudRunner.startListener).toHaveBeenCalled();
 
     await capturedListener({ event: 'hotkey', app: 'Safari' });
-    expect(mockHudRunner.openInteractivePrompt).toHaveBeenCalledWith('Safari', expect.any(Function), expect.any(Function), expect.any(Function), undefined, expect.objectContaining({ model: 'gemini-flash-fast', onModel: expect.any(Function) }), expect.objectContaining({ list: expect.any(Function), resume: expect.any(Function) }));
+    expect(mockHudRunner.openInteractivePrompt).toHaveBeenCalledWith('Safari', expect.any(Function), expect.any(Function), expect.any(Function), undefined, expect.objectContaining({ model: 'gemini-flash-fast', onModel: expect.any(Function) }), expect.objectContaining({ list: expect.any(Function), resume: expect.any(Function) }), expect.objectContaining({ decide: expect.any(Function) }));
 
     await submitHandler({ query: 'start advertising campaign', app: 'Safari' }, dummySender);
     expect(mockStore.createTask).toHaveBeenCalledWith(
@@ -1454,5 +1455,238 @@ describe('HudCoordinator history', () => {
     const stop = vi.spyOn(c, 'stopActiveTask').mockResolvedValue();
     await c.resumeChat('a');
     expect(stop).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('HudCoordinator with the real task store', () => {
+  let dir: string;
+  let store: LocalTaskStore;
+  let hudRunner: any;
+
+  const make = (runner: any) =>
+    new HudCoordinator({
+      hudRunner,
+      intentResolver: { resolve: vi.fn() } as any,
+      guidanceManager: { startSession: vi.fn() } as any,
+      macosDriver: {
+        getActiveWindowContext: vi.fn().mockResolvedValue({ app: 'Google Chrome', title: 'Console', url: 'https://example.com', isBrowser: true }),
+        focusWindow: vi.fn().mockResolvedValue(undefined),
+      } as any,
+      store,
+      runner,
+      autoExecute: true,
+    });
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rh-hud-real-store-'));
+    store = new LocalTaskStore({ dbPath: path.join(dir, 'test.db') });
+    hudRunner = { openPrompt: vi.fn(), startListener: vi.fn(), openInteractivePrompt: vi.fn() };
+  });
+
+  afterEach(() => {
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a follow-up in the same window continues the conversation the first task started', async () => {
+    const seen: Array<string | null> = [];
+    const runner = {
+      run: vi.fn().mockImplementation(async (task: any) => {
+        seen.push(task.conversation_id);
+        return { status: 'done', summary: 'ok', conversationId: 'conv-1', events: [] };
+      }),
+    };
+    const c = make(runner);
+    await c.handleResult({ query: 'set up the content rating for this app', app: 'Google Chrome' }, () => {});
+    await c.whenIdle();
+    await c.handleResult({ query: 'what else is left before I can submit it', app: 'Google Chrome' }, () => {});
+    await c.whenIdle();
+    expect(seen).toEqual([null, 'conv-1']);
+  });
+
+  describe('approvals', () => {
+    const sender = () => {
+      const send: any = vi.fn();
+      send.approval = vi.fn();
+      send.approvalClosed = vi.fn();
+      return send;
+    };
+    const queued = () => store.createTask({ goal: 'Publish it', prompt: 'Goal: Publish it', status: 'queued' });
+
+    it('puts the action a task waits on in front of the person, and an Allow lets it go on', async () => {
+      const send = sender();
+      let verdict = '';
+      const runner = {
+        run: vi.fn().mockImplementation(async (task: any) => {
+          const approval = await store.createApproval(task.id, { summary: 'Press "Submit 11 changes for review"', action: 'publish', risk: 'high' });
+          verdict = (await store.waitForApprovalDecision(approval.id, 5000)).decision;
+          return { status: 'done', summary: 'sent', conversationId: 'c', events: [] };
+        }),
+      };
+      const c = make(runner);
+      const task = await queued();
+      const running = c.executeTaskStandalone(task, send);
+      await vi.waitFor(() => expect(send.approval).toHaveBeenCalledTimes(1));
+      const asked = send.approval.mock.calls[0][0];
+      expect(asked).toMatchObject({ summary: 'Press "Submit 11 changes for review"', risk: 'high' });
+      expect(await c.decideApproval(asked.id, true)).toBe('approved');
+      await running;
+      expect(verdict).toBe('approved');
+    });
+
+    it('a Deny stops the action and says why', async () => {
+      const send = sender();
+      const press = vi.fn();
+      let verdict: any;
+      const runner = {
+        run: vi.fn().mockImplementation(async (task: any) => {
+          const approval = await store.createApproval(task.id, { summary: 'Press "Delete"', action: 'delete', risk: 'high' });
+          verdict = await store.waitForApprovalDecision(approval.id, 5000);
+          if (verdict.decision === 'approved') press();
+          return { status: 'done', summary: 'stopped', conversationId: 'c', events: [] };
+        }),
+      };
+      const c = make(runner);
+      const running = c.executeTaskStandalone(await queued(), send);
+      await vi.waitFor(() => expect(send.approval).toHaveBeenCalled());
+      expect(await c.decideApproval(send.approval.mock.calls[0][0].id, false)).toBe('rejected');
+      await running;
+      expect(verdict.decision).toBe('rejected');
+      expect(verdict.rejection_reason).toBe('Denied from the HUD');
+      expect(press).not.toHaveBeenCalled();
+    });
+
+    it('an Allow cannot undo a No that came first from somewhere else', async () => {
+      const send = sender();
+      let release!: () => void;
+      const hold = new Promise<void>((r) => { release = r; });
+      const runner = { run: vi.fn().mockImplementation(async (task: any) => {
+        await store.createApproval(task.id, { summary: 'Press "Pay"', action: 'pay', risk: 'high' });
+        await hold;
+        return { status: 'done', summary: 'x', conversationId: 'c', events: [] };
+      }) };
+      const c = make(runner);
+      const running = c.executeTaskStandalone(await queued(), send);
+      await vi.waitFor(() => expect(send.approval).toHaveBeenCalled());
+      const id = send.approval.mock.calls[0][0].id;
+      await store.decideApproval(id, 'rejected', 'No from the phone');
+      expect(await c.decideApproval(id, true)).toBe('rejected');
+      expect((await store.getApproval(id))?.decision).toBe('rejected');
+      release();
+      await running;
+    });
+
+    it('Stop takes the card away at once: nothing can be allowed after it, and the row is turned away', async () => {
+      const send = sender();
+      let release!: () => void;
+      const hold = new Promise<void>((r) => { release = r; });
+      let approvalId = '';
+      const runner = { run: vi.fn().mockImplementation(async (task: any) => {
+        approvalId = (await store.createApproval(task.id, { summary: 'Press "Publish"', action: 'publish', risk: 'high' })).id;
+        await hold;
+        return { status: 'done', summary: 'x', conversationId: 'c', events: [] };
+      }) };
+      const c = make(runner);
+      const running = c.executeTaskStandalone(await queued(), send);
+      await vi.waitFor(() => expect(send.approval).toHaveBeenCalled());
+      await c.stopActiveTask('stop', send);
+      expect(await c.decideApproval(approvalId, true)).toBe('expired');
+      expect((await store.getApproval(approvalId))?.decision).toBe('rejected');
+      expect(send.approvalClosed).toHaveBeenCalledWith(approvalId, 'expired');
+      release();
+      await running;
+    });
+
+    it('settles the card with the real outcome when the answer came from elsewhere just before the task ended', async () => {
+      const send = sender();
+      let approvalId = '';
+      const runner = { run: vi.fn().mockImplementation(async (task: any) => {
+        approvalId = (await store.createApproval(task.id, { summary: 'Press "Send"', action: 'send', risk: 'high' })).id;
+        await vi.waitFor(() => expect(send.approval).toHaveBeenCalled());
+        await store.decideApproval(approvalId, 'approved');
+        return { status: 'done', summary: 'x', conversationId: 'c', events: [] };
+      }) };
+      await make(runner).executeTaskStandalone(await queued(), send);
+      expect(send.approvalClosed).toHaveBeenCalledWith(approvalId, 'approved');
+    });
+
+    it('a look that is under way when the task ends cannot put a card up afterwards', async () => {
+      const send = sender();
+      let release!: () => void;
+      const gate = new Promise<void>((r) => { release = r; });
+      const realGet = store.getApproval.bind(store);
+      let seen = 0;
+      vi.spyOn(store, 'getApproval').mockImplementation(async (id: string) => {
+        const row = await realGet(id);
+        if (++seen === 1) await gate;
+        return row;
+      });
+      const runner = { run: vi.fn().mockImplementation(async (task: any) => {
+        await store.createApproval(task.id, { summary: 'Press "Publish"', action: 'publish', risk: 'high' });
+        await vi.waitFor(() => expect(seen).toBeGreaterThan(0));
+        return { status: 'done', summary: 'x', conversationId: 'c', events: [] };
+      }) };
+      const ending = make(runner).executeTaskStandalone(await queued(), send);
+      await vi.waitFor(() => expect(seen).toBeGreaterThan(0));
+      release();
+      await ending;
+      expect(send.approval).not.toHaveBeenCalled();
+    });
+
+    it('refuses an answer for an approval the HUD never showed', async () => {
+      const task = await queued();
+      const approval = await store.createApproval(task.id, { summary: 'Press "Pay"', action: 'pay', risk: 'high' });
+      expect(await make({ run: vi.fn() }).decideApproval(approval.id, true)).toBe('expired');
+      expect((await store.getApproval(approval.id))?.decision).toBe('pending');
+    });
+
+    it('turns away what is still waiting when the task ends, and takes the card down', async () => {
+      const send = sender();
+      let approvalId = '';
+      const runner = {
+        run: vi.fn().mockImplementation(async (task: any) => {
+          approvalId = (await store.createApproval(task.id, { summary: 'Press "Publish"', action: 'publish', risk: 'high' })).id;
+          await vi.waitFor(() => expect(send.approval).toHaveBeenCalled());
+          return { status: 'done', summary: 'gave up', conversationId: 'c', events: [] };
+        }),
+      };
+      await make(runner).executeTaskStandalone(await queued(), send);
+      const left = await store.getApproval(approvalId);
+      expect(left?.decision).toBe('rejected');
+      expect(left?.rejection_reason).toBe('The task ended');
+      expect(send.approvalClosed).toHaveBeenCalledWith(approvalId, 'expired');
+    });
+
+    it('shows only the newest when the same action is asked again', async () => {
+      const send = sender();
+      const ids: string[] = [];
+      const runner = {
+        run: vi.fn().mockImplementation(async (task: any) => {
+          ids.push((await store.createApproval(task.id, { summary: 'Press "Submit"', action: 'publish', risk: 'high' })).id);
+          await vi.waitFor(() => expect(send.approval).toHaveBeenCalledTimes(1));
+          ids.push((await store.createApproval(task.id, { summary: 'Press "Submit"', action: 'publish', risk: 'high' })).id);
+          await vi.waitFor(() => expect(send.approval).toHaveBeenCalledTimes(2));
+          expect((await store.getApproval(ids[0]!))?.decision).toBe('rejected');
+          expect((await store.getApproval(ids[1]!))?.decision).toBe('pending');
+          return { status: 'done', summary: 'x', conversationId: 'c', events: [] };
+        }),
+      };
+      await make(runner).executeTaskStandalone(await queued(), send);
+      expect(send.approval.mock.calls.map((call: any[]) => call[0].id)).toEqual(ids);
+      expect(send.approvalClosed).toHaveBeenCalledWith(ids[0], 'expired');
+    });
+
+    it('does nothing about approvals when the HUD cannot show them', async () => {
+      let approvalId = '';
+      const runner = {
+        run: vi.fn().mockImplementation(async (task: any) => {
+          approvalId = (await store.createApproval(task.id, { summary: 'Press "Publish"', action: 'publish', risk: 'high' })).id;
+          await new Promise((r) => setTimeout(r, 700));
+          return { status: 'done', summary: 'x', conversationId: 'c', events: [] };
+        }),
+      };
+      await make(runner).executeTaskStandalone(await queued(), vi.fn());
+      expect((await store.getApproval(approvalId))?.decision).toBe('pending');
+    });
   });
 });

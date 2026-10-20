@@ -43,7 +43,10 @@ export function createActionGate(context: ActionGateContext = {}): ActionGate {
       },
     );
     if (code !== 0) {
-      throw new Error(`${reasons.join(' ') || 'Approval was not granted.'} "${label.trim()}" was not ${verb === 'Run' ? 'run' : 'pressed'}.`);
+      const said = reasons.join(' ');
+      // Only a real "no" (or no answer in time) tells the agent to stop; a failure to ask at all must not read as a refusal.
+      const refused = /rejected by user|timed out/i.test(said) ? ' The user did not allow it.' : '';
+      throw new Error(`${said || 'Approval was not granted.'} "${label.trim()}" was not ${verb === 'Run' ? 'run' : 'pressed'}.${refused}`);
     }
   };
 }

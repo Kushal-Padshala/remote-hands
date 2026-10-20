@@ -24,6 +24,9 @@ import type {
   TaskStore,
 } from './task-store.js';
 
+/** How often a waiting process looks for a decision another process made. */
+const APPROVAL_POLL_MS = 400;
+
 export interface LocalTaskStoreOptions {
   dbPath: string;
 }
@@ -44,6 +47,9 @@ export interface CreateTaskInput {
   effort?: string | null | undefined;
   status?: TaskStatus | undefined;
   attachments?: ContextAttachment[] | undefined;
+  /** The agent conversation this task continues (a follow-up in the same chat). */
+  conversation_id?: string | null | undefined;
+  conversationId?: string | null | undefined;
 }
 
 export interface LocalTask extends Task {
@@ -184,11 +190,12 @@ export class LocalTaskStore implements TaskStore {
     const status = input.status ?? 'queued';
     const nowIso = new Date().toISOString();
     const attachments = input.attachments ? JSON.stringify(input.attachments) : null;
+    const conversationId = input.conversation_id ?? input.conversationId ?? null;
 
     this.db.prepare(`
-      INSERT INTO tasks (id, user_id, machine_id, prompt, kind, workspace_path, model, effort, mode, status, created_at, updated_at, attachments)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, userId, machineId, prompt, kind, workspacePath, model, effort, mode, status, nowIso, nowIso, attachments);
+      INSERT INTO tasks (id, user_id, machine_id, prompt, kind, workspace_path, model, effort, mode, status, conversation_id, created_at, updated_at, attachments)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, userId, machineId, prompt, kind, workspacePath, model, effort, mode, status, conversationId, nowIso, nowIso, attachments);
 
     const task = await this.getTask(id);
     return task!;
@@ -429,12 +436,14 @@ export class LocalTaskStore implements TaskStore {
   }
 
   async getApproval(id: string): Promise<LocalApproval | null> {
+    this.expireOverdue();
     const row = this.db.prepare('SELECT * FROM approvals WHERE id = ?').get(id) as any;
     if (!row) return null;
     return this.toApproval(row);
   }
 
   async listApprovals(taskId?: string): Promise<ApprovalRow[]> {
+    this.expireOverdue();
     const rows = taskId
       ? (this.db.prepare('SELECT * FROM approvals WHERE task_id = ? ORDER BY created_at ASC').all(taskId) as any[])
       : (this.db.prepare('SELECT * FROM approvals ORDER BY created_at ASC').all() as any[]);
@@ -442,25 +451,31 @@ export class LocalTaskStore implements TaskStore {
   }
 
   async getPendingApproval(taskId: string): Promise<ApprovalRow | null> {
+    this.expireOverdue();
     const row = this.db.prepare("SELECT * FROM approvals WHERE task_id = ? AND status = 'pending' ORDER BY created_at ASC LIMIT 1").get(taskId) as any;
     if (!row) return null;
     return this.toApproval(row);
   }
 
+  /**
+   * Answers a pending approval. Only a request still waiting (and not out of time) takes the answer, decided in one statement, so
+   * whoever answers first wins and a later answer can never change it. Read the row afterwards to see what stands.
+   */
   async resolveApproval(
     id: string,
     status: 'approved' | 'rejected',
     reason?: string,
   ): Promise<void> {
+    this.expireOverdue();
     const nowIso = new Date().toISOString();
     this.db.prepare(`
       UPDATE approvals
       SET status = ?, rejection_reason = ?, decided_at = ?
-      WHERE id = ?
+      WHERE id = ? AND status = 'pending'
     `).run(status, reason ?? null, nowIso, id);
 
     const updated = await this.getApproval(id);
-    if (updated) {
+    if (updated && updated.status !== 'pending') {
       const resolvers = this.decisionResolvers.get(id);
       if (resolvers) {
         for (const res of resolvers) {
@@ -469,6 +484,12 @@ export class LocalTaskStore implements TaskStore {
         this.decisionResolvers.delete(id);
       }
     }
+  }
+
+  /** A request nobody answered in time is expired, in the database, so every reader sees the same thing. */
+  private expireOverdue(): void {
+    const nowIso = new Date().toISOString();
+    this.db.prepare("UPDATE approvals SET status = 'expired', decided_at = ? WHERE status = 'pending' AND expires_at <= ?").run(nowIso, nowIso);
   }
 
   async decideApproval(
@@ -488,14 +509,17 @@ export class LocalTaskStore implements TaskStore {
     signal?: AbortSignal,
   ): Promise<ApprovalRow> {
     const current = await this.getApproval(approvalId);
+    if (current && current.status === 'expired') throw new Error('Approval request timed out');
     if (current && current.status !== 'pending') {
       return current;
     }
 
     return new Promise<ApprovalRow>((resolve, reject) => {
       let timer: NodeJS.Timeout | null = null;
+      let poller: NodeJS.Timeout | null = null;
       const cleanup = () => {
         if (timer) clearTimeout(timer);
+        if (poller) clearInterval(poller);
         signal?.removeEventListener('abort', onAbort);
         const list = this.decisionResolvers.get(approvalId);
         if (list) {
@@ -517,17 +541,28 @@ export class LocalTaskStore implements TaskStore {
 
       const onDecision = (approval: ApprovalRow) => {
         cleanup();
-        resolve(approval);
+        if ((approval as LocalApproval).status === 'expired') reject(new Error('Approval request timed out'));
+        else resolve(approval);
       };
 
       const list = this.decisionResolvers.get(approvalId) ?? [];
       list.push(onDecision);
       this.decisionResolvers.set(approvalId, list);
 
+      // The decision is often made by another process (the HUD daemon, the local server) that shares this
+      // database but not this object, so its resolver never fires here: look at the row now and then.
+      poller = setInterval(() => {
+        try {
+          this.expireOverdue();
+          const cur = this.db.prepare('SELECT * FROM approvals WHERE id = ?').get(approvalId) as any;
+          if (cur && cur.status !== 'pending') onDecision(this.toApproval(cur));
+        } catch {}
+      }, APPROVAL_POLL_MS);
+
       timer = setTimeout(async () => {
         cleanup();
         const cur = await this.getApproval(approvalId);
-        if (cur && cur.status !== 'pending') {
+        if (cur && cur.status !== 'pending' && cur.status !== 'expired') {
           resolve(cur);
         } else {
           reject(new Error('Approval request timed out'));

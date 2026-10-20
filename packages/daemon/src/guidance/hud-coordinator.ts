@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import type { ContextAttachment, Task } from '@remote-hands/shared';
 import type { FastLane, FastLaneOutcome } from '../fast-lane/fast-lane.js';
-import { SpotlightHudRunner, type SpotlightPromptResult, type HudUpdateSender } from '../desktop/spotlight-hud.js';
+import { SpotlightHudRunner, type SpotlightPromptResult, type HudUpdateSender, type HudApprovalOutcome } from '../desktop/spotlight-hud.js';
 import { IntentResolver } from './intent-resolver.js';
 import { GuidanceManager } from './guidance-manager.js';
 import { MacOsDriver, type ActiveWindowContext } from '../desktop/macos-driver.js';
@@ -192,6 +192,10 @@ export function formatContextualTaskPrompt(
   return lines.join('\n');
 }
 
+function outcomeOf(decision: string): HudApprovalOutcome {
+  return decision === 'approved' ? 'approved' : decision === 'rejected' ? 'rejected' : 'expired';
+}
+
 export interface HudResumed {
   id: string;
   title: string;
@@ -203,6 +207,15 @@ export interface HudHistory {
   list: () => Promise<HudHistoryItem[]>;
   resume: (id: string) => Promise<HudResumed | null>;
 }
+
+/** What the prompt window can ask for when the person answers an Allow / Deny card. */
+export interface HudApprovals {
+  /** Records the answer. Resolves to what stands in the end: an approval that already ran out of time cannot be allowed. */
+  decide: (id: string, approved: boolean) => Promise<HudApprovalOutcome>;
+}
+
+/** How often a running task is checked for an action waiting on the person. */
+export const APPROVAL_WATCH_MS = 500;
 
 export interface HudCoordinatorOptions {
   hudRunner?: SpotlightHudRunner | undefined;
@@ -243,6 +256,9 @@ export class HudCoordinator {
   private currentConversationId?: string | undefined;
   /** Bumped whenever the conversation is chosen on purpose, so a task that settles late cannot overwrite the choice. */
   private conversationEpoch = 0;
+  /** Approvals this HUD put up for the running task; only these can be answered from it. */
+  private offeredApprovals = new Set<string>();
+  private approvalWatch?: { end: () => Promise<void> } | undefined;
   private lastTaskDigest?: PreviousTaskDigest | undefined;
   /** The last digest came from a fast-lane task, which the agent's own conversation knows nothing about. */
   private lastDigestFromFastLane = false;
@@ -304,6 +320,7 @@ export class HudCoordinator {
 
   async stopActiveTask(reason = 'Task stopped by user from HUD', sendUpdate?: HudUpdateSender): Promise<void> {
     this.powerManager?.releaseAll();
+    const approvalsEnded = this.endApprovalWatch();
     const currentId = this.activeExecution?.taskId || this.currentTaskId;
     if (this.activeExecution) {
       const { abortController } = this.activeExecution;
@@ -327,6 +344,7 @@ export class HudCoordinator {
         }
       }
     }
+    await approvalsEnded;
     if (sendUpdate) {
       sendUpdate('STOPPED', reason, 'STATUS');
     }
@@ -405,6 +423,111 @@ export class HudCoordinator {
     return { list: () => this.historyList(), resume: (id) => this.resumeChat(id) };
   }
 
+  private approvalsMenu(): HudApprovals {
+    return { decide: (id, approved) => this.decideApproval(id, approved) };
+  }
+
+  /**
+   * Answers an Allow / Deny card. Only an approval this HUD showed for the running task takes the answer, and the store decides
+   * who got there first: what is returned is what stands (a phone that said no a moment earlier wins over this Allow).
+   */
+  async decideApproval(id: string, approved: boolean): Promise<HudApprovalOutcome> {
+    const store = this.getStore();
+    if (!store?.decideApproval || !this.offeredApprovals.has(id)) return 'expired';
+    try {
+      const row = await store.decideApproval(id, approved ? 'approved' : 'rejected', approved ? undefined : 'Denied from the HUD');
+      return outcomeOf(row.decision);
+    } catch {
+      return 'expired';
+    }
+  }
+
+  /** Takes the Allow / Deny cards away and turns away what is still waiting: used when the task is stopped, replaced or over. */
+  private endApprovalWatch(): Promise<void> {
+    return this.approvalWatch?.end() ?? Promise.resolve();
+  }
+
+  /**
+   * While a task runs, puts the action it is waiting on in front of the person (an Allow / Deny card) and takes the card down
+   * when the answer comes from anywhere. `end()` stops the watch at once (no card can be answered after it is called), waits for
+   * a look that is already under way, rejects whatever is still waiting and closes the card that is up. It is safe to call again.
+   */
+  private watchApprovals(taskId: string, sendUpdate?: HudUpdateSender): { end: () => Promise<void> } {
+    const store = this.getStore();
+    const show = sendUpdate?.approval;
+    if (!sendUpdate || !show || !store?.listApprovals || !store.decideApproval) return { end: async () => {} };
+    const close = sendUpdate.approvalClosed;
+    const mine = new Set<string>();
+    let shown: string | null = null;
+    let stopped = false;
+    let looking: Promise<void> | null = null;
+    let ended: Promise<void> | null = null;
+
+    const settleShown = (outcome: HudApprovalOutcome) => {
+      if (!shown) return;
+      close?.(shown, outcome);
+      shown = null;
+    };
+
+    const look = async () => {
+      if (stopped) return;
+      const all = await store.listApprovals!(taskId);
+      if (stopped) return;
+      if (shown) {
+        const current = all.find((a) => a.id === shown);
+        if (!current || current.decision !== 'pending') settleShown(current ? outcomeOf(current.decision) : 'expired');
+      }
+      const waiting = all.filter((a) => a.decision === 'pending');
+      // The same action asked again means the earlier asker gave up: only the newest of those stays.
+      const newest = waiting[waiting.length - 1];
+      for (const old of waiting) {
+        if (newest && old.id !== newest.id && old.summary === newest.summary && old.action_kind === newest.action_kind) {
+          await store.decideApproval!(old.id, 'rejected', 'Asked again').catch(() => {});
+          if (shown === old.id) settleShown('expired');
+        }
+      }
+      if (stopped || shown || !newest) return;
+      const live = await store.getApproval?.(newest.id);
+      if (stopped || shown || !live || live.decision !== 'pending') return;
+      shown = newest.id;
+      mine.add(newest.id);
+      this.offeredApprovals.add(newest.id);
+      show({ id: newest.id, summary: newest.summary, risk: newest.risk });
+    };
+
+    const timer = setInterval(() => {
+      if (looking || stopped) return;
+      looking = look().catch(() => {}).finally(() => { looking = null; });
+    }, APPROVAL_WATCH_MS);
+    timer.unref?.();
+
+    const end = (): Promise<void> => {
+      if (ended) return ended;
+      // the synchronous part: from here no card of this task can be answered
+      stopped = true;
+      clearInterval(timer);
+      for (const id of mine) this.offeredApprovals.delete(id);
+      ended = (async () => {
+        await looking;
+        // what the card stood for before this turned the waiting ones away: still waiting means "no longer needed"
+        let outcome: HudApprovalOutcome = 'expired';
+        try {
+          for (const a of await store.listApprovals!(taskId)) {
+            if (a.id === shown && a.decision !== 'pending') outcome = outcomeOf(a.decision);
+            if (a.decision === 'pending') await store.decideApproval!(a.id, 'rejected', 'The task ended').catch(() => {});
+          }
+        } catch {}
+        settleShown(outcome);
+        for (const id of mine) this.offeredApprovals.delete(id);
+        if (this.approvalWatch?.end === end) this.approvalWatch = undefined;
+      })();
+      return ended;
+    };
+    const watch = { end };
+    this.approvalWatch = watch;
+    return watch;
+  }
+
   hasActiveTask(): boolean {
     return this.activeExecution !== undefined || this.currentTaskId !== undefined;
   }
@@ -433,6 +556,7 @@ export class HudCoordinator {
 
     let running: Task | undefined;
     let completedDigest: PreviousTaskDigest | undefined;
+    let approvalWatch: { end: () => Promise<void> } | undefined;
     try {
       if (store.claimNextTask) {
         const claimed = await store.claimNextTask('machine-local');
@@ -467,6 +591,7 @@ export class HudCoordinator {
       this.taskFront.delete(running.id);
 
       await store.appendEvent(running.id, { kind: 'status', payload: { status: 'running' } });
+      approvalWatch = this.watchApprovals(running.id, sendUpdate);
 
       if (sendUpdate) {
         sendUpdate('STARTING', '');
@@ -571,6 +696,7 @@ export class HudCoordinator {
         sendUpdate('FAILED', plainSummary(err?.message || '', 400) || 'Task failed', 'ERROR');
       }
     } finally {
+      await approvalWatch?.end();
       this.powerManager?.endTask();
       if (this.activeExecution?.taskId === task.id || (running && this.activeExecution?.taskId === running.id)) {
         this.activeExecution = undefined;
@@ -620,6 +746,7 @@ export class HudCoordinator {
     if (this.activeExecution) {
       const prev = this.activeExecution;
       this.activeExecution = undefined;
+      void this.endApprovalWatch();
       prev.abortController.abort();
     }
     const windowContext = result.windowTitle
@@ -749,6 +876,7 @@ export class HudCoordinator {
           undefined,
           this.modelMenu(),
           this.historyMenu(),
+          this.approvalsMenu(),
         );
       });
     }
@@ -795,7 +923,7 @@ export class HudCoordinator {
               this.stopActiveTask('User stopped task from Spotlight HUD', sendUpdate).catch(() => {});
             },
           ];
-          promptArgs.push(event.windowTitle || undefined, this.modelMenu(), this.historyMenu());
+          promptArgs.push(event.windowTitle || undefined, this.modelMenu(), this.historyMenu(), this.approvalsMenu());
           activePrompt = (this.hudRunner.openInteractivePrompt as any)(...promptArgs);
         }
       } catch {}

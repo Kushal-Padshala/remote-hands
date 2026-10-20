@@ -9,7 +9,7 @@ import { ContextService } from '../context/context-service.js';
 import { SPOTLIGHT_SWIFT_SOURCE } from './spotlight-source.generated.js';
 import { materializeMascotAssets } from './mascot-assets.js';
 import { clearHudReadyStatus, ensureWindowsHud, saveHudStatus } from './windows-hud.js';
-import type { HudHistory } from '../guidance/hud-coordinator.js';
+import type { HudApprovals, HudHistory } from '../guidance/hud-coordinator.js';
 
 export interface SpotlightPromptResult {
   query: string;
@@ -31,7 +31,27 @@ export type SpotlightListenerEvent =
   | SpotlightPromptResult
   | { event: string; app: string; windowTitle?: string | undefined; query?: string | undefined };
 
-export type HudUpdateSender = (status: string, text: string, role?: string) => void;
+/** An action the agent may not take until the person says yes: shown in the HUD as a card with Allow and Deny. */
+export interface HudApprovalRequest {
+  id: string;
+  /** What would be done, in a few words ("Press \"Submit 13 changes for review\""). */
+  summary: string;
+  risk: string;
+}
+
+export type HudApprovalOutcome = 'approved' | 'rejected' | 'expired';
+
+export type HudUpdateSender = ((status: string, text: string, role?: string) => void) & {
+  /** Puts the Allow / Deny card up. Absent when this HUD cannot show it (the request then waits for the phone, as before). */
+  approval?: (request: HudApprovalRequest) => void;
+  /** Takes the card down: it was decided somewhere else, ran out of time, or its task ended. */
+  approvalClosed?: (id: string, outcome: HudApprovalOutcome) => void;
+};
+
+/** The HUDs that can draw the Allow / Deny card. */
+export function hudShowsApprovals(platform: NodeJS.Platform = process.platform): boolean {
+  return platform === 'darwin';
+}
 
 /**
  * Writes the embedded hotkey-helper source to `<home>/.remote-hands/spotlight-hud.swift` when it
@@ -235,6 +255,7 @@ export class SpotlightHudRunner {
     windowTitle?: string | undefined,
     modelMenu?: HudModelMenu | undefined,
     history?: HudHistory | undefined,
+    approvals?: HudApprovals | undefined,
   ): { close: () => void } {
     const target = this.ensureBinary();
     if (!target) {
@@ -285,16 +306,6 @@ export class SpotlightHudRunner {
       }
     };
 
-    const sendUpdate: HudUpdateSender = (status: string, text: string, role?: string) => {
-      if (!child.killed && child.stdin && child.stdin.writable) {
-        try {
-          const payload: any = { status, text };
-          if (role) payload.role = role;
-          child.stdin.write(JSON.stringify(payload) + '\n');
-        } catch {}
-      }
-    };
-
     const sendEvent = (payload: Record<string, unknown>) => {
       if (!child.killed && child.stdin && child.stdin.writable) {
         try {
@@ -302,6 +313,20 @@ export class SpotlightHudRunner {
         } catch {}
       }
     };
+
+    const sendUpdate: HudUpdateSender = Object.assign(
+      (status: string, text: string, role?: string) => {
+        const payload: Record<string, unknown> = { status, text };
+        if (role) payload.role = role;
+        sendEvent(payload);
+      },
+      hudShowsApprovals() && approvals
+        ? {
+            approval: (request: HudApprovalRequest) => sendEvent({ event: 'approval', ...request }),
+            approvalClosed: (id: string, outcome: HudApprovalOutcome) => sendEvent({ event: 'approval-closed', id, outcome }),
+          }
+        : {},
+    );
 
     // A prompt typed right after picking a chat must see that chat: it waits for the switch, nothing else waits for it.
     let pendingResume: Promise<void> | null = null;
@@ -342,6 +367,12 @@ export class SpotlightHudRunner {
                 onStop(sendUpdate);
               } catch {}
             }
+          } else if (parsed.event === 'approval' && typeof parsed.id === 'string') {
+            const id: string = parsed.id;
+            const decision = parsed.decision === 'approved' ? 'approved' : 'rejected';
+            Promise.resolve(approvals?.decide(id, decision === 'approved'))
+              .then((outcome) => sendEvent({ event: 'approval-closed', id, outcome: outcome ?? decision }))
+              .catch(() => sendEvent({ event: 'approval-closed', id, outcome: 'expired' }));
           } else if (parsed.event === 'history') {
             const list = history ? history.list() : Promise.resolve([]);
             list

@@ -57,6 +57,19 @@ describe('LocalTaskStore', () => {
     expect(fetched?.attachments?.[0].url).toBe('https://example.com/prop');
   });
 
+  it('keeps the conversation a task continues, so a follow-up resumes that chat', async () => {
+    const first = await store.createTask({ goal: 'First', conversation_id: 'conv-keep' });
+    expect(first.conversation_id).toBe('conv-keep');
+
+    const claimed = await store.claimNextTask('machine-local');
+    expect(claimed?.conversation_id).toBe('conv-keep');
+
+    const fresh = await store.createTask({ goal: 'Fresh', conversation_id: null });
+    expect(fresh.conversation_id).toBeNull();
+    const camel = await store.createTask({ goal: 'Camel', conversationId: 'conv-camel' });
+    expect(camel.conversation_id).toBe('conv-camel');
+  });
+
   it('claims next queued task and updates status', async () => {
     const task = await store.createTask({
       goal: 'Task to claim',
@@ -196,6 +209,40 @@ describe('LocalTaskStore', () => {
 
     const afterDecisionPending = await store.getPendingApproval(task.id);
     expect(afterDecisionPending).toBeNull();
+  });
+
+  it('sees an approval decided by another process that shares the database file', async () => {
+    const task = await store.createTask({ goal: 'Cross-process approval' });
+    const approval = await store.createApproval(task.id, { summary: 'Press "Submit"', action: 'publish', risk: 'high' });
+    const other = new LocalTaskStore({ dbPath: path.join(tempDir, 'test.db') });
+    try {
+      const waiting = store.waitForApprovalDecision(approval.id, 5000);
+      await other.decideApproval(approval.id, 'rejected', 'Denied from the HUD');
+      const decision = await waiting;
+      expect(decision.decision).toBe('rejected');
+      expect(decision.rejection_reason).toBe('Denied from the HUD');
+    } finally {
+      other.close();
+    }
+  });
+
+  it('the first answer to an approval stands: a later one cannot change it', async () => {
+    const task = await store.createTask({ goal: 'First answer wins' });
+    const approval = await store.createApproval(task.id, { summary: 'Press "Pay"', action: 'pay', risk: 'high' });
+    expect((await store.decideApproval(approval.id, 'rejected', 'no')).decision).toBe('rejected');
+    const later = await store.decideApproval(approval.id, 'approved');
+    expect(later.decision).toBe('rejected');
+    expect(later.rejection_reason).toBe('no');
+  });
+
+  it('an approval nobody answered in time is expired for every reader, and cannot be allowed afterwards', async () => {
+    const task = await store.createTask({ goal: 'Too late' });
+    const approval = await store.createApproval(task.id, { summary: 'Press "Send"', action: 'send', risk: 'high', expiresInMs: 1 });
+    await new Promise((r) => setTimeout(r, 15));
+    expect(await store.getPendingApproval(task.id)).toBeNull();
+    expect((await store.listApprovals(task.id))[0]?.decision).toBe('expired');
+    expect((await store.decideApproval(approval.id, 'approved')).decision).toBe('expired');
+    await expect(store.waitForApprovalDecision(approval.id, 50)).rejects.toThrow('timed out');
   });
 
   it('supports in-memory store and frame saving and retrieval', async () => {

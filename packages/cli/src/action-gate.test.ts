@@ -26,6 +26,16 @@ describe('createActionGate', () => {
     );
   });
 
+  it('says the user did not allow it only for a real refusal or no answer, not for a failure to ask', async () => {
+    const failing = (message: string) => vi.fn(async (_a: string[], ctx: any) => { ctx.stderr(message); return 1; });
+    const refused = createActionGate({ env: {}, taskId: 'task-1', approve: failing('Approval rejected by user.') });
+    await expect(refused('Delete')).rejects.toThrow('The user did not allow it.');
+    const silent = createActionGate({ env: {}, taskId: 'task-1', approve: failing('Approval request timed out.') });
+    await expect(silent('Delete')).rejects.toThrow('The user did not allow it.');
+    const broken = createActionGate({ env: {}, taskId: 'task-1', approve: failing('Failed to create approval request: disk full') });
+    await expect(broken('Delete')).rejects.not.toThrow('The user did not allow it.');
+  });
+
   it('never writes approval chatter to stdout (the MCP server uses it for JSON-RPC)', async () => {
     const stdout = vi.fn();
     const approve = vi.fn(async (_args: string[], ctx: any) => {

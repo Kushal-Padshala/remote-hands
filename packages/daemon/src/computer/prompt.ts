@@ -5,7 +5,7 @@ const BROWSER_RULE_MAC_ONLY = ' If a browser_* tool fails because the browser is
 const BROWSER_RULE_END = ' Never run `rh browser setup` yourself: it is interactive and will hang.';
 const APPROVAL_RULE_START = 'Clicks, menu items and send/delete shortcuts (';
 const APPROVAL_KEYS_MAC = 'Cmd/Ctrl+Enter, Cmd+Shift+D, Cmd+Delete';
-const APPROVAL_RULE_END = ') that post, publish, submit, send, reply, pay, buy, delete, merge or deploy wait for the user\'s approval on their phone by themselves: do not run `rh approve` for them, just act. If the tool fails with `Approval rejected by user` or `was not pressed`, adjust per the reason and retry, or cancel. For other sensitive or irreversible actions (a shell command or an ungated key press that submits) run `rh approve "<exact action>" --task=<Task id from the turn> --action=<publish|delete|push|pay|send> --risk=high` and proceed only on exit code 0. On rejection read stderr, adjust, and re-request or cancel. After [HUMAN APPROVAL GRANTED] act immediately.';
+const APPROVAL_RULE_END = ') that post, publish, submit, send, reply, pay, buy, delete, merge or deploy wait for the user\'s approval (an Allow button in the HUD where it shows one, otherwise their phone) by themselves: do not run `rh approve` for them, just act. If the tool fails with `Approval rejected by user`, adjust per the reason or cancel. If it fails with `Approval request timed out` or `The user did not allow it`, never press it again and never look for another way to do it (no shell, no other tool): finish by telling the user that step is not done and that they can do it themselves. Any other `was not pressed` error (the page changed): take a fresh snapshot and retry. For other sensitive or irreversible actions (a shell command or an ungated key press that submits) run `rh approve "<exact action>" --task=<Task id from the turn> --action=<publish|delete|push|pay|send> --risk=high` and proceed only on exit code 0. On rejection read stderr, adjust, and re-request or cancel; after `Approval request timed out` do not ask again. After [HUMAN APPROVAL GRANTED] act immediately.';
 
 /**
  * The arguments of every tool, so the model calls them without first opening each tool's schema
@@ -53,7 +53,7 @@ const WINDOWS_COMPUTER_PROMPT = [
 
 /** A short reminder for a task that continues an earlier conversation on a browser-only computer. */
 export const WINDOWS_COMPUTER_REMINDER =
-  '[Context Reminder: Remote Hands computer use on Windows. Only the browser tools (browser_tabs, browser_focus, browser_open, browser_snapshot, browser_click, browser_type, browser_find, browser_do, browser_extract) are available: reuse the open tab, finish multi-step tasks end to end, risky clicks wait for the user\'s approval on their phone by themselves, and end with a short summary.]';
+  '[Context Reminder: Remote Hands computer use on Windows. Only the browser tools (browser_tabs, browser_focus, browser_open, browser_snapshot, browser_click, browser_type, browser_find, browser_do, browser_extract) are available: reuse the open tab, finish multi-step tasks end to end, risky clicks wait for the user\'s approval (the HUD where it shows one, otherwise their phone) by themselves, and end with a short summary.]';
 
 /** The instructions for the agent on this computer: the Mac ones as always, a browser-only set elsewhere. */
 export function computerPrompt(platform: NodeJS.Platform = process.platform): string {

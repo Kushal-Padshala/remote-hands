@@ -154,6 +154,55 @@ describe('SpotlightHudRunner', () => {
     expect(written.map((w) => JSON.parse(w))).toContainEqual({ event: 'history-list', items: [] });
   });
 
+  it('passes an Allow or Deny from the window to the coordinator and tells the window what stands', async () => {
+    let onData: ((chunk: Buffer) => void) | undefined;
+    const written: string[] = [];
+    vi.mocked(spawn).mockImplementationOnce(((..._a: unknown[]) => ({
+      on: vi.fn(), stdout: { on: (_e: string, cb: (chunk: Buffer) => void) => { onData = cb; } },
+      stdin: { writable: true, write: (s: string) => { written.push(s); return true; } }, killed: false, kill: vi.fn(), unref: vi.fn(),
+    })) as never);
+    const approvals = { decide: vi.fn().mockImplementation(async (_id: string, ok: boolean) => (ok ? 'approved' : 'rejected')) };
+    runner.openInteractivePrompt('Notes', () => {}, undefined, undefined, undefined, undefined, undefined, approvals);
+    onData!(Buffer.from('{"event":"approval","id":"a1","decision":"approved"}\n{"event":"approval","id":"a2","decision":"rejected"}\n{"event":"approval","id":"a3"}\n'));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(approvals.decide.mock.calls).toEqual([['a1', true], ['a2', false], ['a3', false]]);
+    const lines = written.map((w) => JSON.parse(w));
+    expect(lines).toContainEqual({ event: 'approval-closed', id: 'a1', outcome: 'approved' });
+    expect(lines).toContainEqual({ event: 'approval-closed', id: 'a2', outcome: 'rejected' });
+  });
+
+  it.runIf(process.platform === 'darwin')('lets the coordinator put the Allow / Deny card up and take it down', () => {
+    const written: string[] = [];
+    let onData: ((chunk: Buffer) => void) | undefined;
+    vi.mocked(spawn).mockImplementationOnce(((..._a: unknown[]) => ({
+      on: vi.fn(), stdout: { on: (_e: string, cb: (chunk: Buffer) => void) => { onData = cb; } },
+      stdin: { writable: true, write: (s: string) => { written.push(s); return true; } }, killed: false, kill: vi.fn(), unref: vi.fn(),
+    })) as never);
+    let sender: any;
+    runner.openInteractivePrompt('Notes', (_r, send) => { sender = send; }, undefined, undefined, undefined, undefined, undefined, { decide: vi.fn() });
+    onData!(Buffer.from('{"event":"submit","query":"x","app":"Notes"}\n'));
+    sender.approval({ id: 'a1', summary: 'Press "Submit"', risk: 'high' });
+    sender.approvalClosed('a1', 'expired');
+    sender('WORKING', 'hi');
+    expect(written.map((w) => JSON.parse(w))).toEqual([
+      { event: 'approval', id: 'a1', summary: 'Press "Submit"', risk: 'high' },
+      { event: 'approval-closed', id: 'a1', outcome: 'expired' },
+      { status: 'WORKING', text: 'hi' },
+    ]);
+  });
+
+  it('offers no approval card when the window was not given a way to answer', () => {
+    const feeds: any[] = [];
+    vi.mocked(spawn).mockImplementationOnce(((..._a: unknown[]) => ({
+      on: vi.fn(), stdout: { on: (_e: string, cb: (chunk: Buffer) => void) => feeds.push(cb) },
+      stdin: { writable: true, write: () => true }, killed: false, kill: vi.fn(), unref: vi.fn(),
+    })) as never);
+    let sender: any;
+    runner.openInteractivePrompt('Notes', (_r, send) => { sender = send; });
+    feeds[0](Buffer.from('{"event":"submit","query":"x","app":"Notes"}\n'));
+    expect(sender.approval).toBeUndefined();
+  });
+
   it('offers no model arguments when there is no choice to make', () => {
     runner.openInteractivePrompt('Notes', () => {});
     const args = vi.mocked(spawn).mock.calls.at(-1)![1] as string[];

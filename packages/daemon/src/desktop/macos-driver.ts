@@ -151,13 +151,13 @@ export class MacOsDriver {
               }
               ` : ''}
               url = (targetWin.activeTab && typeof targetWin.activeTab.url === 'function' ? targetWin.activeTab.url() : "") || "";
-              if (!winTitle) winTitle = (targetWin.activeTab && typeof targetWin.activeTab.title === 'function' ? targetWin.activeTab.title() : "") || (targetWin.name && typeof targetWin.name === 'function' ? targetWin.name() : "") || "";
+              { const liveTitle = (targetWin.activeTab && typeof targetWin.activeTab.title === 'function' ? targetWin.activeTab.title() : "") || (targetWin.name && typeof targetWin.name === 'function' ? targetWin.name() : "") || ""; if (liveTitle) winTitle = liveTitle; }
             }
           } else if (/safari/i.test(appName)) {
             const safari = Application("Safari");
             if (safari.running() && safari.documents.length > 0) {
               url = safari.documents[0].url() || "";
-              if (!winTitle) winTitle = safari.documents[0].name() || "";
+              { const liveTitle = safari.documents[0].name() || ""; if (liveTitle) winTitle = liveTitle; }
             }
           } else if (/arc/i.test(appName)) {
             const arc = Application("Arc");
@@ -176,7 +176,7 @@ export class MacOsDriver {
               }
               ` : ''}
               url = (targetWin.activeTab && typeof targetWin.activeTab.url === 'function' ? targetWin.activeTab.url() : "") || "";
-              if (!winTitle) winTitle = (targetWin.activeTab && typeof targetWin.activeTab.title === 'function' ? targetWin.activeTab.title() : "") || "";
+              { const liveTitle = (targetWin.activeTab && typeof targetWin.activeTab.title === 'function' ? targetWin.activeTab.title() : "") || ""; if (liveTitle) winTitle = liveTitle; }
             }
           } else if (/brave/i.test(appName)) {
             const brave = Application("Brave Browser");
@@ -195,7 +195,7 @@ export class MacOsDriver {
               }
               ` : ''}
               url = (targetWin.activeTab && typeof targetWin.activeTab.url === 'function' ? targetWin.activeTab.url() : "") || "";
-              if (!winTitle) winTitle = (targetWin.activeTab && typeof targetWin.activeTab.title === 'function' ? targetWin.activeTab.title() : "") || "";
+              { const liveTitle = (targetWin.activeTab && typeof targetWin.activeTab.title === 'function' ? targetWin.activeTab.title() : "") || ""; if (liveTitle) winTitle = liveTitle; }
             }
           } else if (/edge/i.test(appName)) {
             const edge = Application("Microsoft Edge");
@@ -214,7 +214,7 @@ export class MacOsDriver {
               }
               ` : ''}
               url = (targetWin.activeTab && typeof targetWin.activeTab.url === 'function' ? targetWin.activeTab.url() : "") || "";
-              if (!winTitle) winTitle = (targetWin.activeTab && typeof targetWin.activeTab.title === 'function' ? targetWin.activeTab.title() : "") || "";
+              { const liveTitle = (targetWin.activeTab && typeof targetWin.activeTab.title === 'function' ? targetWin.activeTab.title() : "") || ""; if (liveTitle) winTitle = liveTitle; }
             }
           }
         } catch (_) {}

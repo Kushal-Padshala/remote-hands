@@ -40,15 +40,26 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
   type Result = { isError?: boolean; content: { type: 'text'; text: string }[] };
   // A call that hits the limit is abandoned: its scope is marked, so whatever it is still doing
   // (a batch, an approval wait) refuses to act any more, and only then does the queue move on.
-  const withTimeout = (work: Promise<Result>, abandon: () => void): Promise<Result> => {
+  const withTimeout = (work: Promise<Result>, abandon: () => void, watchWaiting: (cb: (waiting: boolean) => void) => void): Promise<Result> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<Result>((resolve) => {
+    let fire!: (result: Result) => void;
+    let over = false;
+    const timeout = new Promise<Result>((resolve) => { fire = resolve; });
+    const arm = () => {
+      clearTimeout(timer);
+      if (over) return;
       timer = setTimeout(() => {
         abandon();
-        resolve({ isError: true, content: [{ type: 'text', text: formatTimeout(limit) }] });
+        fire({ isError: true, content: [{ type: 'text', text: formatTimeout(limit) }] });
       }, limit);
+    };
+    arm();
+    // While the call waits for the person's approval the clock stands still; it starts over when the answer comes.
+    watchWaiting((waiting) => (waiting ? clearTimeout(timer) : arm()));
+    return Promise.race([work, timeout]).finally(() => {
+      over = true;
+      clearTimeout(timer);
     });
-    return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
   };
   let queue: Promise<unknown> = Promise.resolve();
   const serialized = <T>(fn: () => Promise<T>): Promise<T> => {
@@ -66,7 +77,7 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
         const result = await serialized(() => {
           startedAt = new Date(); // time the work itself, not the wait for earlier calls
           startedMs = clock();
-          const { result, abort } = runInCallScope(
+          const { result, abort, watchWaiting } = runInCallScope(
             async (): Promise<Result> => {
               try {
                 return { content: [{ type: 'text' as const, text: tool.keepWhole ? await tool.handler(args) : fitResult(await tool.handler(args)) }] };
@@ -75,7 +86,7 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
               }
             },
           );
-          return withTimeout(result, abort);
+          return withTimeout(result, abort, watchWaiting);
         });
         if (opts.onCall) {
           try {

@@ -117,7 +117,7 @@ describe('computerPrompt', () => {
     expect(win).toContain('Only the web browser can be controlled on Windows for now');
     // the browser and approval rules are the Mac ones
     expect(win).toContain('Use browser_do to fill and submit a whole form in one call');
-    expect(win).toContain('wait for the user\'s approval on their phone by themselves');
+    expect(win).toContain('wait for the user\'s approval (an Allow button in the HUD where it shows one, otherwise their phone) by themselves');
     expect(win).toContain('Never run `rh browser setup` yourself');
   });
 });
