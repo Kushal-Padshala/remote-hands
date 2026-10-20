@@ -436,14 +436,12 @@ export class LocalTaskStore implements TaskStore {
   }
 
   async getApproval(id: string): Promise<LocalApproval | null> {
-    this.expireOverdue();
     const row = this.db.prepare('SELECT * FROM approvals WHERE id = ?').get(id) as any;
     if (!row) return null;
     return this.toApproval(row);
   }
 
   async listApprovals(taskId?: string): Promise<ApprovalRow[]> {
-    this.expireOverdue();
     const rows = taskId
       ? (this.db.prepare('SELECT * FROM approvals WHERE task_id = ? ORDER BY created_at ASC').all(taskId) as any[])
       : (this.db.prepare('SELECT * FROM approvals ORDER BY created_at ASC').all() as any[]);
@@ -451,28 +449,28 @@ export class LocalTaskStore implements TaskStore {
   }
 
   async getPendingApproval(taskId: string): Promise<ApprovalRow | null> {
-    this.expireOverdue();
     const row = this.db.prepare("SELECT * FROM approvals WHERE task_id = ? AND status = 'pending' ORDER BY created_at ASC LIMIT 1").get(taskId) as any;
     if (!row) return null;
     return this.toApproval(row);
   }
 
   /**
-   * Answers a pending approval. Only a request still waiting (and not out of time) takes the answer, decided in one statement, so
-   * whoever answers first wins and a later answer can never change it. Read the row afterwards to see what stands.
+   * Answers a pending approval. Only a request that is still waiting and not out of time takes the answer (a yes also needs its task to be
+   * still going), all decided by the one statement, so whoever answers first wins and a later answer can never change it. Read the row
+   * afterwards to see what stands.
    */
   async resolveApproval(
     id: string,
     status: 'approved' | 'rejected',
     reason?: string,
   ): Promise<void> {
-    this.expireOverdue();
     const nowIso = new Date().toISOString();
     this.db.prepare(`
       UPDATE approvals
       SET status = ?, rejection_reason = ?, decided_at = ?
-      WHERE id = ? AND status = 'pending'
-    `).run(status, reason ?? null, nowIso, id);
+      WHERE id = ? AND status = 'pending' AND expires_at > ?
+        AND (? = 'rejected' OR NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = approvals.task_id AND t.status IN ('cancelled', 'failed', 'done')))
+    `).run(status, reason ?? null, nowIso, id, nowIso, status);
 
     const updated = await this.getApproval(id);
     if (updated && updated.status !== 'pending') {
@@ -486,10 +484,13 @@ export class LocalTaskStore implements TaskStore {
     }
   }
 
-  /** A request nobody answered in time is expired, in the database, so every reader sees the same thing. */
-  private expireOverdue(): void {
+  /**
+   * Marks the requests of a task that nobody answered in time as expired, so no list shows them as waiting. Reading never does
+   * this by itself: the daemon that ran the task tells "timed out" from "no approval" by what it finds.
+   */
+  async expireOverdueApprovals(taskId: string): Promise<void> {
     const nowIso = new Date().toISOString();
-    this.db.prepare("UPDATE approvals SET status = 'expired', decided_at = ? WHERE status = 'pending' AND expires_at <= ?").run(nowIso, nowIso);
+    this.db.prepare("UPDATE approvals SET status = 'expired', decided_at = ? WHERE task_id = ? AND status = 'pending' AND expires_at <= ?").run(nowIso, taskId, nowIso);
   }
 
   async decideApproval(
@@ -553,7 +554,6 @@ export class LocalTaskStore implements TaskStore {
       // database but not this object, so its resolver never fires here: look at the row now and then.
       poller = setInterval(() => {
         try {
-          this.expireOverdue();
           const cur = this.db.prepare('SELECT * FROM approvals WHERE id = ?').get(approvalId) as any;
           if (cur && cur.status !== 'pending') onDecision(this.toApproval(cur));
         } catch {}

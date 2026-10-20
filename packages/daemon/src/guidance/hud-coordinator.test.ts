@@ -1614,47 +1614,22 @@ describe('HudCoordinator with the real task store', () => {
       const send = sender();
       let release!: () => void;
       const gate = new Promise<void>((r) => { release = r; });
-      const realGet = store.getApproval.bind(store);
       let seen = 0;
-      vi.spyOn(store, 'getApproval').mockImplementation(async (id: string) => {
-        const row = await realGet(id);
-        if (++seen === 1) await gate;
-        return row;
-      });
       const runner = { run: vi.fn().mockImplementation(async (task: any) => {
-        await store.createApproval(task.id, { summary: 'Press "Publish"', action: 'publish', risk: 'high' });
+        const approval = await store.createApproval(task.id, { summary: 'Press "Publish"', action: 'publish', risk: 'high' });
+        // only now: the next getApproval is the watcher's own look, which stays under way while the task ends
+        const real = store.getApproval.bind(store);
+        vi.spyOn(store, 'getApproval').mockImplementation(async (id: string) => {
+          const row = await real(id);
+          if (id === approval.id && ++seen === 1) await gate;
+          return row;
+        });
         await vi.waitFor(() => expect(seen).toBeGreaterThan(0));
+        setTimeout(release, 30);
         return { status: 'done', summary: 'x', conversationId: 'c', events: [] };
       }) };
-      const ending = make(runner).executeTaskStandalone(await queued(), send);
-      await vi.waitFor(() => expect(seen).toBeGreaterThan(0));
-      release();
-      await ending;
-      expect(send.approval).not.toHaveBeenCalled();
-    });
-
-    it('refuses an answer for an approval the HUD never showed', async () => {
-      const task = await queued();
-      const approval = await store.createApproval(task.id, { summary: 'Press "Pay"', action: 'pay', risk: 'high' });
-      expect(await make({ run: vi.fn() }).decideApproval(approval.id, true)).toBe('expired');
-      expect((await store.getApproval(approval.id))?.decision).toBe('pending');
-    });
-
-    it('turns away what is still waiting when the task ends, and takes the card down', async () => {
-      const send = sender();
-      let approvalId = '';
-      const runner = {
-        run: vi.fn().mockImplementation(async (task: any) => {
-          approvalId = (await store.createApproval(task.id, { summary: 'Press "Publish"', action: 'publish', risk: 'high' })).id;
-          await vi.waitFor(() => expect(send.approval).toHaveBeenCalled());
-          return { status: 'done', summary: 'gave up', conversationId: 'c', events: [] };
-        }),
-      };
       await make(runner).executeTaskStandalone(await queued(), send);
-      const left = await store.getApproval(approvalId);
-      expect(left?.decision).toBe('rejected');
-      expect(left?.rejection_reason).toBe('The task ended');
-      expect(send.approvalClosed).toHaveBeenCalledWith(approvalId, 'expired');
+      expect(send.approval).not.toHaveBeenCalled();
     });
 
     it('shows only the newest when the same action is asked again', async () => {

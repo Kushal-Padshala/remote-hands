@@ -41,12 +41,22 @@ export function isCallAborted(): boolean {
 export function abandonAwareGate(gate: ActionGate): ActionGate {
   return async (label, opts) => {
     const scope = storage.getStore();
-    // The time limit of the tool call is for the work, not for the person to decide: it stops while the gate waits.
-    if (scope && ++scope.waiting === 1) scope.onWaiting?.(true);
+    let waiting = false;
+    // The time limit of the tool call is for the work, not for the person to decide: it stands still only while the gate
+    // really waits for an answer (a control that needs no approval never reaches this).
+    const onWait = (now: boolean) => {
+      if (!scope || now === waiting) return;
+      waiting = now;
+      if (now) {
+        if (++scope.waiting === 1) scope.onWaiting?.(true);
+      } else if (--scope.waiting === 0) {
+        scope.onWaiting?.(false);
+      }
+    };
     try {
-      await gate(label, opts);
+      await gate(label, { ...opts, onWait });
     } finally {
-      if (scope && --scope.waiting === 0) scope.onWaiting?.(false);
+      onWait(false);
     }
     if (isCallAborted()) throw new Error(`${ABANDONED}; nothing was done`);
   };

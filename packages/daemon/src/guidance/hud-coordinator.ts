@@ -471,6 +471,7 @@ export class HudCoordinator {
 
     const look = async () => {
       if (stopped) return;
+      await store.expireOverdueApprovals?.(taskId);
       const all = await store.listApprovals!(taskId);
       if (stopped) return;
       if (shown) {
@@ -482,8 +483,8 @@ export class HudCoordinator {
       const newest = waiting[waiting.length - 1];
       for (const old of waiting) {
         if (newest && old.id !== newest.id && old.summary === newest.summary && old.action_kind === newest.action_kind) {
-          await store.decideApproval!(old.id, 'rejected', 'Asked again').catch(() => {});
-          if (shown === old.id) settleShown('expired');
+          const row = await store.decideApproval!(old.id, 'rejected', 'Asked again').catch(() => null);
+          if (shown === old.id) settleShown(row && !(row.decision === 'rejected' && row.rejection_reason === 'Asked again') ? outcomeOf(row.decision) : 'expired');
         }
       }
       if (stopped || shown || !newest) return;
@@ -508,15 +509,25 @@ export class HudCoordinator {
       clearInterval(timer);
       for (const id of mine) this.offeredApprovals.delete(id);
       ended = (async () => {
-        await looking;
-        // what the card stood for before this turned the waiting ones away: still waiting means "no longer needed"
+        // Turn the waiting ones away first, so nothing can still be allowed while a look that is under way finishes.
+        // What the card stood for: still waiting when this came means "no longer needed"; otherwise what the answer was.
         let outcome: HudApprovalOutcome = 'expired';
-        try {
-          for (const a of await store.listApprovals!(taskId)) {
-            if (a.id === shown && a.decision !== 'pending') outcome = outcomeOf(a.decision);
-            if (a.decision === 'pending') await store.decideApproval!(a.id, 'rejected', 'The task ended').catch(() => {});
-          }
-        } catch {}
+        const turnAway = async () => {
+          try {
+            await store.expireOverdueApprovals?.(taskId);
+            for (const a of await store.listApprovals!(taskId)) {
+              if (a.decision === 'pending') {
+                const row = await store.decideApproval!(a.id, 'rejected', 'The task ended').catch(() => null);
+                if (a.id === shown && row && !(row.decision === 'rejected' && row.rejection_reason === 'The task ended')) outcome = outcomeOf(row.decision);
+              } else if (a.id === shown && a.rejection_reason !== 'The task ended') {
+                outcome = outcomeOf(a.decision);
+              }
+            }
+          } catch {}
+        };
+        await turnAway();
+        await looking;
+        await turnAway();
         settleShown(outcome);
         for (const id of mine) this.offeredApprovals.delete(id);
         if (this.approvalWatch?.end === end) this.approvalWatch = undefined;

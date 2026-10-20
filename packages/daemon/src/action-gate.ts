@@ -10,7 +10,15 @@ import type { ActionKind } from '@remote-hands/shared';
  * `rh approve`; without a gate every action runs, as before. `kind` skips label
  * classification for actions already known to be risky (send/delete shortcuts, raw scripts).
  */
-export type ActionGate = (label: string, opts?: { goal?: boolean; kind?: ActionKind }) => Promise<void>;
+export type ActionGate = (
+  label: string,
+  opts?: {
+    goal?: boolean;
+    kind?: ActionKind;
+    /** Called with true while the gate waits for the person to decide, and false when that wait is over. */
+    onWait?: (waiting: boolean) => void;
+  },
+) => Promise<void>;
 
 /**
  * The warm agy process and the MCP server it starts are spawned once, so the running task

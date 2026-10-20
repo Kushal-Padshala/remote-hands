@@ -33,15 +33,21 @@ export function createActionGate(context: ActionGateContext = {}): ActionGate {
 
     const reasons: string[] = [];
     const approve = context.approve ?? approveCommand;
-    const code = await approve(
-      [`${verb} "${label.trim()}"`, `--action=${action}`, '--risk=high', `--task=${taskId}`],
-      {
-        ...context,
-        // Never stdout: the MCP server speaks JSON-RPC on it.
-        stdout: () => {},
-        stderr: (msg) => reasons.push(msg),
-      },
-    );
+    opts?.onWait?.(true);
+    let code: number;
+    try {
+      code = await approve(
+        [`${verb} "${label.trim()}"`, `--action=${action}`, '--risk=high', `--task=${taskId}`],
+        {
+          ...context,
+          // Never stdout: the MCP server speaks JSON-RPC on it.
+          stdout: () => {},
+          stderr: (msg) => reasons.push(msg),
+        },
+      );
+    } finally {
+      opts?.onWait?.(false);
+    }
     if (code !== 0) {
       const said = reasons.join(' ');
       // Only a real "no" (or no answer in time) tells the agent to stop; a failure to ask at all must not read as a refusal.

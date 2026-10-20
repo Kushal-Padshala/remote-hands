@@ -14,6 +14,8 @@ import { buildComputerTools, type ComputerTool } from './tools.js';
  * queue). computer_batch calls the raw handlers for its steps, so it never re-enqueues.
  */
 const DEFAULT_CALL_TIMEOUT_MS = 90_000;
+/** The least time a call keeps after an approval, to do the action that was approved. */
+const AFTER_APPROVAL_MS = 15_000;
 
 /** The error text for a call that hit the per-call timeout. */
 export function formatTimeout(ms: number): string {
@@ -44,18 +46,30 @@ export function createComputerMcpServer(tools: ComputerTool[], opts: ComputerMcp
     let timer: ReturnType<typeof setTimeout> | undefined;
     let fire!: (result: Result) => void;
     let over = false;
+    let left = limit;
+    let armedAt = 0;
     const timeout = new Promise<Result>((resolve) => { fire = resolve; });
     const arm = () => {
       clearTimeout(timer);
       if (over) return;
+      armedAt = Date.now();
       timer = setTimeout(() => {
         abandon();
         fire({ isError: true, content: [{ type: 'text', text: formatTimeout(limit) }] });
-      }, limit);
+      }, left);
     };
     arm();
-    // While the call waits for the person's approval the clock stands still; it starts over when the answer comes.
-    watchWaiting((waiting) => (waiting ? clearTimeout(timer) : arm()));
+    // While the call waits for the person's approval the clock stands still; afterwards it runs on with what was left of it
+    // (but never less than the time a click needs).
+    watchWaiting((waiting) => {
+      if (waiting) {
+        clearTimeout(timer);
+        left = Math.max(0, left - (Date.now() - armedAt));
+      } else {
+        left = Math.max(left, AFTER_APPROVAL_MS);
+        arm();
+      }
+    });
     return Promise.race([work, timeout]).finally(() => {
       over = true;
       clearTimeout(timer);

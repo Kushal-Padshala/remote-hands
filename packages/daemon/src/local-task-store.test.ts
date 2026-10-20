@@ -217,8 +217,11 @@ describe('LocalTaskStore', () => {
     const other = new LocalTaskStore({ dbPath: path.join(tempDir, 'test.db') });
     try {
       const waiting = store.waitForApprovalDecision(approval.id, 5000);
+      const startedAt = Date.now();
       await other.decideApproval(approval.id, 'rejected', 'Denied from the HUD');
       const decision = await waiting;
+      // seen by polling, long before the wait's own deadline
+      expect(Date.now() - startedAt).toBeLessThan(2000);
       expect(decision.decision).toBe('rejected');
       expect(decision.rejection_reason).toBe('Denied from the HUD');
     } finally {
@@ -235,14 +238,23 @@ describe('LocalTaskStore', () => {
     expect(later.rejection_reason).toBe('no');
   });
 
-  it('an approval nobody answered in time is expired for every reader, and cannot be allowed afterwards', async () => {
+  it('an approval out of time cannot be allowed, and can be marked expired without any reader doing it by itself', async () => {
     const task = await store.createTask({ goal: 'Too late' });
     const approval = await store.createApproval(task.id, { summary: 'Press "Send"', action: 'send', risk: 'high', expiresInMs: 1 });
     await new Promise((r) => setTimeout(r, 15));
-    expect(await store.getPendingApproval(task.id)).toBeNull();
+    // reading changes nothing
+    expect((await store.getApproval(approval.id))?.decision).toBe('pending');
+    expect((await store.decideApproval(approval.id, 'approved')).decision).toBe('pending');
+    await store.expireOverdueApprovals(task.id);
     expect((await store.listApprovals(task.id))[0]?.decision).toBe('expired');
-    expect((await store.decideApproval(approval.id, 'approved')).decision).toBe('expired');
     await expect(store.waitForApprovalDecision(approval.id, 50)).rejects.toThrow('timed out');
+  });
+
+  it('nothing can be allowed once its task has ended', async () => {
+    const task = await store.createTask({ goal: 'Stopped' });
+    const approval = await store.createApproval(task.id, { summary: 'Press "Pay"', action: 'pay', risk: 'high' });
+    await store.cancelTask(task.id, 'stopped');
+    expect((await store.decideApproval(approval.id, 'approved')).decision).toBe('pending');
   });
 
   it('supports in-memory store and frame saving and retrieval', async () => {

@@ -200,9 +200,13 @@ describe('createComputerMcpServer', () => {
     expect(ok.content).toEqual([{ type: 'text', text: 'quick' }]);
   });
 
-  it('the time limit stands still while the call waits for the person to approve, then starts over', async () => {
+  it('the time limit stands still while the call waits for the person to approve, then runs on', async () => {
     let allow!: () => void;
-    const gate = abandonAwareGate(() => new Promise<void>((r) => { allow = r; }));
+    const gate = abandonAwareGate(async (_label, opts) => {
+      opts?.onWait?.(true);
+      await new Promise<void>((r) => { allow = r; });
+      opts?.onWait?.(false);
+    });
     const acted = vi.fn();
     const client = await connect(
       [{ name: 'press', description: 'p', inputSchema: {}, handler: async () => { await gate('Submit'); acted(); return 'pressed'; } }],
@@ -216,6 +220,19 @@ describe('createComputerMcpServer', () => {
     expect(res.isError).toBeFalsy();
     expect(res.content).toEqual([{ type: 'text', text: 'pressed' }]);
     expect(acted).toHaveBeenCalledTimes(1);
+  });
+
+  it('gates that need no approval do not stretch the time limit', async () => {
+    const gate = abandonAwareGate(async () => {});
+    const client = await connect(
+      [{ name: 'clicks', description: 'c', inputSchema: {}, handler: async () => {
+        for (let i = 0; i < 8; i++) { await gate('Next'); await new Promise((r) => setTimeout(r, 20)); }
+        return 'done';
+      } }],
+      { callTimeoutMs: 60 },
+    );
+    const res = await client.callTool({ name: 'clicks', arguments: {} });
+    expect(res.isError).toBe(true);
   });
 
   it('a call that keeps working after the approval still times out', async () => {
